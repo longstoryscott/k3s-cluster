@@ -1,0 +1,74 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: lsm-gateway
+spec:
+  gatewayClassName: nginx
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+# ---
+# apiVersion: gateway.networking.k8s.io/v1beta1
+# kind: ReferenceGrant
+# metadata:
+#   name: access-to-registry
+#   namespace: registry
+# spec:
+#   to:
+#     - group: ""
+#       kind: Service
+#   from:
+#     - group: gateway.networking.k8s.io
+#       kind: HTTPRoute
+#       namespace: default
+# ---
+# apiVersion: gateway.networking.k8s.io/v1
+# kind: HTTPRoute
+# metadata:
+#   name: registry-route
+# spec:
+#   parentRefs:
+#     - name: lsm-gateway
+#       sectionName: http
+#   rules:
+#     - matches:
+#         - path:
+#             type: PathPrefix
+#             value: /registry
+#       backendRefs:
+#         - name: registry
+#           namespace: registry
+#           port: 5000
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: access-to-nc
+  namespace: nextcloud
+spec:
+  to:
+    - group: ""
+      kind: Service
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: default
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: nc-route
+spec:
+  parentRefs:
+    - name: lsm-gateway
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: nextcloud
+          namespace: nextcloud
+          port: 8080

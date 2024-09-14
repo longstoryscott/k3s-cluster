@@ -1,0 +1,10 @@
+{
+    "json.schemas": [
+        {
+            "fileMatch": [
+                "postgresql/values.yaml"
+            ],
+            "url": "https://raw.githubusercontent.com/bitnami/charts/main/bitnami/postgresql/values.schema.json"
+        }
+    ]
+}
