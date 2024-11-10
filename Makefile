@@ -5,12 +5,13 @@ ROUTER = $(CURDIR)/router
 REDIS = $(CURDIR)/redis
 NEXTCLOUD = $(CURDIR)/nextcloud
 POSTGRESQL = $(CURDIR)/postgresql
+WORDPRESS = $(CURDIR)/wordpress
 
 .DEFAULT_GOAL := all
 
 .SILENT:
 
-all: ex nc router
+all: ex nc wp router
 
 install: init gateway install-registry nc router
 
@@ -21,7 +22,7 @@ update-workers: ex
 	cd $(SCRIPTS) && bash update-workers.sh && cd ..
 
 ex:
-	for f in $(SCRIPTS)/*.sh $(INGRESS)/*.sh $(REGISTRY)/*.sh $(NEXTCLOUD)/*.sh; do chmod +x "$$f"; done;
+	for f in $(SCRIPTS)/*.sh $(INGRESS)/*.sh $(REGISTRY)/*.sh $(NEXTCLOUD)/*.sh $(WORDPRESS)/*.sh; do chmod +x "$$f"; done;
 
 install-registry:
 	$(REGISTRY)/install.sh $(REGISTRY) "patch"
@@ -51,6 +52,9 @@ nc-template: ex
 
 delete-nc:
 	$(NEXTCLOUD)/delete.sh
+
+wp: ex
+	$(WORDPRESS)/install.sh $(WORDPRESS)/values.yaml
 
 destroy:
 	$(SCRIPTS)/k8s-down.sh
