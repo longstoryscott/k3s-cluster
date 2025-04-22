@@ -3,6 +3,8 @@
 CWD=$1
 PATCH=$2
 
+kubectl create namespace registry || true
+
 if [ "${PATCH}" = "patch" ]; then
     source "${CWD}/accessmgmt.sh"
 

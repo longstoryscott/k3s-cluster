@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llama3-8b-modelfile
+  namespace: ollama
+data:
+  Modelfile: |
+    FROM llama3:8b
+    PARAMETER temperature 0.7
+    PARAMETER num_ctx 1024
+    PARAMETER stop "User:"
+    PARAMETER stop "<|endoftext|>"
+    PARAMETER seed 42
+    PARAMETER num_gpu 1
+    PARAMETER num_thread 4
+    PARAMETER quantization q3_K_M

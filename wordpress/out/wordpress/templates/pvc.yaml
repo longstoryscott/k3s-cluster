@@ -1,0 +1,20 @@
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: wordpress
+  namespace: "wordpress"
+  labels:
+    app.kubernetes.io/instance: wordpress
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: wordpress
+    app.kubernetes.io/version: 6.7.1
+    helm.sh/chart: wordpress-24.0.7
+spec:
+  accessModes:
+    - "ReadWriteOnce"
+    - "ReadWriteMany"
+  resources:
+    requests:
+      storage: "50Gi"
+---

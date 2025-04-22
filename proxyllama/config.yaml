@@ -1,0 +1,19 @@
+server:
+  port: 8080
+  host: 0.0.0.0
+
+auth:
+  issuer: https://auth.longstorymedia.com
+  audience: myclient
+  jwks_uri: https://auth.longstorymedia.com/keys
+
+ollama:
+  base_url: http://ollama-service.ollama.svc.cluster.local:11434
+
+database:
+  host: postgres.psql.svc.cluster.local
+  port: 5432
+  user: ollama_user
+  password: supersecretpassword
+  dbname: ollama_history
+  sslmode: disable

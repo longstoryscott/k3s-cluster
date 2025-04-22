@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: ollama
+  labels:
+    app.kubernetes.io/name: ollama
+    app.kubernetes.io/instance: ollama
+    app.kubernetes.io/component: app
+spec:
+  selector:
+    matchLabels:
+      name: ollama
+  template:
+    metadata:
+      labels:
+        name: ollama
+        app.kubernetes.io/name: ollama
+        app.kubernetes.io/instance: ollama
+        app.kubernetes.io/component: app
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - name: http
+              containerPort: 11434
+              protocol: TCP
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+  strategy:
+    type: Recreate

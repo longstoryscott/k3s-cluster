@@ -1,0 +1,31 @@
+# First, create a ConfigMap with your init script
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: "psql"
+data:
+  create-multiple-dbs.sh: |
+    #!/bin/bash
+    set -e
+
+    # Use password from environment variable
+    export PGPASSWORD="${POSTGRES_PASSWORD}"
+
+    # Create databases
+    psql -v ON_ERROR_STOP=1 --username "lsm" --dbname "postgres" <<-EOSQL
+      CREATE DATABASE ollama;
+      CREATE DATABASE dex_db;      
+
+      -- Create TimescaleDB extension in each database
+      \c ollama
+      CREATE EXTENSION IF NOT EXISTS timescaledb;
+      
+      \c dex_db  
+      CREATE EXTENSION IF NOT EXISTS timescaledb;
+    EOSQL
+
+    # Unset password for security
+    unset PGPASSWORD
+
+# Then update your StatefulSet to mount this ConfigMap

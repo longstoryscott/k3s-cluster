@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: passgo
+  namespace: auth
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: passgo
+  template:
+    metadata:
+      labels:
+        app: passgo
+    spec:
+      containers:
+        - name: proxy-api
+          image: your-registry/passgo:latest
+          imagePullPolicy: Never
+          resources:
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+            requests:
+              memory: "64Mi"
+              cpu: "250m"
+          env:
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jwt_secret
+                  key: secret
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/passgo/
+              readOnly: true
+      volumes:
+        - name: config-volume
+          configMap:
+            name: passgo-config

@@ -1,0 +1,7 @@
+users:
+  scott.long:
+    password: "$argon2id$v=19$m=65536,t=3,p=4$MbODOrVXDhBzSe66HTFKPw$xbvHdV2BOPqDFTsjep1d8CCrFxJYB6/YYSShvHI6dC4"
+    displayname: "Scott Long"
+    email: longstoryscott@gmail.com
+    groups:
+      - admins

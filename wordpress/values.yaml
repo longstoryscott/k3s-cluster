@@ -129,7 +129,7 @@ wordpressFirstName: Norah
 wordpressLastName: Long
 ## @param wordpressBlogName Blog name
 ##
-wordpressBlogName: Fox & Folk
+wordpressBlogName: "Fox & Folk"
 ## @param wordpressTablePrefix Prefix to use for WordPress database tables
 ##
 wordpressTablePrefix: fnf_
@@ -140,7 +140,7 @@ wordpressScheme: https
 ## NOTE: useful if you use an external database that already contains WordPress data
 ## ref: https://github.com/bitnami/containers/tree/main/bitnami/wordpress#connect-wordpress-docker-container-to-an-existing-database
 ##
-wordpressSkipInstall: false
+wordpressSkipInstall: true
 ## @param wordpressExtraConfigContent Add extra content to the default wp-config.php file
 ## e.g:
 ## wordpressExtraConfigContent: |
@@ -333,6 +333,7 @@ hostAliases:
   - ip: "127.0.0.1"
     hostnames:
       - "status.localhost"
+      - "knitfoxandfolk.local"
 ## @param extraVolumes Optionally specify extra list of additional volumes for WordPress pods
 ##
 extraVolumes: []
@@ -505,7 +506,7 @@ livenessProbe:
 ## @param readinessProbe.successThreshold Success threshold for readinessProbe
 ##
 readinessProbe:
-  enabled: true
+  enabled: false
   httpGet:
     path: /wp-login.php
     port: "{{ .Values.wordpressScheme }}"
@@ -574,12 +575,12 @@ lifecycleHooks: {}
 service:
   ## @param service.type WordPress service type
   ##
-  type: LoadBalancer
+  type: ClusterIP
   ## @param service.ports.http WordPress service HTTP port
   ## @param service.ports.https WordPress service HTTPS port
   ##
   ports:
-    http: 80
+    http: 8080
     https: 443
   ## @param service.httpsTargetPort Target port for HTTPS
   ##
@@ -649,7 +650,7 @@ ingress:
   ingressClassName: ""
   ## @param ingress.hostname Default host for the ingress record. The hostname is templated and thus can contain other variable references.
   ##
-  hostname: wordpress.local
+  hostname: knitfoxandfolk.local
   ## @param ingress.path Default path for the ingress record
   ## NOTE: You may need to set this to '/*' in order to use this with ALB ingress controllers
   ##
@@ -961,7 +962,7 @@ volumePermissions:
 serviceAccount:
   ## @param serviceAccount.create Enable creation of ServiceAccount for WordPress pod
   ##
-  create: true
+  create: false
   ## @param serviceAccount.name The name of the ServiceAccount to use.
   ## If not set and create is true, a name is generated using the common.names.fullname template
   ##
@@ -980,7 +981,7 @@ serviceAccount:
 ## @param pdb.maxUnavailable Maximum number/percentage of pods that may be made unavailable. Defaults to `1` if both `pdb.minAvailable` and `pdb.maxUnavailable` are empty.
 ##
 pdb:
-  create: true
+  create: false
   minAvailable: ""
   maxUnavailable: ""
 ## WordPress Autoscaling configuration

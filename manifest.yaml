@@ -76,7 +76,7 @@ metadata:
     helm.sh/chart: postgresql-15.5.0
 type: Opaque
 data:
-  postgres-password: "NWlBRnZWRElVNg=="
+  postgres-password: "N0Z6WmRNNm9waQ=="
   password: "NnUhdGFyMDAhUUFa"
   # We don't auto-generate LDAP password when it's not provided as we do for other passwords
 ---
@@ -87,7 +87,7 @@ metadata:
   name: nextcloud-nextcloud
   labels:
     app.kubernetes.io/name: nextcloud
-    helm.sh/chart: nextcloud-5.5.6
+    helm.sh/chart: nextcloud-6.6.6
     app.kubernetes.io/instance: nextcloud
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: app
@@ -168,7 +168,7 @@ metadata:
   name: nextcloud
   labels:
     app.kubernetes.io/name: nextcloud
-    helm.sh/chart: nextcloud-5.5.6
+    helm.sh/chart: nextcloud-6.6.6
     app.kubernetes.io/instance: nextcloud
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: app
@@ -191,7 +191,7 @@ metadata:
   name: nextcloud
   labels:
     app.kubernetes.io/name: nextcloud
-    helm.sh/chart: nextcloud-5.5.6
+    helm.sh/chart: nextcloud-6.6.6
     app.kubernetes.io/instance: nextcloud
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: app
@@ -211,16 +211,15 @@ spec:
         app.kubernetes.io/instance: nextcloud
         app.kubernetes.io/component: app
       annotations:
-        nextcloud-config-hash: b1c70036bd50622dc3b0c6b7991ee4df26867655ecf455cc2fede9350b4e063a
+        nextcloud-config-hash: 8266a725d5474acb6adbf9f0609a3494dc3340a3ac306db90eac9ddb1b851960
         php-config-hash: 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a
         hooks-hash: 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a
     spec:
       containers:
         - name: nextcloud
-          image: nextcloud:29.0.6-apache
+          image: nextcloud:30.0.6-apache
           imagePullPolicy: IfNotPresent
           env:
-            
             - name: POSTGRES_HOST
               value: nextcloud-postgresql
             - name: POSTGRES_DB
@@ -249,11 +248,10 @@ spec:
               value: lsnet.longstorymedia.com
             - name: NEXTCLOUD_DATA_DIR
               value: "/var/www/html/data"
-            
-            
-            
+
             - name: NEXTCLOUD_TRUSTED_DOMAINS
-              value: lsnet.longstorymedia.com lsnet.tplinkdns.com lsnode-0.local 192.168.0.71
+              value:
+                lsnet.longstorymedia.com lsnet.tplinkdns.com lsnode-0.local 192.168.0.71
                 10.42.2.29
             - name: TRUSTED_PROXIES
               value: lsnet.longstorymedia.com
@@ -274,10 +272,10 @@ spec:
           livenessProbe:
             httpGet:
               path: /status.php
-              port:  80
+              port: 80
               httpHeaders:
-              - name: Host
-                value: "lsnet.longstorymedia.com"
+                - name: Host
+                  value: "lsnet.longstorymedia.com"
             initialDelaySeconds: 20
             periodSeconds: 15
             timeoutSeconds: 10
@@ -286,10 +284,10 @@ spec:
           readinessProbe:
             httpGet:
               path: /status.php
-              port:  80
+              port: 80
               httpHeaders:
-              - name: Host
-                value: "lsnet.longstorymedia.com"
+                - name: Host
+                  value: "lsnet.longstorymedia.com"
             initialDelaySeconds: 20
             periodSeconds: 15
             timeoutSeconds: 10
@@ -327,6 +325,8 @@ spec:
       initContainers:
         - name: postgresql-isready
           image: docker.io/bitnami/postgresql:15.4.0-debian-11-r10
+          resources: {}
+          securityContext: {}
           env:
             - name: POSTGRES_USER
               valueFrom:
@@ -383,11 +383,11 @@ spec:
         app.kubernetes.io/component: primary
     spec:
       serviceAccountName: nextcloud-postgresql
-      
+
       automountServiceAccountToken: false
       affinity:
         podAffinity:
-          
+
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
             - podAffinityTerm:
@@ -399,7 +399,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
               weight: 1
         nodeAffinity:
-          
+
       securityContext:
         fsGroup: 1001
         fsGroupChangePolicy: Always
@@ -415,7 +415,7 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop:
-              - ALL
+                - ALL
             privileged: false
             readOnlyRootFilesystem: true
             runAsGroup: 1001

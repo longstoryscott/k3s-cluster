@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: auth
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dex
+  template:
+    metadata:
+      labels:
+        app: dex
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.42.1
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex
+          ports:
+            - containerPort: 5556
+          args:
+            - dex
+            - serve
+            - /etc/dex/config.yaml
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+      volumes:
+        - name: config
+          projected:
+            sources:
+              - configMap:
+                  name: config

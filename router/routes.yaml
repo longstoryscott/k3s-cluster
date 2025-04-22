@@ -5,41 +5,18 @@ metadata:
 spec:
   gatewayClassName: nginx
   listeners:
-    - name: http
-      port: 80
+    - name: nextcloud
+      port: 3000
       protocol: HTTP
-# ---
-# apiVersion: gateway.networking.k8s.io/v1beta1
-# kind: ReferenceGrant
-# metadata:
-#   name: access-to-registry
-#   namespace: registry
-# spec:
-#   to:
-#     - group: ""
-#       kind: Service
-#   from:
-#     - group: gateway.networking.k8s.io
-#       kind: HTTPRoute
-#       namespace: default
-# ---
-# apiVersion: gateway.networking.k8s.io/v1
-# kind: HTTPRoute
-# metadata:
-#   name: registry-route
-# spec:
-#   parentRefs:
-#     - name: lsm-gateway
-#       sectionName: http
-#   rules:
-#     - matches:
-#         - path:
-#             type: PathPrefix
-#             value: /registry
-#       backendRefs:
-#         - name: registry
-#           namespace: registry
-#           port: 5000
+    - name: ollama-phi3-5
+      port: 11434
+      protocol: HTTP
+    - name: dex
+      port: 9091
+      protocol: HTTP
+    - name: registry
+      port: 5000
+      protocol: HTTP
 --- # Nextcloud
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
@@ -62,7 +39,7 @@ metadata:
 spec:
   parentRefs:
     - name: lsm-gateway
-      sectionName: http
+      sectionName: nextcloud
   rules:
     - matches:
         - path:
@@ -72,12 +49,12 @@ spec:
         - name: nextcloud
           namespace: nextcloud
           port: 8080
---- # Wordpress
+--- # Ollama
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
 metadata:
-  name: access-to-wp
-  namespace: wordpress
+  name: access-to-ollama
+  namespace: ollama
 spec:
   to:
     - group: ""
@@ -90,17 +67,125 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: wp-route
+  name: ollama-phi3-5-route
 spec:
   parentRefs:
     - name: lsm-gateway
-      sectionName: http
+      sectionName: ollama-phi3-5
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /phi3-5
+      backendRefs:
+        - name: phi3-5
+          namespace: ollama
+          port: 11434
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: "/"
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /llama3-8b
+      backendRefs:
+        - name: llama3-8b
+          namespace: ollama
+          port: 11434
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: "/"
+--- # dex
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: access-to-dex
+  namespace: auth
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: default
+  to:
+    - group: ""
+      kind: Service
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: dex-route
+  namespace: default
+spec:
+  parentRefs:
+    - name: lsm-gateway
+      namespace: default
+      sectionName: dex
+  hostnames:
+    - "auth.longstorymedia.com"
+    - "localhost"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+          method: OPTIONS
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: dex
+          namespace: auth
+          port: 5556
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            add:
+              - name: Access-Control-Allow-Origin
+                value: "*"
+              - name: Access-Control-Allow-Credentials
+                value: "true"
+              - name: Access-Control-Allow-Methods
+                value: "GET, POST, OPTIONS"
+              - name: Access-Control-Allow-Headers
+                value: "Content-Type, Authorization"
+--- # registry
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: access-to-registry
+  namespace: registry
+spec:
+  to:
+    - group: ""
+      kind: Service
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: default
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: registry-route
+spec:
+  parentRefs:
+    - name: lsm-gateway
+      sectionName: registry
+  hostnames:
+    - "registry.longstorymedia.com"
+    - "localhost"
   rules:
     - matches:
         - path:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: wordpress
-          namespace: wordpress
-          port: 8080
+        - name: registry
+          namespace: registry
+          port: 5000

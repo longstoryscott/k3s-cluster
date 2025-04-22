@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: "psql"
+spec:
+  selector:
+    app: postgres
+  ports:
+    - name: tcp-postgresql
+      port: 5432
+      targetPort: tcp-postgresql
+      nodePort: 32345
+  type: LoadBalancer
+  clusterIP: 10.43.223.45
+  publishNotReadyAddresses: true
+status:
+  loadBalancer:
+    ingress:
+      - ip: 192.168.0.122

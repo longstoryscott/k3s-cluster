@@ -1,0 +1,244 @@
+# Source: wordpress/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordpress
+  namespace: "wordpress"
+  labels:
+    app.kubernetes.io/instance: wordpress
+    app.kubernetes.io/name: wordpress
+    app.kubernetes.io/version: 6.7.1
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: wordpress
+      app.kubernetes.io/name: wordpress
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: wordpress
+        app.kubernetes.io/name: wordpress
+        app.kubernetes.io/version: 6.7.1
+    spec:
+      automountServiceAccountToken: false
+      # yamllint disable rule:indentation
+      hostAliases:
+        - hostnames:
+            - press.knitfoxandfolk.com
+            - localhost
+          ip: 127.0.0.1
+      # yamllint enable rule:indentation
+      affinity:
+        podAffinity:
+
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: wordpress
+                    app.kubernetes.io/name: wordpress
+                topologyKey: kubernetes.io/hostname
+              weight: 1
+        nodeAffinity:
+
+      securityContext:
+        fsGroup: 1001
+        fsGroupChangePolicy: Always
+        supplementalGroups: []
+        sysctls: []
+      serviceAccountName: default
+      initContainers:
+        - name: prepare-base-dir
+          image: docker.io/bitnami/wordpress:6.6.2-debian-12-r18
+          imagePullPolicy: "IfNotPresent"
+          resources:
+            limits:
+              cpu: 375m
+              ephemeral-storage: 2Gi
+              memory: 384Mi
+            requests:
+              cpu: 250m
+              ephemeral-storage: 50Mi
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsGroup: 1001
+            runAsNonRoot: true
+            runAsUser: 1001
+            seLinuxOptions: {}
+            seccompProfile:
+              type: RuntimeDefault
+          command:
+            - /bin/bash
+          args:
+            - -ec
+            - |
+              #!/bin/bash
+
+              . /opt/bitnami/scripts/liblog.sh
+              . /opt/bitnami/scripts/libfs.sh
+
+              info "Copying base dir to empty dir"
+              # In order to not break the application functionality (such as upgrades or plugins) we need
+              # to make the base directory writable, so we need to copy it to an empty dir volume
+              cp -r --preserve=mode /opt/bitnami/wordpress /emptydir/app-base-dir
+
+              info "Copying symlinks to stdout/stderr"
+              # We copy the logs folder because it has symlinks to stdout and stderr
+              if ! is_dir_empty /opt/bitnami/apache/logs; then
+                cp -r /opt/bitnami/apache/logs /emptydir/apache-logs-dir
+              fi
+
+              info "Copying default PHP config"
+              cp -r --preserve=mode /opt/bitnami/php/etc /emptydir/php-conf-dir
+
+              info "Copying php var directory"
+              if ! is_dir_empty /opt/bitnami/php/var; then
+                cp -r /opt/bitnami/php/var /emptydir/php-var-dir
+              fi
+
+              info "Copy operation completed"
+          volumeMounts:
+            - name: empty-dir
+              mountPath: /emptydir
+      containers:
+        - name: wordpress
+          image: docker.io/bitnami/wordpress:6.6.2-debian-12-r18
+          imagePullPolicy: "IfNotPresent"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsGroup: 1001
+            runAsNonRoot: true
+            runAsUser: 1001
+            seLinuxOptions: {}
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+            - name: BITNAMI_DEBUG
+              value: "false"
+            - name: ALLOW_EMPTY_PASSWORD
+              value: "yes"
+            - name: WORDPRESS_SKIP_BOOTSTRAP
+              value: "no"
+            - name: MARIADB_HOST
+              value: "wordpress-mariadb"
+            - name: MARIADB_PORT_NUMBER
+              value: "3306"
+            - name: WORDPRESS_DATABASE_NAME
+              value: "fnf_wordpress"
+            - name: WORDPRESS_DATABASE_USER
+              value: "fnf"
+            - name: WORDPRESS_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: wordpress-mariadb
+                  key: mariadb-password
+            - name: WORDPRESS_USERNAME
+              value: "fnf"
+            - name: WORDPRESS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: wordpress
+                  key: wordpress-password
+            - name: WORDPRESS_EMAIL
+              value: "foxandfolkknits@gmail.com"
+            - name: WORDPRESS_FIRST_NAME
+              value: "Norah"
+            - name: WORDPRESS_LAST_NAME
+              value: "Long"
+            - name: WORDPRESS_HTACCESS_OVERRIDE_NONE
+              value: "no"
+            - name: WORDPRESS_ENABLE_HTACCESS_PERSISTENCE
+              value: "no"
+            - name: WORDPRESS_BLOG_NAME
+              value: "Fox & Folk"
+            - name: WORDPRESS_TABLE_PREFIX
+              value: "fnf_"
+            - name: WORDPRESS_SCHEME
+              value: "https"
+            - name: WORDPRESS_EXTRA_WP_CONFIG_CONTENT
+              value: "/*#@+\n * Authentication Unique Keys and Salts.\n *\n * Change these to different unique phrases!\n * You can generate these using the {@link https://api.wordpress.org/secret-key/1.1/salt/ WordPress.org secret-key service}\n * You can change these at any point in time to invalidate all existing cookies. This will force all users to have to log in again.\n *\n * @since 2.6.0\n */\n\ndefine('AUTH_KEY', '=Dw}w._bL8sVF[k_ADZ-!rX$WP&ye|?23N~t/6fL|d<b>+[bj:Q(%z<fX)EGp6zd');\ndefine('SECURE_AUTH_KEY', '`#/nR6`9d<(aL|F6i1:dk_1F.titUvIHa/nK`X_P+9I{~z)o*2hlx+fd&bJk*F[M');\ndefine('LOGGED_IN_KEY', '&Wq6)xo^czj|oJ*yh|1uch<jDx%Ihak5JrmAoXhDJ~!o@JJ0gZUP2T62QqT]^RRC');\ndefine('NONCE_KEY', 'h|U-[BA!+?d@NR8&]VNlhS(OEFIQ&r#mQ9v-Seqpy$P& rKo)>y|-=@`XAC7MC0:');\ndefine('AUTH_SALT', '@/c|{}d@u6=oS^v7)(z`$84;7y/+KrcrQttGX:F9# c;+N|ji+2.v^@|UuiKd?]5');\ndefine('SECURE_AUTH_SALT', '&Pcaq=6,qa#2XCwIPWf6HN&2=-myzX`GP1p@KLjLN-_^%dNEx=NQ@W?+v?56RMiH');\ndefine('LOGGED_IN_SALT', '(6pY6*/XiRqJFKfsP!4nluuo3Gl%l4[y+4CTM{S.&6)%=TJ!].cqFo93i,6&`]*F');\ndefine('NONCE_SALT', 'Ob,6FvW16U)/!DO>@J#};Ii$[9<U|<<eu2v|&2CpmQ?wi ~2-}z=6QS k3CO-10T');\ndefine('JWT_AUTH_SECRET_KEY', 'UNrgOq5$sNy@-Sxrrn-)16{jjo*:To*D-:KGihx`B|[guu*[jL]vv&h8PqotItv{');\n\ndefine('JWT_AUTH_CORS_ENABLE', true);\n"
+            - name: WORDPRESS_PLUGINS
+              value: "none"
+            - name: WORDPRESS_OVERRIDE_DATABASE_SETTINGS
+              value: "no"
+            - name: APACHE_HTTP_PORT_NUMBER
+              value: "8080"
+            - name: APACHE_HTTPS_PORT_NUMBER
+              value: "8443"
+          envFrom: []
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: https
+              containerPort: 8443
+          livenessProbe:
+            failureThreshold: 6
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            successThreshold: 1
+            tcpSocket:
+              port: http
+            timeoutSeconds: 5
+          resources:
+            limits:
+              cpu: 375m
+              ephemeral-storage: 2Gi
+              memory: 384Mi
+            requests:
+              cpu: 250m
+              ephemeral-storage: 50Mi
+              memory: 256Mi
+          volumeMounts:
+            - name: empty-dir
+              mountPath: /opt/bitnami/apache/conf
+              subPath: apache-conf-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/apache/logs
+              subPath: apache-logs-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/apache/var/run
+              subPath: apache-tmp-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/php/etc
+              subPath: php-conf-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/php/tmp
+              subPath: php-tmp-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/php/var
+              subPath: php-var-dir
+            - name: empty-dir
+              mountPath: /tmp
+              subPath: tmp-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/wordpress
+              subPath: app-base-dir
+            - mountPath: /bitnami/wordpress
+              name: wordpress-data
+              subPath: wordpress
+            - mountPath: /docker-entrypoint-init.d
+              name: custom-postinit
+      volumes:
+        - name: empty-dir
+          emptyDir: {}
+        - name: custom-postinit
+          configMap:
+            name: wordpress-postinit
+            defaultMode: 0755
+        - name: wordpress-data
+          persistentVolumeClaim:
+            claimName: wordpress

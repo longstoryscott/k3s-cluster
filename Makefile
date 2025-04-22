@@ -4,16 +4,21 @@ REGISTRY = $(CURDIR)/registry
 ROUTER = $(CURDIR)/router
 REDIS = $(CURDIR)/redis
 NEXTCLOUD = $(CURDIR)/nextcloud
-POSTGRESQL = $(CURDIR)/postgresql
+POSTGRESQL = $(CURDIR)/psql
 WORDPRESS = $(CURDIR)/wordpress
+OLLAMA = $(CURDIR)/ollama
+AUTH = $(CURDIR)/auth
+PROXYLLAMA = $(CURDIR)/proxyllama
 
 .DEFAULT_GOAL := all
 
+export HELM_KUBECONTEXT=lsnet
+
 .SILENT:
 
-all: ex nc wp router
+all: ex auth nc wp ollama router
 
-install: init gateway install-registry nc router
+install: init gateway install-registry all
 
 init: ex
 	cd $(SCRIPTS) && bash make-server.sh && cd ..
@@ -21,8 +26,17 @@ init: ex
 update-workers: ex
 	cd $(SCRIPTS) && bash update-workers.sh && cd ..
 
+auth: ex
+	$(AUTH)/install.sh $(AUTH)
+
+restart-auth:
+	kubectl delete --all all,configmap,secret,pvc,ingress,serviceaccount -n auth
+	kubectl delete namespace auth
+	$(AUTH)/install.sh $(AUTH)
+	make router
+
 ex:
-	for f in $(SCRIPTS)/*.sh $(INGRESS)/*.sh $(REGISTRY)/*.sh $(NEXTCLOUD)/*.sh $(WORDPRESS)/*.sh; do chmod +x "$$f"; done;
+	for f in $(SCRIPTS)/*.sh $(INGRESS)/*.sh $(REGISTRY)/*.sh $(NEXTCLOUD)/*.sh $(WORDPRESS)/*.sh $(AUTH)/*sh; do chmod +x "$$f"; done;
 
 install-registry:
 	$(REGISTRY)/install.sh $(REGISTRY) "patch"
@@ -31,18 +45,18 @@ update-registry:
 	$(REGISTRY)/install.sh $(REGISTRY) 
 
 gateway:
-	kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.0.0/standard-install.yaml
-	kubectl apply -f https://github.com/nginxinc/nginx-gateway-fabric/releases/download/v1.2.0/crds.yaml
+	kubectl kustomize "https://github.com/nginxinc/nginx-gateway-fabric/config/crd/gateway-api/standard?ref=v1.4.0" | kubectl apply -f -
+	kubectl kustomize "https://github.com/nginxinc/nginx-gateway-fabric/config/crd/gateway-api/experimental?ref=v1.4.0" | kubectl apply -f -
+	# kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.1.0/standard-install.yaml
+	# kubectl apply -f https://github.com/nginxinc/nginx-gateway-fabric/releases/download/v1.2.0/crds.yaml
 
 router:
-	helm template nginx-gateway oci://ghcr.io/nginxinc/charts/nginx-gateway-fabric --create-namespace -n nginx-gateway --values $(ROUTER)/values.yaml > $(ROUTER)/patch/manifest.yaml
-	# helm upgrade --install nginx-gateway oci://ghcr.io/nginxinc/charts/nginx-gateway-fabric --create-namespace -n nginx-gateway --values $(ROUTER)/values.yaml
-	# kubectl wait --timeout=5m -n nginx-gateway deployment/nginx-gateway-nginx-gateway-fabric --for=condition=Available
-	kubectl apply -k $(ROUTER)/patch
+	helm upgrade --install nginx-gateway oci://ghcr.io/nginxinc/charts/nginx-gateway-fabric --create-namespace -n nginx-gateway --values $(ROUTER)/values.yaml
+	kubectl wait --timeout=5m -n nginx-gateway deployment/nginx-gateway-nginx-gateway-fabric --for=condition=Available
 	kubectl apply -f $(ROUTER)/routes.yaml
 
-connect-postgres:
-	kubectl run postgresql-client --rm --tty -i --restart='Never' --namespace postgresql --image docker.io/bitnami/postgresql:16.2.0-debian-12-r10 --env="PGPASSWORD=$(shell kubectl get secret --namespace nextcloud nextcloud-postgresql -o jsonpath='{.data.password}' | base64 -d)" --command -- psql --host postgresql -U lsm -d postgres -p 5432
+psql:
+	$(POSTGRESQL)/install.sh $(POSTGRESQL)
 
 nc: ex
 	$(NEXTCLOUD)/install.sh $(NEXTCLOUD)/values.yaml
@@ -56,13 +70,19 @@ delete-nc:
 wp: ex
 	$(WORDPRESS)/install.sh $(WORDPRESS)/values.yaml
 
+ollama:
+	$(OLLAMA)/install.sh $(OLLAMA)
+
+proxyllama:
+	$(PROXYLLAMA)/deploy.sh $(PROXYLLAMA)
+
 destroy:
 	$(SCRIPTS)/k8s-down.sh
 
 sync:
-	rsync -avzru --delete --exclude=".git" -e 'ssh -p 2222' . lsm@lsnet.tplinkdns.com:~/k8s/
+	rsync -avzru --delete --exclude=".git" --exclude="node_modules" -e 'ssh -p 2222' . lsm@lsnet.tplinkdns.com:~/k8s/
 
 apply: sync
 	ssh -p 2222 lsm@lsnet.tplinkdns.com "cd k8s && make"
 
-.PHONY: router ex
+.PHONY: router ex ollama psql proxyllama

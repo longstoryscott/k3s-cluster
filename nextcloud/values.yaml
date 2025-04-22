@@ -428,7 +428,7 @@ persistence:
   # existingClaim:
 
   accessMode: ReadWriteOnce
-  size: 100Gi
+  size: 400Gi
 
   ## Use an additional pvc for the data directory rather than a subpath of the default PVC
   ## Useful to store data on a different storageClass (e.g. on slower disks)
@@ -443,11 +443,11 @@ persistence:
 
 resources:
   requests:
-    cpu: 200m
-    memory: 500Mi
+    cpu: 400m
+    memory: 1000Mi
   limits:
-    cpu: 4
-    memory: 4Gi
+    cpu: 6
+    memory: 10Gi
 
 ## Liveness and readiness probe values
 ## Ref: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-probes

@@ -1,0 +1,3 @@
+services:
+  ollama:
+    base_url: "http://ollama.ollama.svc.cluster.local:11434"

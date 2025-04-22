@@ -1,0 +1,209 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres
+  namespace: "psql"
+  labels:
+    app: postgres
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: "psql"
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  serviceName: postgres
+  updateStrategy:
+    rollingUpdate: {}
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      name: postgres
+      labels:
+        app: postgres
+    spec:
+      serviceAccountName: postgres
+      automountServiceAccountToken: false
+      affinity:
+        podAffinity: {}
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: postgres
+                topologyKey: kubernetes.io/hostname
+              weight: 1
+        nodeAffinity: {}
+      securityContext:
+        fsGroup: 1001
+        fsGroupChangePolicy: Always
+        supplementalGroups: []
+        sysctls: []
+      hostNetwork: false
+      hostIPC: false
+      containers:
+        - name: postgres
+          image: timescale/timescaledb-ha:pg17
+          imagePullPolicy: "IfNotPresent"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsGroup: 1001
+            runAsNonRoot: true
+            runAsUser: 1001
+            seLinuxOptions: {}
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+            # - name: BITNAMI_DEBUG
+            #   value: "false"
+            # - name: POSTGRESQL_PORT_NUMBER
+            #   value: "5432"
+            - name: POSTGRESQL_VOLUME_DIR
+              value: "/home/postgres/pgdata"
+            # - name: PGDATA
+            #   value: "/bitnami/postgresql/data"
+            # Authentication
+            - name: POSTGRES_USER
+              value: "lsm"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: psqlpw
+            - name: POSTGRES_MULTIPLE_DATABASES
+              value: "dex_db,ollama"
+            - name: PGROOT
+              value: /home/postgres \
+            - name: PGDATA
+              value: /home/postgres/pgdata/data
+            - name: PGHOST
+              value: /var/run/postgresql
+            - name: PGLOG
+              value: /home/postgres/pg_log
+            - name: PGSOCKET
+              value: /home/postgres/pgdata
+            - name: BACKUPROOT
+              value: /home/postgres/pgdata/backup
+            - name: PGBACKREST_CONFIG
+              value: /home/postgres/pgdata/backup/pgbackrest.conf
+            - name: PGBACKREST_STANZA
+              value: poddb
+            - name: POSTGRES_DATABASE
+              value: "ollama"
+            - name: POSTGRES_DB
+              value: ollama
+            # Replication
+            # Initdb
+            # Standby
+            # LDAP
+            - name: POSTGRESQL_UNIX_SOCKET_DIRECTORIES
+              value: /home/postgres/pgdata
+            - name: POSTGRESQL_ENABLE_LDAP
+              value: "no"
+            # TLS
+            - name: POSTGRESQL_ENABLE_TLS
+              value: "no"
+            # Audit
+            - name: POSTGRESQL_LOG_HOSTNAME
+              value: "false"
+            - name: POSTGRESQL_LOG_CONNECTIONS
+              value: "false"
+            - name: POSTGRESQL_LOG_DISCONNECTIONS
+              value: "false"
+            - name: POSTGRESQL_PGAUDIT_LOG_CATALOG
+              value: "off"
+            # Others
+            - name: POSTGRESQL_CLIENT_MIN_MESSAGES
+              value: "error"
+            - name: POSTGRESQL_SHARED_PRELOAD_LIBRARIES
+              value: "pgaudit"
+          ports:
+            - name: tcp-postgresql
+              containerPort: 5432
+          livenessProbe:
+            failureThreshold: 6
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exec pg_isready -U "lsm" -d "dbname=ollama" -h 127.0.0.1 -p 5432
+          readinessProbe:
+            failureThreshold: 6
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - -e
+                - |
+                  exec pg_isready -U "lsm" -d "dbname=ollama" -h 127.0.0.1 -p 5432
+                  [ -f /opt/postgresql/tmp/.initialized ] || [ -f /home/postgres/pgdata/.initialized ]
+          resources:
+            limits:
+              cpu: 150m
+              ephemeral-storage: 1024Mi
+              memory: 192Mi
+            requests:
+              cpu: 100m
+              ephemeral-storage: 50Mi
+              memory: 128Mi
+          volumeMounts:
+            - name: empty-dir
+              mountPath: /tmp
+              subPath: tmp-dir
+            # - name: empty-dir
+            #   mountPath: /opt/postgresql/conf
+            #   subPath: app-conf-dir
+            # - name: empty-dir
+            #   mountPath: /opt/postgresql/tmp
+            #   subPath: app-tmp-dir
+            - name: dshm
+              mountPath: /dev/shm
+            - name: data
+              mountPath: /home/postgres/pgdata
+            - name: postgresql-run
+              mountPath: /var/run/postgresql
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d/
+      volumes:
+        - name: empty-dir
+          emptyDir: {}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+        - name: postgresql-run
+          emptyDir: {}
+        - name: init-scripts
+          configMap:
+            name: postgres-init-scripts
+  volumeClaimTemplates:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: "300Gi"

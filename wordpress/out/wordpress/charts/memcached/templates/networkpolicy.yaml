@@ -1,0 +1,29 @@
+---
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: wordpress-memcached
+  namespace: "wordpress"
+  labels:
+    app.kubernetes.io/instance: wordpress
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: memcached
+    app.kubernetes.io/version: 1.6.32
+    helm.sh/chart: memcached-7.5.2
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: wordpress
+      app.kubernetes.io/managed-by: Helm
+      app.kubernetes.io/name: memcached
+      app.kubernetes.io/version: 1.6.32
+      helm.sh/chart: memcached-7.5.2
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - {}
+  ingress:
+    - ports:
+        - port: 11211
+---
