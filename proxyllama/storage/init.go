@@ -358,6 +358,34 @@ func InitSchema(ctx context.Context) {
 		log.Printf("Warning: Could not create cascade delete trigger: %v", err)
 	}
 
+	// Enable compression on hypertables before adding compression policies
+	_, err = Pool.Exec(ctx, `
+	ALTER TABLE messages SET (timescaledb.compress, timescaledb.compress_segmentby = 'conversation_id');
+`)
+	if err != nil {
+		log.Printf("Warning: Could not enable compression for messages: %v", err)
+	} else {
+		log.Printf("Compression enabled for messages")
+	}
+
+	_, err = Pool.Exec(ctx, `
+	ALTER TABLE conversations SET (timescaledb.compress, timescaledb.compress_segmentby = 'user_id');
+`)
+	if err != nil {
+		log.Printf("Warning: Could not enable compression for conversations: %v", err)
+	} else {
+		log.Printf("Compression enabled for conversations")
+	}
+
+	_, err = Pool.Exec(ctx, `
+	ALTER TABLE summaries SET (timescaledb.compress, timescaledb.compress_segmentby = 'conversation_id');
+`)
+	if err != nil {
+		log.Printf("Warning: Could not enable compression for summaries: %v", err)
+	} else {
+		log.Printf("Compression enabled for summaries")
+	}
+
 	// Add data compression policies for hypertables
 	_, err = Pool.Exec(ctx, `
 		SELECT add_compression_policy('messages', INTERVAL '7 days', 

@@ -12,11 +12,14 @@ import (
 	"proxyllama/storage"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // ConversationContext holds data needed to maintain context across requests
 type ConversationContext struct {
 	ConversationID int       `json:"conversation_id"`
+	Title          string    `json:"title"`
 	UserID         string    `json:"user_id"`
 	Model          string    `json:"model"`
 	Messages       []Message `json:"messages"`
@@ -53,6 +56,13 @@ func GetOrCreateConversation(ctx context.Context, userID, model string, conversa
 		// Verify the conversation exists and belongs to the user
 		conv, err := storage.GetConversation(ctx, *conversationID)
 		if err != nil {
+			if err == pgx.ErrNoRows {
+				cid, err := storage.CreateConversation(ctx, userID, model, "")
+				if err != nil {
+					return nil, fmt.Errorf("failed to create conversation: %w", err)
+				}
+				return GetOrCreateConversation(ctx, userID, model, &cid)
+			}
 			return nil, fmt.Errorf("failed to get conversation: %w", err)
 		}
 
@@ -60,11 +70,12 @@ func GetOrCreateConversation(ctx context.Context, userID, model string, conversa
 			return nil, fmt.Errorf("conversation does not belong to user")
 		}
 
-		convContext.ConversationID = *conversationID
+		convContext.ConversationID = conv.ID
+		convContext.Title = conv.Title
 
 		// Load messages
 		messages, err := storage.GetConversationHistory(ctx, *conversationID)
-		if err != nil {
+		if err != nil && err != pgx.ErrNoRows {
 			return nil, fmt.Errorf("failed to load conversation history: %w", err)
 		}
 
