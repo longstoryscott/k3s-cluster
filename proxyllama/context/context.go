@@ -405,10 +405,12 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 	type OllamaRequest struct {
 		Model    string          `json:"model"`
 		Messages []OllamaMessage `json:"messages"`
+		Stream   bool            `json:"stream"`
 	}
 
 	req := OllamaRequest{
-		Model: cc.Model,
+		Model:  cc.Model,
+		Stream: true,
 	}
 
 	conf := config.GetConfig()
@@ -416,17 +418,14 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 	summariesBeforeConsolidation := conf.Summarization.SummariesBeforeConsolidation
 
 	// Only add system messages if we actually have summaries to include
-	hasSummaries := len(cc.Summaries) > 0
-
-	if hasSummaries {
+	if len(cc.Summaries) > 0 {
 		// Start with adding a system message to introduce the conversation
 		req.Messages = append(req.Messages, OllamaMessage{
 			Role:    "system",
 			Content: "This is a continued conversation. The historical context is provided in the following messages.",
 		})
 
-		// Add summaries based on level - start with highest level summaries
-		// as they provide broader context, then move to more detailed ones
+		// Find highest summary level
 		highestLevel := 0
 		for _, summary := range cc.Summaries {
 			if summary.Level > highestLevel {
@@ -434,21 +433,19 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 			}
 		}
 
-		// Helper function to collect summaries of a specific level
-		getSummariesByLevel := func(level int) []Summary {
-			var result []Summary
-			for _, summary := range cc.Summaries {
-				if summary.Level == level {
-					result = append(result, summary)
-				}
-			}
-			return result
+		// Group summaries by level for more efficient access
+		summariesByLevel := make(map[int][]Summary)
+		for _, summary := range cc.Summaries {
+			summariesByLevel[summary.Level] = append(summariesByLevel[summary.Level], summary)
 		}
 
 		// Add summaries from highest level to lowest level 1
 		summaryCount := 0
 		for level := highestLevel; level >= 1; level-- {
-			levelSummaries := getSummariesByLevel(level)
+			levelSummaries := summariesByLevel[level]
+			if len(levelSummaries) == 0 {
+				continue
+			}
 
 			// For higher levels, include all summaries as they're already consolidated
 			// For level 1, limit to the most recent ones based on configuration
@@ -473,11 +470,10 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 		}
 	}
 
-	// Calculate how many recent messages to include
-	// If there are fewer messages than the configured limit, include all
-	messagesToInclude := len(cc.Messages)
-	if messagesToInclude > messagesBeforeSummary {
-		messagesToInclude = messagesBeforeSummary
+	// Calculate how many recent messages to include (more efficiently)
+	messagesToInclude := messagesBeforeSummary
+	if len(cc.Messages) < messagesToInclude {
+		messagesToInclude = len(cc.Messages)
 	}
 
 	// Add the most recent messages

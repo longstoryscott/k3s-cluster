@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"proxyllama/config"
@@ -65,10 +64,10 @@ func WithAuth(c *fiber.Ctx) error {
 	c.Locals("user_id", userID)
 	c.Set("X-User-ID", userID)
 
+	// Generate and set request ID
 	rid := uuid.New().String()
 	c.Set("X-Request-ID", rid)
-	// set the request ID in the context
 	c.Locals("request_id", rid)
-	fmt.Println("Request ID:", rid)
+	log.Printf("Request ID: %s, User ID: %s", rid, userID)
 	return c.Next()
 }

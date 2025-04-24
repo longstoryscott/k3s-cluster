@@ -1,4 +1,4 @@
-import { Box, Paper } from '@mui/material';
+import { Box } from '@mui/material';
 import ChatContainer from '../components/Chat/ChatContainer';
 import ChatBubble from '../components/Chat/ChatBubble';
 import ModelSelector from '../components/ModelSelector/ModelSelector';
@@ -9,9 +9,9 @@ const ChatPage = () => {
   const { messages, response, isTyping } = useChat();
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
       <ModelSelector />
-      <Paper elevation={2} sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+      <Box sx={{ flex: 1, overflow: 'hidden' }}>
         <ChatContainer>
           {/* Display all existing messages */}
           {messages.map((msg, index) => (
@@ -30,7 +30,7 @@ const ChatPage = () => {
           {/* Display typing indicator when no response content yet */}
           {isTyping && !response && <ControlLoader text='Typing...'/>}
         </ChatContainer>
-      </Paper>
+      </Box>
     </Box>
   );
 };

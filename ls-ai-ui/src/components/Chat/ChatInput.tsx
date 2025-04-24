@@ -4,7 +4,7 @@ import { useChat } from '../../chat';
 
 const ChatInput = () => {
   const [input, setInput] = useState('');
-  const { sendMessage, isTyping } = useChat();
+  const { sendMessage, isTyping, currentConversation } = useChat();
 
   const handleKeyPress = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -16,7 +16,7 @@ const ChatInput = () => {
   const handleSend = () => {
     const trimmedInput = input.trim();
     if (trimmedInput && !isTyping) {
-      sendMessage({ content: trimmedInput, role: 'user' });
+      sendMessage({ content: trimmedInput, role: 'user', conversationId: currentConversation?.id ?? 0 });
       setInput('');
     }
   };

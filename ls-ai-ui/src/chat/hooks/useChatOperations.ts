@@ -1,7 +1,7 @@
 import { useCallback, useRef } from 'react';
 import { ChatState, ChatActions } from './useChatState';
 import { useAuth } from '../../auth';
-import { chat, getManyConversations, getMessages, removeConversation, startConversation, updateConversationTitle, ChatMessage } from '../../api';
+import { chat, getManyConversations, getMessages, removeConversation, startConversation, updateConversationTitle, ChatUserMessage, ChatAgentMessage } from '../../api';
 import { getModels } from '../../api/model';
 
 export const useChatOperations = (state: ChatState, actions: ChatActions) => {
@@ -108,7 +108,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
   }, [state.selectedModel, actions, getToken]);
 
   // Send a message in the current conversation
-  const sendMessage = useCallback(async (message: ChatMessage) => {
+  const sendMessage = useCallback(async (message: ChatUserMessage) => {
     if (state.isTyping) {
       console.warn("Already typing, please wait.");
       return;
@@ -148,7 +148,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
 
       // When streaming completes, add the complete response to messages
       if (completeResponse) {
-        const assistantMessage: ChatMessage = {
+        const assistantMessage: ChatAgentMessage = {
           role: 'assistant',
           content: completeResponse
         };

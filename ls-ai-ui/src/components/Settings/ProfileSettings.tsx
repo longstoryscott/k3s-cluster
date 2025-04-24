@@ -1,51 +1,44 @@
 import { useState } from 'react';
-import { Button, TextField, Typography, Paper, Grid } from '@mui/material';
+import { Box, TextField, Button } from '@mui/material';
 import { useAuth } from '../../auth';
 
 const ProfileSettings = () => {
-  const { user, logout } = useAuth();
-  const [name, setName] = useState(user.name);
-  const [email, setEmail] = useState(user.email);
+  const { user } = useAuth();
+  const [name, setName] = useState(user?.name || '');
+  const [email, setEmail] = useState(user?.email || '');
 
   const handleSave = () => {
-    // Logic to save the updated profile information
-    console.log('Profile updated:', { name, email });
+    // Implement the API call to update user profile
+    // When implemented, this would call a function to update the user profile
   };
 
   return (
-    <Paper elevation={3} style={{ padding: 20 }}>
-      <Typography variant="h5" gutterBottom>
-        Profile Settings
-      </Typography>
-      <Grid container spacing={2}>
-        <Grid>
-          <TextField
-            label="Name"
-            variant="outlined"
-            fullWidth
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </Grid>
-        <Grid>
-          <TextField
-            label="Email"
-            variant="outlined"
-            fullWidth
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-        </Grid>
-        <Grid>
-          <Button variant="contained" color="primary" onClick={handleSave}>
-            Save Changes
-          </Button>
-          <Button variant="outlined" color="secondary" onClick={logout} style={{ marginLeft: 10 }}>
-            Logout
-          </Button>
-        </Grid>
-      </Grid>
-    </Paper>
+    <Box component="form" sx={{ mt: 2 }}>
+      <TextField
+        label="Name"
+        variant="outlined"
+        fullWidth
+        margin="normal"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      <TextField
+        label="Email"
+        variant="outlined"
+        fullWidth
+        margin="normal"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      <Button 
+        variant="contained" 
+        color="primary" 
+        sx={{ mt: 2 }} 
+        onClick={handleSave}
+      >
+        Save Changes
+      </Button>
+    </Box>
   );
 };
 

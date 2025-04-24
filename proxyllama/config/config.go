@@ -1,11 +1,11 @@
 package config
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,12 +21,13 @@ type Config struct {
 	} `yaml:"ollama"`
 
 	Database struct {
-		Host     string `yaml:"host"`
-		Port     int    `yaml:"port"`
-		User     string `yaml:"user"`
-		Password string `yaml:"password"`
-		DBName   string `yaml:"dbname"`
-		SSLMode  string `yaml:"sslmode"`
+		Host           string        `yaml:"host"`
+		Port           int           `yaml:"port"`
+		User           string        `yaml:"user"`
+		Password       string        `yaml:"password"`
+		DBName         string        `yaml:"dbname"`
+		SSLMode        string        `yaml:"sslmode"`
+		ConnectTimeout time.Duration `yaml:"connect_timeout"` // Timeout for database connection
 	} `yaml:"database"`
 
 	Auth struct {
@@ -42,14 +43,14 @@ type Config struct {
 }
 
 var (
-	config        Config
-	configureOnce sync.Once = sync.Once{}
+	config     Config
+	configOnce sync.Once
 )
 
 // GetConfig loads configuration from config.yaml with environment variable overrides
 func GetConfig() Config {
 	// Use sync.Once to ensure config is loaded only once
-	configureOnce.Do(func() {
+	configOnce.Do(func() {
 		// Set defaults first
 		setDefaults(&config)
 
@@ -60,8 +61,6 @@ func GetConfig() Config {
 
 		// Override with environment variables
 		applyEnvironmentOverrides(&config)
-
-		fmt.Printf("Config loaded: %+v\n", config)
 	})
 
 	return config
@@ -83,6 +82,7 @@ func setDefaults(cfg *Config) {
 	cfg.Database.Password = "postgres"
 	cfg.Database.DBName = "proxyllama"
 	cfg.Database.SSLMode = "disable"
+	cfg.Database.ConnectTimeout = 10 * time.Second // Default 10-second timeout
 
 	// Auth defaults
 	cfg.Auth.JWKSURI = "http://localhost:9091/dex/keys"
@@ -96,29 +96,24 @@ func setDefaults(cfg *Config) {
 
 // loadFromFile loads configuration from config.yaml
 func loadFromFile(cfg *Config) error {
-	file, err := os.Open(".config.yaml")
-	if err != nil {
-		return fmt.Errorf("error opening config file: %w", err)
-	}
-
+	// Try to read the correct config file based on environment
+	var filePath string
 	if os.Getenv("LOCAL") == "true" {
-		file.Close()
-		file, err = os.Open(".config.local.yaml")
-		if err != nil {
-			return fmt.Errorf("error opening local config file: %w", err)
-		}
+		filePath = ".config.local.yaml"
+	} else {
+		filePath = ".config.yaml"
 	}
-	defer file.Close()
 
+	file, err := os.Open(filePath)
 	if err != nil {
-		return fmt.Errorf("error opening config file: %w", err)
+		return err
 	}
 	defer file.Close()
 
 	// Parse YAML
 	decoder := yaml.NewDecoder(file)
 	if err := decoder.Decode(cfg); err != nil {
-		return fmt.Errorf("error parsing config file: %w", err)
+		return err
 	}
 
 	return nil
@@ -165,6 +160,13 @@ func applyEnvironmentOverrides(cfg *Config) {
 	}
 	if dbSSLMode := os.Getenv("DATABASE_SSLMODE"); dbSSLMode != "" {
 		cfg.Database.SSLMode = dbSSLMode
+	}
+	if dbTimeoutStr := os.Getenv("DATABASE_CONNECT_TIMEOUT"); dbTimeoutStr != "" {
+		if timeout, err := strconv.Atoi(dbTimeoutStr); err == nil {
+			cfg.Database.ConnectTimeout = time.Duration(timeout) * time.Second
+		} else {
+			log.Printf("Warning: invalid DATABASE_CONNECT_TIMEOUT environment variable: %s", dbTimeoutStr)
+		}
 	}
 
 	// Auth overrides

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { ChatMessage, ChatConversation, Model } from '../../api/types';
+import { ChatUserMessage, ChatConversation, Model, ChatMessage } from '../../api/types';
 
 export interface ChatState {
   messages: ChatMessage[];
@@ -14,7 +14,7 @@ export interface ChatState {
 }
 
 export interface ChatActions {
-  setMessages: (messages: ChatMessage[]) => void;
+  setMessages: (messages: ChatUserMessage[]) => void;
   setConversations: (conversations: ChatConversation[]) => void;
   setCurrentConversation: (conversation: ChatConversation | null) => void;
   setIsLoading: (loading: boolean) => void;
@@ -56,7 +56,7 @@ export const useChatState = (): [ChatState, ChatActions] => {
   }, []);
 
   const addConversation = useCallback((conversation: ChatConversation) => {
-    setConversations(prev => [conversation, ...prev]);
+    setConversations(prev => [conversation, ...(prev ?? [])]);
   }, []);
 
   const updateConversationInList = useCallback((id: number, updates: Partial<ChatConversation>) => {

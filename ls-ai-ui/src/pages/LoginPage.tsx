@@ -12,7 +12,7 @@ const LoginPage = () => {
   const handleLogin = async () => {
     try {
       await auth.login(username, password);
-      navigate('/chat'); // Redirect to chat page after successful login
+      navigate('/'); // Redirect to chat page after successful login
     } catch (error) {
       console.error('Login failed:', error);
       // Handle login error (e.g., show a notification)

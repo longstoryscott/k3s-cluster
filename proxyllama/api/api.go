@@ -14,6 +14,13 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// handleError is a helper function that logs the error and returns a fiber error
+// to standardize error handling across API endpoints
+func handleError(err error, status int, message string) error {
+	log.Printf("%s: %v", message, err)
+	return fiber.NewError(status, message)
+}
+
 // RegisterConversationRoutes adds conversation management endpoints
 func RegisterConversationRoutes(app *fiber.App) {
 	app.Get("/api/conversations", GetUserConversations)
@@ -29,12 +36,9 @@ func RegisterConversationRoutes(app *fiber.App) {
 func GetUserConversations(c *fiber.Ctx) error {
 	userID := c.UserContext().Value(auth.UserIDKey).(string)
 
-	fmt.Println("GetUserConversations User ID:", userID)
-
 	conversations, err := storage.GetUserConversations(c.Context(), userID)
 	if err != nil {
-		fmt.Println("Error retrieving conversations:", err)
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to retrieve conversations")
+		return handleError(err, fiber.StatusInternalServerError, "Failed to retrieve conversations")
 	}
 
 	return c.JSON(conversations)
@@ -80,8 +84,7 @@ func GetConversationMessages(c *fiber.Ctx) error {
 
 	messages, err := storage.GetConversationHistory(c.Context(), conversationID)
 	if err != nil {
-		fmt.Println("Error retrieving messages:", err)
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to retrieve messages")
+		return handleError(err, fiber.StatusInternalServerError, "Failed to retrieve messages")
 	}
 
 	return c.JSON(messages)
@@ -92,30 +95,22 @@ func DeleteConversation(c *fiber.Ctx) error {
 	userID := c.UserContext().Value(auth.UserIDKey).(string)
 	conversationID, err := c.ParamsInt("id")
 	if err != nil {
-		// Log the error for debugging
-		fmt.Println("Error parsing conversation ID:", err)
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid conversation ID")
+		return handleError(err, fiber.StatusBadRequest, "Invalid conversation ID")
 	}
 
 	// Verify ownership
 	conversation, err := storage.GetConversation(c.Context(), conversationID)
 	if err != nil {
-		// Log the error for debugging
-		fmt.Println("Error retrieving conversation:", err)
-		return fiber.NewError(fiber.StatusNotFound, "Conversation not found")
+		return handleError(err, fiber.StatusNotFound, "Conversation not found")
 	}
 	if conversation.UserID != userID {
-		// Log the error for debugging
-		fmt.Println("Access denied for user:", userID, "to conversation:", conversationID)
 		return fiber.NewError(fiber.StatusForbidden, "Access denied")
 	}
 
 	// Add deletion function to storage package
 	err = storage.DeleteConversation(c.Context(), conversationID)
 	if err != nil {
-		// Log the error for debugging
-		fmt.Println("Error deleting conversation:", err)
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete conversation")
+		return handleError(err, fiber.StatusInternalServerError, "Failed to delete conversation")
 	}
 
 	return c.SendStatus(fiber.StatusOK)
@@ -149,7 +144,7 @@ func UpdateConversation(c *fiber.Ctx) error {
 	// Update the title
 	err = storage.UpdateConversationTitle(c.Context(), conversationID, req.Title)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update conversation")
+		return handleError(err, fiber.StatusInternalServerError, "Failed to update conversation")
 	}
 
 	return c.SendStatus(fiber.StatusOK)
@@ -163,17 +158,12 @@ func CreateConversation(c *fiber.Ctx) error {
 		Title string `json:"title"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		// Log the error for debugging
-		fmt.Println("Error parsing request body:", err)
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+		return handleError(err, fiber.StatusBadRequest, "Invalid request body")
 	}
 
 	conversationID, err := storage.CreateConversation(c.Context(), userID, req.Model, req.Title)
 	if err != nil {
-		// Log the error for debugging
-		fmt.Println("Error creating conversation:", err)
-		// Return a 500 error with a message
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create conversation")
+		return handleError(err, fiber.StatusInternalServerError, "Failed to create conversation")
 	}
 
 	return c.JSON(fiber.Map{"conversation_id": conversationID})
@@ -188,7 +178,7 @@ func GetModels(c *fiber.Ctx) error {
 	// Create a request to Ollama's /api/tags endpoint
 	req, err := http.NewRequestWithContext(c.Context(), "GET", targetURL, nil)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create proxy request")
+		return handleError(err, fiber.StatusInternalServerError, "Failed to create proxy request")
 	}
 
 	// Copy headers from original request
@@ -208,14 +198,14 @@ func GetModels(c *fiber.Ctx) error {
 	// Make the request to Ollama
 	resp, err := client.Do(req)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to contact Ollama")
+		return handleError(err, fiber.StatusBadGateway, "Failed to contact Ollama")
 	}
 	defer resp.Body.Close()
 
 	// Read the response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read Ollama response")
+		return handleError(err, fiber.StatusInternalServerError, "Failed to read Ollama response")
 	}
 
 	// If Ollama returns an error, pass it through

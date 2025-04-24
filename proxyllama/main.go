@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -15,23 +14,6 @@ import (
 	"proxyllama/proxy"
 	"proxyllama/storage"
 )
-
-type ModelDetails struct {
-	ParentModel       string   `json:"parent_model"`
-	Format            string   `json:"format"`
-	Family            string   `json:"family"`
-	Families          []string `json:"families"`
-	ParameterSize     int64    `json:"parameter_size"`
-	QuantizationLevel string   `json:"quantization_level"`
-}
-
-type Model struct {
-	Name       string       `json:"name"`
-	ModifiedAt time.Time    `json:"modified_at"`
-	Size       int64        `json:"size"`
-	Digest     string       `json:"digest"`
-	Details    ModelDetails `json:"details"`
-}
 
 func main() {
 	conf := config.GetConfig()
@@ -45,13 +27,16 @@ func main() {
 		conf.Database.SSLMode,
 	)
 
-	// Init DB
+	// Init DB with a context for timeout handling
+	ctx, cancel := context.WithTimeout(context.Background(), conf.Database.ConnectTimeout)
+	defer cancel()
+
 	if err := storage.InitDB(psqlconn); err != nil {
 		log.Fatalf("failed to connect to db: %v", err)
 	}
 
 	// Initialize database schema
-	storage.InitSchema(context.Background())
+	storage.InitSchema(ctx)
 
 	// Create a new Fiber app
 	app := fiber.New(fiber.Config{
@@ -83,7 +68,8 @@ func main() {
 	// Setup reverse proxy handler with chunk processing
 	app.All("/*", proxy.ReverseProxyHandler())
 
-	// Start the server
-	log.Println("Server started on :8080")
-	log.Fatal(app.Listen(":8080"))
+	// Use port from configuration instead of hardcoding it
+	serverAddress := fmt.Sprintf("%s:%d", conf.Server.Host, conf.Server.Port)
+	log.Printf("Server started on %s", serverAddress)
+	log.Fatal(app.Listen(serverAddress))
 }

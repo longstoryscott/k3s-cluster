@@ -26,16 +26,20 @@ export type ChatConversation = {
 }
 
 export type ChatMessage = {
+  id?: number;
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
-  images?: string[];
-  tool_calls?: unknown[];
-  model?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
 };
+
+export type ChatUserMessage = ChatMessage & {
+  conversationId: number;
+}
 
 export type ChatRequest = {
   model: string;
-  messages: ChatMessage[];
+  messages: ChatUserMessage[];
   tools?: Record<string, unknown>;
   format?: string;
   options?: string[];
@@ -43,9 +47,12 @@ export type ChatRequest = {
   keep_alive?: string;
 }
 
+export type ChatAgentMessage = ChatMessage;
+
+
 export type ChatResponse = {
   done: boolean;
-  message?: ChatMessage;
+  message?: ChatAgentMessage;
   createdAt: string;
   model: string;
   context?: number[];

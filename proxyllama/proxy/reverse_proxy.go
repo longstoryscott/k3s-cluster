@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +11,7 @@ import (
 	"net/http"
 	"proxyllama/auth"
 	"proxyllama/config"
-	"proxyllama/context"
+	pxcx "proxyllama/context"
 	"strings"
 	"time"
 
@@ -21,7 +22,7 @@ import (
 type ChatRequest struct {
 	Model          string        `json:"model"`
 	Messages       []ChatMessage `json:"messages"`
-	ConversationID *int          `json:"conversation_id,omitempty"`
+	ConversationID *int          `json:"conversationId"` // ui sends camelCase
 	Stream         bool          `json:"stream,omitempty"`
 }
 
@@ -33,10 +34,15 @@ type ChatMessage struct {
 
 // ChunkData represents the structure of a streaming chunk response
 type ChunkData struct {
-	Message struct {
-		Content string `json:"content"`
-	} `json:"message"`
-	Done bool `json:"done"`
+	Message            ChatMessage `json:"message"`
+	Done               bool        `json:"done"`
+	DoneReason         string      `json:"done_reason"`
+	TotalDuration      float64     `json:"total_duration"`
+	LoadDuration       float64     `json:"load_duration"`
+	PromptEvalCount    int         `json:"prompt_eval_count"`
+	PromptEvalDuration float64     `json:"prompt_eval_duration"`
+	EvalCount          int         `json:"eval_count"`
+	EvalDuration       float64     `json:"eval_duration"`
 }
 
 // ReverseProxyHandler forwards the request to Ollama and streams the response back to the client
@@ -48,11 +54,28 @@ func ReverseProxyHandler() fiber.Handler {
 		// Special handling for chat endpoints
 		if strings.Contains(path, "/chat") {
 			log.Printf("Chat endpoint detected: %s", path)
+			log.Printf("Got request body: %s", string(c.Body()))
 			return handleChatRequest(c)
 		}
 
 		// For non-chat endpoints, just pass through
 		return handleRegularProxyRequest(c)
+	}
+}
+
+// createStreamingHTTPClient returns a configured HTTP client optimized for streaming responses
+func createStreamingHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 0, // No timeout for streaming
+		Transport: &http.Transport{
+			IdleConnTimeout:       0,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   100,
+			DisableKeepAlives:     false,
+			ResponseHeaderTimeout: 0,
+			ExpectContinueTimeout: 0,
+			TLSHandshakeTimeout:   0,
+		},
 	}
 }
 
@@ -64,13 +87,15 @@ func handleChatRequest(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
+	log.Printf("Parsed chat request: %+v", chatReq)
+
 	// Always set streaming to true to prevent timeouts
 	chatReq.Stream = true
 
 	uid := c.UserContext().Value(auth.UserIDKey).(string)
 	// Get or create conversation context
 	ctx := c.Context()
-	convCtx, err := context.GetOrCreateConversation(ctx, uid, chatReq.Model, chatReq.ConversationID)
+	convCtx, err := pxcx.GetOrCreateConversation(ctx, uid, chatReq.Model, chatReq.ConversationID)
 	if err != nil {
 		log.Printf("Error getting conversation context: %v", err)
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to process conversation")
@@ -139,19 +164,8 @@ func handleChatRequest(c *fiber.Ctx) error {
 	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("Connection", "keep-alive") // Add keep-alive for persistent connections
 
-	// Create HTTP client with improved configuration for streaming
-	client := &http.Client{
-		Timeout: 0, // No timeout for streaming
-		Transport: &http.Transport{
-			IdleConnTimeout:       0,
-			MaxIdleConns:          100,
-			MaxIdleConnsPerHost:   100,
-			DisableKeepAlives:     false, // Enable keep-alives
-			ResponseHeaderTimeout: 0,     // No timeout for header response
-			ExpectContinueTimeout: 0,     // No timeout for continue expectation
-			TLSHandshakeTimeout:   0,     // No timeout for TLS handshake
-		},
-	}
+	// Use the shared HTTP client
+	client := createStreamingHTTPClient()
 
 	// Make the request to Ollama
 	resp, err := client.Do(req)
@@ -178,6 +192,7 @@ func handleChatRequest(c *fiber.Ctx) error {
 
 	// Stream response and collect assistant response
 	var assistantResponse strings.Builder
+	var debugChunkCount int
 
 	c.Response().SetBodyStreamWriter(func(w *bufio.Writer) {
 		defer resp.Body.Close() // Ensure connection is closed when done
@@ -191,10 +206,11 @@ func handleChatRequest(c *fiber.Ctx) error {
 			if n > 0 {
 				data := buffer[:n]
 
-				// Process SSE data to extract the assistant response
+				// Process Ollama data to extract the assistant response
 				content := extractContent(data)
 				if content != "" {
 					assistantResponse.WriteString(content)
+					debugChunkCount++
 				}
 
 				// Write to response
@@ -229,10 +245,25 @@ func handleChatRequest(c *fiber.Ctx) error {
 		if !contextError {
 			// Store the complete assistant response
 			fullResponse := assistantResponse.String()
+			log.Printf("DEBUG: Final accumulated content size: %d bytes, chunk count: %d",
+				len(fullResponse), debugChunkCount)
+
 			if fullResponse != "" {
-				if err := convCtx.AddAssistantMessage(ctx, fullResponse); err != nil {
+				log.Printf("Storing assistant response (length: %d)", len(fullResponse))
+
+				// Create a separate context with timeout for database operation
+				dbCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				defer cancel()
+
+				// Use a transaction for reliability
+				if err := convCtx.AddAssistantMessage(dbCtx, fullResponse); err != nil {
 					log.Printf("Error storing assistant response: %v", err)
+				} else {
+					log.Printf("Successfully stored assistant message in conversation %d", convCtx.ConversationID)
 				}
+			} else {
+				log.Printf("Empty assistant response, not storing")
+				// Dump the raw data we received for debugging
 			}
 
 			// Add conversation ID to response metadata (last chunk)
@@ -318,19 +349,8 @@ func handleRegularProxyRequest(c *fiber.Ctx) error {
 		}
 	}
 
-	// Create HTTP client with improved configuration
-	client := &http.Client{
-		Timeout: 0, // No timeout for streaming
-		Transport: &http.Transport{
-			IdleConnTimeout:       0,
-			MaxIdleConns:          100,
-			MaxIdleConnsPerHost:   100,
-			DisableKeepAlives:     false,
-			ResponseHeaderTimeout: 0,
-			ExpectContinueTimeout: 0,
-			TLSHandshakeTimeout:   0,
-		},
-	}
+	// Use the shared HTTP client configuration
+	client := createStreamingHTTPClient()
 
 	// Make the request
 	resp, err := client.Do(req)
@@ -417,35 +437,15 @@ func handleRegularProxyRequest(c *fiber.Ctx) error {
 	return nil
 }
 
-// extractContent parses SSE data to extract message content
+// extractContent parses ollama message content (not SSE format) from the response
 func extractContent(data []byte) string {
-	str := string(data)
-	lines := strings.Split(str, "\n")
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "data: ") {
-			jsonData := strings.TrimPrefix(line, "data: ")
-
-			// Skip empty data
-			if len(jsonData) == 0 {
-				continue
-			}
-
-			// Try to parse the JSON data
-			var response struct {
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-				Done bool `json:"done"`
-			}
-
-			if err := json.Unmarshal([]byte(jsonData), &response); err == nil {
-				return response.Message.Content
-			} else {
-				// Log the error but continue processing
-				log.Printf("Error parsing JSON in extractContent: %v, data: %s", err, jsonData)
-			}
-		}
+	// Try to parse the JSON data
+	var chunkData ChunkData
+	if err := json.Unmarshal(data, &chunkData); err == nil {
+		return chunkData.Message.Content
+	} else {
+		// Log parsing errors for debugging
+		log.Printf("DEBUG: Error parsing JSON chunk: %v, data: %s", err, string(data))
 	}
 
 	return ""

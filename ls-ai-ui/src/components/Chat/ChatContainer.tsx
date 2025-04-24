@@ -15,6 +15,12 @@ const ChatContainer = ({children}: React.PropsWithChildren<unknown>) => {
     }
   }, [response, isTyping]);
 
+  // A proper handler function instead of just logging to console
+  const handleMenuClick = () => {
+    // This could be implemented to toggle a drawer or handle other UI navigation
+    // For now, this is a placeholder for future functionality
+  };
+
   return (
     <Box 
       ref={containerRef}
@@ -25,7 +31,7 @@ const ChatContainer = ({children}: React.PropsWithChildren<unknown>) => {
         overflow: 'auto'
       }}
     >
-      <ChatHeader title="Chat" onMenuClick={() => console.log('Menu clicked')} />
+      <ChatHeader title="Chat" onMenuClick={handleMenuClick} />
       <Box sx={{ flex: 1, p: 2 }}>
         {/* Children will contain the messages displayed by ChatPage */}
         {children}

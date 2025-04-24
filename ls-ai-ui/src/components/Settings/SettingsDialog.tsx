@@ -14,7 +14,7 @@ const SettingsDialog = ({ open, onClose }: SettingsDialogProps) => {
 
   const handleSave = () => {
     // Logic to save settings (e.g., update user profile)
-    console.log('Settings saved:', { username, email });
+    // This would typically call an API to update user settings
     onClose();
   };
 

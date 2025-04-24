@@ -24,7 +24,6 @@ export interface ChatContextType {
   deleteConversation: ReturnType<typeof useChatOperations>['deleteConversation'];
   startNewConversation: ReturnType<typeof useChatOperations>['startNewConversation'];
   selectConversation: ReturnType<typeof useChatOperations>['selectConversation'];
-  handleTyping: (typing: boolean) => void;
   setConversationTitle: ReturnType<typeof useChatOperations>['setConversationTitle'];
   setSelectedModel: ReturnType<typeof useChatState>[1]['setSelectedModel'];
   fetchModels: ReturnType<typeof useChatOperations>['fetchModels'];
@@ -41,11 +40,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const apiRequestInProgress = useRef(false);
   const isFirstLoad = useRef(true);
 
-  // Simple handler for typing indicator
-  const handleTyping = (typing: boolean) => {
-    actions.setIsTyping(typing);
-  };
-
   // Load conversations on first mount
   useEffect(() => {
     if (auth.isAuthenticated && isFirstLoad.current && !apiRequestInProgress.current) {
@@ -53,7 +47,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       apiRequestInProgress.current = true;
       (async () => {
         await operations.fetchModels();
-        console.log(state.models);
         await operations.fetchConversations();
         apiRequestInProgress.current = false;
       })();
@@ -80,7 +73,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     deleteConversation: operations.deleteConversation,
     startNewConversation: operations.startNewConversation,
     selectConversation: operations.selectConversation,
-    handleTyping,
     setConversationTitle: operations.setConversationTitle,
     setSelectedModel: actions.setSelectedModel,
     fetchModels: operations.fetchModels
