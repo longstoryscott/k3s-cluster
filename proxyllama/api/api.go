@@ -2,8 +2,14 @@ package api
 
 import (
 	"fmt"
+	"io"
+	"log"
+	"net/http"
 	"proxyllama/auth"
+	"proxyllama/config"
 	"proxyllama/storage"
+	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -16,6 +22,7 @@ func RegisterConversationRoutes(app *fiber.App) {
 	app.Delete("/api/conversations/:id", DeleteConversation)
 	app.Put("/api/conversations/:id", UpdateConversation)
 	app.Post("/api/conversations", CreateConversation)
+	app.Get("/api/models", GetModels)
 }
 
 // GetUserConversations returns all conversations for the authenticated user
@@ -170,4 +177,54 @@ func CreateConversation(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"conversation_id": conversationID})
+}
+
+// GetModels returns the available models
+func GetModels(c *fiber.Ctx) error {
+	conf := config.GetConfig()
+	ollamaURL := conf.Ollama.BaseURL
+	targetURL := fmt.Sprintf("%s/api/tags", strings.TrimSuffix(ollamaURL, "/"))
+
+	// Create a request to Ollama's /api/tags endpoint
+	req, err := http.NewRequestWithContext(c.Context(), "GET", targetURL, nil)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create proxy request")
+	}
+
+	// Copy headers from original request
+	c.Request().Header.VisitAll(func(key, value []byte) {
+		k := string(key)
+		v := string(value)
+		if strings.ToLower(k) != "host" && strings.ToLower(k) != "connection" {
+			req.Header.Set(k, v)
+		}
+	})
+
+	// Create HTTP client
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	// Make the request to Ollama
+	resp, err := client.Do(req)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to contact Ollama")
+	}
+	defer resp.Body.Close()
+
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read Ollama response")
+	}
+
+	// If Ollama returns an error, pass it through
+	if resp.StatusCode >= 400 {
+		log.Printf("Ollama error response: %s", string(body))
+		return c.Status(resp.StatusCode).Send(body)
+	}
+
+	// Return the response to the client
+	c.Set("Content-Type", "application/json")
+	return c.Status(resp.StatusCode).Send(body)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -14,6 +15,23 @@ import (
 	"proxyllama/proxy"
 	"proxyllama/storage"
 )
+
+type ModelDetails struct {
+	ParentModel       string   `json:"parent_model"`
+	Format            string   `json:"format"`
+	Family            string   `json:"family"`
+	Families          []string `json:"families"`
+	ParameterSize     int64    `json:"parameter_size"`
+	QuantizationLevel string   `json:"quantization_level"`
+}
+
+type Model struct {
+	Name       string       `json:"name"`
+	ModifiedAt time.Time    `json:"modified_at"`
+	Size       int64        `json:"size"`
+	Digest     string       `json:"digest"`
+	Details    ModelDetails `json:"details"`
+}
 
 func main() {
 	conf := config.GetConfig()
@@ -38,6 +56,8 @@ func main() {
 	// Create a new Fiber app
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: false,
+		// Add streaming capability
+		StreamRequestBody: true,
 	})
 
 	// Add logger middleware
@@ -60,11 +80,8 @@ func main() {
 	// Register conversation API routes
 	api.RegisterConversationRoutes(app)
 
-	// Setup reverse proxy handler
-	app.All("/*", proxy.StreamProxyHandler(conf.Ollama.BaseURL, func(chunk []byte) {
-		// Handle the chunk of data here
-		log.Printf("Received chunk: %s", string(chunk))
-	}))
+	// Setup reverse proxy handler with chunk processing
+	app.All("/*", proxy.ReverseProxyHandler())
 
 	// Start the server
 	log.Println("Server started on :8080")

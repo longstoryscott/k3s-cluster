@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"proxyllama/config"
@@ -10,6 +11,7 @@ import (
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 // contextKey is a custom type for context keys to avoid collisions
@@ -62,5 +64,11 @@ func WithAuth(c *fiber.Ctx) error {
 	c.SetUserContext(ctx)
 	c.Locals("user_id", userID)
 	c.Set("X-User-ID", userID)
+
+	rid := uuid.New().String()
+	c.Set("X-Request-ID", rid)
+	// set the request ID in the context
+	c.Locals("request_id", rid)
+	fmt.Println("Request ID:", rid)
 	return c.Next()
 }

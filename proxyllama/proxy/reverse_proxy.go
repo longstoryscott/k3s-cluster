@@ -8,229 +8,69 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"proxyllama/auth"
+	"proxyllama/config"
 	"proxyllama/context"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/proxy"
 )
 
 // ChatRequest represents the structure of incoming chat requests
 type ChatRequest struct {
-	Model          string    `json:"model"`
-	Messages       []Message `json:"messages"`
-	ConversationID *int      `json:"conversation_id,omitempty"`
+	Model          string        `json:"model"`
+	Messages       []ChatMessage `json:"messages"`
+	ConversationID *int          `json:"conversation_id,omitempty"`
+	Stream         bool          `json:"stream,omitempty"`
 }
 
-// Message represents a single message in a chat
-type Message struct {
+// ChatMessage represents a single message in a chat
+type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-type ModelMap struct {
-	Model      string `json:"model"`
-	PathPrefix string `json:"path_prefix"`
+// ChunkData represents the structure of a streaming chunk response
+type ChunkData struct {
+	Message struct {
+		Content string `json:"content"`
+	} `json:"message"`
+	Done bool `json:"done"`
 }
 
-type ModelMapList []ModelMap
-
-var modelMapList ModelMapList = ModelMapList{
-	{Model: "default", PathPrefix: ""},
-	{Model: "phi3.5", PathPrefix: "/phi3-5"},
-	{Model: "llama3-8b", PathPrefix: "/llama3-8b"},
-}
-
-func NewReverseProxy(target string) func(c *fiber.Ctx) error {
+// ReverseProxyHandler forwards the request to Ollama and streams the response back to the client
+func ReverseProxyHandler() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		path := c.Path()
-		log.Printf("Request path: %s", path)
-		// Build the target URL
-		targetURL := strings.TrimSuffix(target, "/") + path
-
-		// Map the model to the correct path prefix
-		for _, modelMap := range modelMapList {
-			if strings.Contains(path, modelMap.Model) {
-				targetURL = fmt.Sprintf("%s%s", targetURL, modelMap.PathPrefix)
-			}
-		}
-
-		// Configure the proxy for streaming
-		if err := proxy.Do(c, targetURL); err != nil {
-			log.Printf("Proxy error: %v", err)
-			return err
-		}
-
-		// Ensure streaming headers are set correctly
-		if strings.Contains(path, "/generate") || strings.Contains(path, "/chat") {
-			c.Set("Content-Type", "text/event-stream")
-			c.Set("Cache-Control", "no-cache")
-			c.Set("Connection", "keep-alive")
-			c.Set("Transfer-Encoding", "chunked")
-		}
-
-		return nil
-	}
-}
-
-// StreamProxyHandler forwards the request to Ollama and streams the response back to the client
-func StreamProxyHandler(ollamaUrl string, chunk func([]byte)) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		path := c.Path()
-		requestBody := string(c.Body())
-
-		// Extract the path prefix based on model name in request body
-		var pathPrefix string
-		for _, modelMap := range modelMapList {
-			if strings.Contains(requestBody, fmt.Sprintf("\"model\":\"%s\"", modelMap.Model)) ||
-				strings.Contains(requestBody, fmt.Sprintf("\"model\": \"%s\"", modelMap.Model)) {
-				pathPrefix = modelMap.PathPrefix
-				log.Printf("Detected model %s, using path prefix: %s", modelMap.Model, pathPrefix)
-				break
-			}
-		}
-
-		// Build the full target URL by combining base URL, path prefix, and path
-		targetUrl := fmt.Sprintf("%s%s%s",
-			strings.TrimSuffix(ollamaUrl, "/"),
-			pathPrefix,
-			path)
-
-		log.Printf("Proxying request to: %s", targetUrl)
-		// Prepare the proxy request to Ollama
-		req, err := http.NewRequestWithContext(c.Context(), c.Method(), targetUrl, bytes.NewReader(c.Body()))
-		if err != nil {
-			return fiber.NewError(fiber.StatusInternalServerError, "Failed to create proxy request")
-		}
-
-		// Copy query parameters
-		req.URL.RawQuery = string(c.Request().URI().QueryString())
-
-		// Copy all headers from the incoming request
-		c.Request().Header.VisitAll(func(key, value []byte) {
-			k := string(key)
-			v := string(value)
-			if strings.ToLower(k) != "host" && strings.ToLower(k) != "connection" {
-				req.Header.Set(k, v)
-			}
-		})
-
-		// Set specific headers for streaming if needed
-		if strings.Contains(path, "/generate") || strings.Contains(path, "/chat") {
-			req.Header.Set("Accept", "text/event-stream")
-			req.Header.Set("Cache-Control", "no-cache")
-		}
-
-		// Create client with longer timeouts for streaming
-		client := &http.Client{
-			Timeout: 0, // No timeout for streaming
-			Transport: &http.Transport{
-				IdleConnTimeout:     0, // Important: prevent idle timeout during streaming
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 100,
-			},
-		}
-
-		// Make the request to Ollama
-		resp, err := client.Do(req)
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadGateway, "Failed to contact Ollama")
-		}
-
-		// Log response status
-		log.Printf("Ollama responded with status: %d", resp.StatusCode)
-
-		// If Ollama returns an error, pass it through
-		if resp.StatusCode >= 400 {
-			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close() // Close here since we've read everything
-			log.Printf("Ollama error response: %s", string(body))
-			// Return the error body
-			return c.Status(resp.StatusCode).Send(body)
-		}
-
-		// Set headers from Ollama response
-		for k, values := range resp.Header {
-			for _, v := range values {
-				c.Set(k, v)
-			}
-		}
-
-		// Set streaming headers
-		c.Set("Content-Type", "text/event-stream")
-		c.Set("Cache-Control", "no-cache")
-		c.Set("Connection", "keep-alive")
-		c.Set("Transfer-Encoding", "chunked")
-		c.Set("X-Accel-Buffering", "no") // Disable buffering in Nginx if you're using it
-
-		c.Status(resp.StatusCode)
-
-		// Stream response body as it arrives
-		c.Response().SetBodyStreamWriter(func(w *bufio.Writer) {
-			defer resp.Body.Close() // Close the body when streaming is finished
-
-			buffer := make([]byte, 1024) // Smaller buffer for more frequent flushes
-
-			log.Printf("Starting to stream response")
-			for {
-				n, err := resp.Body.Read(buffer)
-				if n > 0 {
-					go chunk(buffer[:n])
-					if _, writeErr := w.Write(buffer[:n]); writeErr != nil {
-						log.Printf("Error writing to response: %v", writeErr)
-						break
-					}
-					if flushErr := w.Flush(); flushErr != nil {
-						log.Printf("Error flushing response: %v", flushErr)
-						break
-					}
-				}
-
-				if err != nil {
-					if err != io.EOF {
-						log.Printf("Error reading from Ollama: %v", err)
-					} else {
-						log.Printf("Finished streaming response (EOF)")
-					}
-					break
-				}
-			}
-			log.Printf("Streaming complete")
-		})
-
-		return nil
-	}
-}
-
-// StreamProxyHandler forwards the request to Ollama and streams the response back to the client
-func StreamProxyHandler2(ollamaUrl string, chunk func([]byte)) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		path := c.Path()
-
-		// Get user ID from context (set by auth middleware)
-		userID := c.Locals("user_id").(string)
+		log.Printf("Received request for path: %s", path)
 
 		// Special handling for chat endpoints
 		if strings.Contains(path, "/chat") {
-			return handleChatRequest(c, ollamaUrl, userID, chunk)
+			log.Printf("Chat endpoint detected: %s", path)
+			return handleChatRequest(c)
 		}
 
 		// For non-chat endpoints, just pass through
-		return handleRegularProxyRequest(c, ollamaUrl, chunk)
+		return handleRegularProxyRequest(c)
 	}
 }
 
 // handleChatRequest handles requests to the chat endpoint with context tracking
-func handleChatRequest(c *fiber.Ctx, ollamaUrl, userID string, chunk func([]byte)) error {
+func handleChatRequest(c *fiber.Ctx) error {
 	// Parse the incoming request
 	var chatReq ChatRequest
 	if err := c.BodyParser(&chatReq); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
+	// Always set streaming to true to prevent timeouts
+	chatReq.Stream = true
+
+	uid := c.UserContext().Value(auth.UserIDKey).(string)
 	// Get or create conversation context
 	ctx := c.Context()
-	convCtx, err := context.GetOrCreateConversation(ctx, userID, chatReq.Model, chatReq.ConversationID)
+	convCtx, err := context.GetOrCreateConversation(ctx, uid, chatReq.Model, chatReq.ConversationID)
 	if err != nil {
 		log.Printf("Error getting conversation context: %v", err)
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to process conversation")
@@ -246,18 +86,46 @@ func handleChatRequest(c *fiber.Ctx, ollamaUrl, userID string, chunk func([]byte
 	}
 
 	// Add the user message to context
+	contextError := false
 	if err := convCtx.AddUserMessage(ctx, userMessage); err != nil {
 		log.Printf("Error adding user message: %v", err)
+		contextError = true
 	}
 
-	// Convert conversation context to Ollama format
-	ollamaReqBody, err := convCtx.ToJSON()
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to format request")
+	var ollamaReqBody []byte
+	var jsonErr error
+
+	// Only use context if there was no error adding the user message
+	if !contextError {
+		// Convert conversation context to Ollama format (includes summaries)
+		ollamaReqBody, jsonErr = convCtx.ToJSON()
+		if jsonErr != nil {
+			log.Printf("Error converting context to JSON: %v", jsonErr)
+			contextError = true
+		}
+	}
+
+	// Fall back to the original request if we had any context errors
+	if contextError {
+		log.Printf("Falling back to original request without context")
+		// Use the original request but ensure the model is set correctly and stream is true
+		fallbackReq := map[string]interface{}{
+			"model":    chatReq.Model,
+			"messages": chatReq.Messages,
+			"stream":   true, // Always force streaming
+		}
+		ollamaReqBody, jsonErr = json.Marshal(fallbackReq)
+		if jsonErr != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to format request")
+		}
 	}
 
 	// Build the target URL
-	targetUrl := fmt.Sprintf("%s/api/chat", strings.TrimSuffix(ollamaUrl, "/"))
+	targetUrl := config.GetConfig().Ollama.BaseURL + c.Path()
+
+	log.Printf("Proxying request to: %s", targetUrl)
+	// Log the request body for debugging
+	log.Printf("Request body: %s", string(ollamaReqBody))
 
 	// Create the request
 	req, err := http.NewRequestWithContext(ctx, "POST", targetUrl, bytes.NewReader(ollamaReqBody))
@@ -269,14 +137,19 @@ func handleChatRequest(c *fiber.Ctx, ollamaUrl, userID string, chunk func([]byte
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set("Connection", "keep-alive") // Add keep-alive for persistent connections
 
-	// Create HTTP client
+	// Create HTTP client with improved configuration for streaming
 	client := &http.Client{
 		Timeout: 0, // No timeout for streaming
 		Transport: &http.Transport{
-			IdleConnTimeout:     0,
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 100,
+			IdleConnTimeout:       0,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   100,
+			DisableKeepAlives:     false, // Enable keep-alives
+			ResponseHeaderTimeout: 0,     // No timeout for header response
+			ExpectContinueTimeout: 0,     // No timeout for continue expectation
+			TLSHandshakeTimeout:   0,     // No timeout for TLS handshake
 		},
 	}
 
@@ -307,9 +180,10 @@ func handleChatRequest(c *fiber.Ctx, ollamaUrl, userID string, chunk func([]byte
 	var assistantResponse strings.Builder
 
 	c.Response().SetBodyStreamWriter(func(w *bufio.Writer) {
-		defer resp.Body.Close()
+		defer resp.Body.Close() // Ensure connection is closed when done
 
 		buffer := make([]byte, 1024)
+		lastFlushTime := time.Now()
 
 		log.Printf("Starting to stream chat response")
 		for {
@@ -323,15 +197,21 @@ func handleChatRequest(c *fiber.Ctx, ollamaUrl, userID string, chunk func([]byte
 					assistantResponse.WriteString(content)
 				}
 
-				// Forward chunk to caller
-				go chunk(data)
-
 				// Write to response
 				if _, writeErr := w.Write(data); writeErr != nil {
 					log.Printf("Error writing to response: %v", writeErr)
 					break
 				}
-				if flushErr := w.Flush(); flushErr != nil {
+
+				// Flush frequently to avoid client timeouts
+				// Always flush at least every 10 seconds even if no data
+				if time.Since(lastFlushTime) > 10*time.Second {
+					if flushErr := w.Flush(); flushErr != nil {
+						log.Printf("Error flushing response: %v", flushErr)
+						break
+					}
+					lastFlushTime = time.Now()
+				} else if flushErr := w.Flush(); flushErr != nil {
 					log.Printf("Error flushing response: %v", flushErr)
 					break
 				}
@@ -345,18 +225,23 @@ func handleChatRequest(c *fiber.Ctx, ollamaUrl, userID string, chunk func([]byte
 			}
 		}
 
-		// Store the complete assistant response
-		fullResponse := assistantResponse.String()
-		if fullResponse != "" {
-			if err := convCtx.AddAssistantMessage(ctx, fullResponse); err != nil {
-				log.Printf("Error storing assistant response: %v", err)
+		// Only store the assistant response if there was no context error
+		if !contextError {
+			// Store the complete assistant response
+			fullResponse := assistantResponse.String()
+			if fullResponse != "" {
+				if err := convCtx.AddAssistantMessage(ctx, fullResponse); err != nil {
+					log.Printf("Error storing assistant response: %v", err)
+				}
 			}
-		}
 
-		// Add conversation ID to response metadata (last chunk)
-		metadataChunk := fmt.Sprintf("\ndata: {\"conversation_id\": %d}\n\n", convCtx.ConversationID)
-		w.WriteString(metadataChunk)
-		w.Flush()
+			// Add conversation ID to response metadata (last chunk)
+			metadataChunk := fmt.Sprintf("\ndata: {\"conversation_id\": %d}\n\n", convCtx.ConversationID)
+			if _, err := w.WriteString(metadataChunk); err != nil {
+				log.Printf("Error writing metadata chunk: %v", err)
+			}
+			w.Flush()
+		}
 
 		log.Printf("Chat streaming complete")
 	})
@@ -365,10 +250,10 @@ func handleChatRequest(c *fiber.Ctx, ollamaUrl, userID string, chunk func([]byte
 }
 
 // handleRegularProxyRequest handles regular proxy requests without context tracking
-func handleRegularProxyRequest(c *fiber.Ctx, ollamaUrl string, chunk func([]byte)) error {
+func handleRegularProxyRequest(c *fiber.Ctx) error {
 	// Build the full target URL
 	path := c.Path()
-	targetUrl := fmt.Sprintf("%s%s", strings.TrimSuffix(ollamaUrl, "/"), path)
+	targetUrl := strings.TrimSuffix(config.GetConfig().Ollama.BaseURL, "/") + c.Path()
 
 	log.Printf("Proxying request to: %s", targetUrl)
 
@@ -390,19 +275,60 @@ func handleRegularProxyRequest(c *fiber.Ctx, ollamaUrl string, chunk func([]byte
 		}
 	})
 
-	// Set specific headers for streaming if needed
-	if strings.Contains(path, "/generate") {
+	// Set specific headers for streaming endpoints and force streaming when applicable
+	isStreamingEndpoint := strings.Contains(path, "/generate") || strings.Contains(path, "/chat")
+	if isStreamingEndpoint {
 		req.Header.Set("Accept", "text/event-stream")
 		req.Header.Set("Cache-Control", "no-cache")
+		req.Header.Set("Connection", "keep-alive")
+
+		// If this is a POST request to a streaming endpoint, check and force stream=true
+		if c.Method() == "POST" {
+			var bodyData map[string]interface{}
+
+			// Try to decode the body
+			if err := json.Unmarshal(c.Body(), &bodyData); err == nil {
+				// Force streaming to be true
+				bodyData["stream"] = true
+
+				// Rebuild the request body with updated streaming setting
+				updatedBody, jsonErr := json.Marshal(bodyData)
+				if jsonErr == nil {
+					req, err = http.NewRequestWithContext(
+						c.Context(),
+						c.Method(),
+						targetUrl,
+						bytes.NewReader(updatedBody),
+					)
+					if err != nil {
+						return fiber.NewError(fiber.StatusInternalServerError, "Failed to recreate proxy request")
+					}
+
+					// Re-add headers
+					c.Request().Header.VisitAll(func(key, value []byte) {
+						k := string(key)
+						v := string(value)
+						if strings.ToLower(k) != "host" && strings.ToLower(k) != "connection" {
+							req.Header.Set(k, v)
+						}
+					})
+					req.Header.Set("Content-Type", "application/json")
+				}
+			}
+		}
 	}
 
-	// Create HTTP client
+	// Create HTTP client with improved configuration
 	client := &http.Client{
-		Timeout: 0,
+		Timeout: 0, // No timeout for streaming
 		Transport: &http.Transport{
-			IdleConnTimeout:     0,
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 100,
+			IdleConnTimeout:       0,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   100,
+			DisableKeepAlives:     false,
+			ResponseHeaderTimeout: 0,
+			ExpectContinueTimeout: 0,
+			TLSHandshakeTimeout:   0,
 		},
 	}
 
@@ -427,8 +353,8 @@ func handleRegularProxyRequest(c *fiber.Ctx, ollamaUrl string, chunk func([]byte
 		}
 	}
 
-	// Set streaming headers
-	if strings.Contains(path, "/generate") {
+	// Set streaming headers for streaming endpoints
+	if isStreamingEndpoint {
 		c.Set("Content-Type", "text/event-stream")
 		c.Set("Cache-Control", "no-cache")
 		c.Set("Connection", "keep-alive")
@@ -443,34 +369,49 @@ func handleRegularProxyRequest(c *fiber.Ctx, ollamaUrl string, chunk func([]byte
 		defer resp.Body.Close()
 
 		buffer := make([]byte, 1024)
+		lastFlushTime := time.Now()
 
-		log.Printf("Starting to stream response")
+		log.Printf("Starting to stream response for %s", path)
 		for {
 			n, err := resp.Body.Read(buffer)
 			if n > 0 {
 				data := buffer[:n]
-				go chunk(data)
 
+				// Write to response
 				if _, writeErr := w.Write(data); writeErr != nil {
 					log.Printf("Error writing to response: %v", writeErr)
 					break
 				}
-				if flushErr := w.Flush(); flushErr != nil {
-					log.Printf("Error flushing response: %v", flushErr)
-					break
+
+				// Flush frequently to avoid client timeouts
+				// Always flush at least every 5 seconds even if no data
+				if time.Since(lastFlushTime) > 5*time.Second {
+					if flushErr := w.Flush(); flushErr != nil {
+						log.Printf("Error flushing response: %v", flushErr)
+						break
+					}
+					lastFlushTime = time.Now()
+					log.Printf("Regular flush performed for %s", path)
+				} else if isStreamingEndpoint {
+					// For streaming endpoints, flush after every write
+					if flushErr := w.Flush(); flushErr != nil {
+						log.Printf("Error flushing response: %v", flushErr)
+						break
+					}
 				}
 			}
 
 			if err != nil {
 				if err != io.EOF {
 					log.Printf("Error reading from Ollama: %v", err)
-				} else {
-					log.Printf("Finished streaming response (EOF)")
 				}
 				break
 			}
 		}
-		log.Printf("Streaming complete")
+
+		// Final flush to ensure all data is sent
+		w.Flush()
+		log.Printf("Finished streaming response for %s", path)
 	})
 
 	return nil
@@ -485,7 +426,12 @@ func extractContent(data []byte) string {
 		if strings.HasPrefix(line, "data: ") {
 			jsonData := strings.TrimPrefix(line, "data: ")
 
-			// Try to parse the JSON
+			// Skip empty data
+			if len(jsonData) == 0 {
+				continue
+			}
+
+			// Try to parse the JSON data
 			var response struct {
 				Message struct {
 					Content string `json:"content"`
@@ -495,6 +441,9 @@ func extractContent(data []byte) string {
 
 			if err := json.Unmarshal([]byte(jsonData), &response); err == nil {
 				return response.Message.Content
+			} else {
+				// Log the error but continue processing
+				log.Printf("Error parsing JSON in extractContent: %v, data: %s", err, jsonData)
 			}
 		}
 	}

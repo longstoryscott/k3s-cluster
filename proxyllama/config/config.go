@@ -1,67 +1,192 @@
 package config
 
 import (
-	"io"
+	"fmt"
+	"log"
 	"os"
+	"strconv"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
 	Server struct {
-		Port int    `yaml:"port" required:"true"`
-		Host string `yaml:"host" required:"true"`
+		Host string `yaml:"host"`
+		Port int    `yaml:"port"`
 	} `yaml:"server"`
 
-	Auth struct {
-		Issuer   string `yaml:"issuer" required:"true"`
-		Audience string `yaml:"audience" required:"true"`
-		JWKSURI  string `yaml:"jwks_uri" required:"true"`
-	} `yaml:"auth"`
-
 	Ollama struct {
-		BaseURL string `yaml:"base_url" required:"true"`
+		BaseURL string `yaml:"base_url"`
 	} `yaml:"ollama"`
 
 	Database struct {
-		Host     string `yaml:"host" required:"true"`
-		Port     int    `yaml:"port" required:"true"`
-		User     string `yaml:"user" required:"true"`
-		Password string `yaml:"password" required:"true"`
-		DBName   string `yaml:"dbname" required:"true"`
-		SSLMode  string `yaml:"sslmode" required:"true"`
+		Host     string `yaml:"host"`
+		Port     int    `yaml:"port"`
+		User     string `yaml:"user"`
+		Password string `yaml:"password"`
+		DBName   string `yaml:"dbname"`
+		SSLMode  string `yaml:"sslmode"`
 	} `yaml:"database"`
+
+	Auth struct {
+		JWKSURI string `yaml:"jwks_uri"`
+	} `yaml:"auth"`
+
+	Summarization struct {
+		MessagesBeforeSummary        int    `yaml:"messages_before_summary"`
+		SummariesBeforeConsolidation int    `yaml:"summaries_before_consolidation"`
+		SummaryModel                 string `yaml:"summary_model"`
+		SystemPrompt                 string `yaml:"system_prompt"`
+	} `yaml:"summarization"`
 }
 
-var conf *Config
+var (
+	config        Config
+	configureOnce sync.Once = sync.Once{}
+)
 
-func loadConfig(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return err
-	}
-	return yaml.Unmarshal(data, &conf)
-}
+// GetConfig loads configuration from config.yaml with environment variable overrides
+func GetConfig() Config {
+	// Use sync.Once to ensure config is loaded only once
+	configureOnce.Do(func() {
+		// Set defaults first
+		setDefaults(&config)
 
-func GetConfig() *Config {
-	if conf == nil {
-		islocal := os.Getenv("LOCAL")
-		if islocal == "true" {
-			err := loadConfig(".config.local.yaml")
-			if err != nil {
-				panic(err)
-			}
-			return conf
+		// Try to read from config file
+		if err := loadFromFile(&config); err != nil {
+			log.Printf("Warning: couldn't load config file: %v, using defaults and environment variables", err)
 		}
-		err := loadConfig(".config.yaml")
+
+		// Override with environment variables
+		applyEnvironmentOverrides(&config)
+
+		fmt.Printf("Config loaded: %+v\n", config)
+	})
+
+	return config
+}
+
+// setDefaults initializes the config with default values
+func setDefaults(cfg *Config) {
+	// Server defaults
+	cfg.Server.Host = "0.0.0.0"
+	cfg.Server.Port = 8080
+
+	// Ollama defaults
+	cfg.Ollama.BaseURL = "http://localhost:11434"
+
+	// Database defaults
+	cfg.Database.Host = "localhost"
+	cfg.Database.Port = 5432
+	cfg.Database.User = "postgres"
+	cfg.Database.Password = "postgres"
+	cfg.Database.DBName = "proxyllama"
+	cfg.Database.SSLMode = "disable"
+
+	// Auth defaults
+	cfg.Auth.JWKSURI = "http://localhost:9091/dex/keys"
+
+	// Summarization defaults
+	cfg.Summarization.MessagesBeforeSummary = 10
+	cfg.Summarization.SummariesBeforeConsolidation = 5
+	cfg.Summarization.SummaryModel = "" // Default to same as conversation model
+	cfg.Summarization.SystemPrompt = "Summarize the conversation so far in a concise paragraph. Include key points and conclusions, but omit redundant details. The summary will be used as context for future interaction."
+}
+
+// loadFromFile loads configuration from config.yaml
+func loadFromFile(cfg *Config) error {
+	file, err := os.Open(".config.yaml")
+	if err != nil {
+		return fmt.Errorf("error opening config file: %w", err)
+	}
+
+	if os.Getenv("LOCAL") == "true" {
+		file.Close()
+		file, err = os.Open(".config.local.yaml")
 		if err != nil {
-			panic(err)
+			return fmt.Errorf("error opening local config file: %w", err)
 		}
 	}
-	return conf
+	defer file.Close()
+
+	if err != nil {
+		return fmt.Errorf("error opening config file: %w", err)
+	}
+	defer file.Close()
+
+	// Parse YAML
+	decoder := yaml.NewDecoder(file)
+	if err := decoder.Decode(cfg); err != nil {
+		return fmt.Errorf("error parsing config file: %w", err)
+	}
+
+	return nil
+}
+
+// applyEnvironmentOverrides overrides config with environment variables
+func applyEnvironmentOverrides(cfg *Config) {
+	// Server overrides
+	if host := os.Getenv("SERVER_HOST"); host != "" {
+		cfg.Server.Host = host
+	}
+	if portStr := os.Getenv("SERVER_PORT"); portStr != "" {
+		if port, err := strconv.Atoi(portStr); err == nil {
+			cfg.Server.Port = port
+		} else {
+			log.Printf("Warning: invalid SERVER_PORT environment variable: %s", portStr)
+		}
+	}
+
+	// Ollama overrides
+	if ollamaURL := os.Getenv("OLLAMA_URL"); ollamaURL != "" {
+		cfg.Ollama.BaseURL = ollamaURL
+	}
+
+	// Database overrides
+	if dbHost := os.Getenv("DATABASE_HOST"); dbHost != "" {
+		cfg.Database.Host = dbHost
+	}
+	if dbPortStr := os.Getenv("DATABASE_PORT"); dbPortStr != "" {
+		if dbPort, err := strconv.Atoi(dbPortStr); err == nil {
+			cfg.Database.Port = dbPort
+		} else {
+			log.Printf("Warning: invalid DATABASE_PORT environment variable: %s", dbPortStr)
+		}
+	}
+	if dbUser := os.Getenv("DATABASE_USER"); dbUser != "" {
+		cfg.Database.User = dbUser
+	}
+	if dbPassword := os.Getenv("DATABASE_PASSWORD"); dbPassword != "" {
+		cfg.Database.Password = dbPassword
+	}
+	if dbName := os.Getenv("DATABASE_DBNAME"); dbName != "" {
+		cfg.Database.DBName = dbName
+	}
+	if dbSSLMode := os.Getenv("DATABASE_SSLMODE"); dbSSLMode != "" {
+		cfg.Database.SSLMode = dbSSLMode
+	}
+
+	// Auth overrides
+	if jwksEndpoint := os.Getenv("AUTH_JWKS_URI"); jwksEndpoint != "" {
+		cfg.Auth.JWKSURI = jwksEndpoint
+	}
+
+	// Summarization overrides
+	if msgBeforeSummaryStr := os.Getenv("SUMMARIZATION_MESSAGES_BEFORE_SUMMARY"); msgBeforeSummaryStr != "" {
+		if val, err := strconv.Atoi(msgBeforeSummaryStr); err == nil {
+			cfg.Summarization.MessagesBeforeSummary = val
+		}
+	}
+	if sumBeforeConsolidationStr := os.Getenv("SUMMARIZATION_SUMMARIES_BEFORE_CONSOLIDATION"); sumBeforeConsolidationStr != "" {
+		if val, err := strconv.Atoi(sumBeforeConsolidationStr); err == nil {
+			cfg.Summarization.SummariesBeforeConsolidation = val
+		}
+	}
+	if summaryModel := os.Getenv("SUMMARIZATION_SUMMARY_MODEL"); summaryModel != "" {
+		cfg.Summarization.SummaryModel = summaryModel
+	}
+	if systemPrompt := os.Getenv("SUMMARIZATION_SYSTEM_PROMPT"); systemPrompt != "" {
+		cfg.Summarization.SystemPrompt = systemPrompt
+	}
 }

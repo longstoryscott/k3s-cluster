@@ -116,7 +116,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const payload = JSON.parse(atob(tokens.id_token.split('.')[1]));
     sessionStorage.setItem(config.auth.userStorageKey, JSON.stringify(payload));
-    setUser({...payload, accessToken: tokens.access_token, refreshToken: tokens.refresh_token});
+    setUser(u => ({...u, ...payload, accessToken: tokens.access_token, refreshToken: tokens.refresh_token}));
     setIsAuthenticated(true);
 
     const expiresIn = tokens.expires_in || 300;
@@ -138,14 +138,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         const expiresIn = tokens.expires_in || 300;
         scheduleRefresh(expiresIn, tokens.refresh_token);
+        setUser(u => ({...u, ...storedUser, accessToken: tokens.access_token, refreshToken: tokens.refresh_token}));
 
-        setUser({...storedUser, accessToken: tokens.access_token, refreshToken: tokens.refresh_token});
         setIsAuthenticated(true);
       } catch {
         clearSession();
       }
     }
   }, []);
+
+  console.log(user);
 
   return (
     <AuthContext.Provider value={{ user, isAuthenticated, login, logout }}>

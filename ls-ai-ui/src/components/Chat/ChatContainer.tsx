@@ -1,21 +1,19 @@
 import { useEffect, useRef } from 'react';
 import ChatHeader from './ChatHeader';
 import ChatInput from './ChatInput';
-import ChatBubble from './ChatBubble';
-import TypingIndicator from './TypingIndicator';
 import { Box } from '@mui/material';
 import { useChat } from '../../chat';
 
 const ChatContainer = ({children}: React.PropsWithChildren<unknown>) => {
-  const { response, isTyping, messages } = useChat();
+  const { response, isTyping } = useChat();
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Scroll to the bottom of the chat when messages change
+    // Scroll to the bottom of the chat when messages change or during typing
     if (containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, [response]);
+  }, [response, isTyping]);
 
   return (
     <Box 
@@ -29,11 +27,8 @@ const ChatContainer = ({children}: React.PropsWithChildren<unknown>) => {
     >
       <ChatHeader title="Chat" onMenuClick={() => console.log('Menu clicked')} />
       <Box sx={{ flex: 1, p: 2 }}>
+        {/* Children will contain the messages displayed by ChatPage */}
         {children}
-        {messages.map((msg, index) => (
-          <ChatBubble key={index} message={msg} />
-        ))}
-        {isTyping && <TypingIndicator />}
       </Box>
       <ChatInput />
     </Box>

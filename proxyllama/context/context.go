@@ -1,12 +1,17 @@
 package context
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"proxyllama/config"
 	"proxyllama/storage"
 	"strings"
+	"time"
 )
 
 // ConversationContext holds data needed to maintain context across requests
@@ -15,12 +20,21 @@ type ConversationContext struct {
 	UserID         string    `json:"user_id"`
 	Model          string    `json:"model"`
 	Messages       []Message `json:"messages"`
+	Summaries      []Summary `json:"summaries"` // Holds summaries of older messages
 }
 
 // Message represents a single exchange in the conversation
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+	ID      int    `json:"-"` // Internal use only, not sent to LLM
+}
+
+// Summary represents a consolidated summary of messages or other summaries
+type Summary struct {
+	Content string `json:"content"`
+	Level   int    `json:"-"` // Internal use only, not sent to LLM
+	ID      int    `json:"-"` // Internal use only, not sent to LLM
 }
 
 // GetOrCreateConversation retrieves or creates a conversation context
@@ -59,6 +73,22 @@ func GetOrCreateConversation(ctx context.Context, userID, model string, conversa
 			convContext.Messages = append(convContext.Messages, Message{
 				Role:    msg.Role,
 				Content: msg.Content,
+				ID:      msg.ID,
+			})
+		}
+
+		// Load summaries
+		summaries, err := storage.GetSummariesForConversation(ctx, *conversationID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load summaries: %w", err)
+		}
+
+		// Convert storage.Summary to context.Summary
+		for _, summary := range summaries {
+			convContext.Summaries = append(convContext.Summaries, Summary{
+				Content: summary.Content,
+				Level:   summary.Level,
+				ID:      summary.ID,
 			})
 		}
 
@@ -77,7 +107,7 @@ func GetOrCreateConversation(ctx context.Context, userID, model string, conversa
 // AddUserMessage adds a user message to the conversation
 func (cc *ConversationContext) AddUserMessage(ctx context.Context, content string) error {
 	// Add to database
-	_, err := storage.AddMessage(ctx, cc.ConversationID, "user", content)
+	msgID, err := storage.AddMessage(ctx, cc.ConversationID, "user", content)
 	if err != nil {
 		return err
 	}
@@ -86,6 +116,7 @@ func (cc *ConversationContext) AddUserMessage(ctx context.Context, content strin
 	cc.Messages = append(cc.Messages, Message{
 		Role:    "user",
 		Content: content,
+		ID:      msgID,
 	})
 
 	// Update title if this is the first message
@@ -102,7 +133,7 @@ func (cc *ConversationContext) AddUserMessage(ctx context.Context, content strin
 // AddAssistantMessage adds an assistant message to the conversation
 func (cc *ConversationContext) AddAssistantMessage(ctx context.Context, content string) error {
 	// Add to database
-	_, err := storage.AddMessage(ctx, cc.ConversationID, "assistant", content)
+	msgID, err := storage.AddMessage(ctx, cc.ConversationID, "assistant", content)
 	if err != nil {
 		return err
 	}
@@ -111,9 +142,256 @@ func (cc *ConversationContext) AddAssistantMessage(ctx context.Context, content 
 	cc.Messages = append(cc.Messages, Message{
 		Role:    "assistant",
 		Content: content,
+		ID:      msgID,
 	})
 
+	// Check if we need to summarize messages
+	if cc.shouldSummarize() {
+		if err := cc.summarizeMessages(ctx); err != nil {
+			log.Printf("Failed to summarize messages: %v", err)
+			// Continue even if summarization fails
+		}
+	}
+
 	return nil
+}
+
+// shouldSummarize checks if we have enough messages to create a summary
+func (cc *ConversationContext) shouldSummarize() bool {
+	// We need at least N messages (where N is configurable) to create a summary
+	return len(cc.Messages) >= config.GetConfig().Summarization.MessagesBeforeSummary
+}
+
+// summarizeMessages creates a summary of the oldest messages
+func (cc *ConversationContext) summarizeMessages(ctx context.Context) error {
+	// Calculate how many messages to summarize
+	// We always keep the most recent messages (the last N messages)
+	messagesToKeep := config.GetConfig().Summarization.MessagesBeforeSummary / 2
+	if messagesToKeep < 2 {
+		messagesToKeep = 2 // Always keep at least the last user and assistant message
+	}
+
+	messagesToSummarize := len(cc.Messages) - messagesToKeep
+	if messagesToSummarize <= 0 {
+		return nil // Not enough messages to summarize
+	}
+
+	// Extract the messages to summarize
+	var messagesToSummarizeContent []Message
+	var messageIDs []int
+
+	for i := 0; i < messagesToSummarize; i++ {
+		messagesToSummarizeContent = append(messagesToSummarizeContent, cc.Messages[i])
+		messageIDs = append(messageIDs, cc.Messages[i].ID)
+	}
+
+	// Generate the summary using Ollama
+	summaryContent, err := cc.generateSummary(ctx, messagesToSummarizeContent)
+	if err != nil {
+		return fmt.Errorf("failed to generate summary: %w", err)
+	}
+
+	// Create a new summary record in the database
+	summaryID, err := storage.CreateSummary(ctx, cc.ConversationID, summaryContent, 1, messageIDs)
+	if err != nil {
+		return fmt.Errorf("failed to store summary: %w", err)
+	}
+
+	// Add the summary to our context
+	summary := Summary{
+		Content: summaryContent,
+		Level:   1,
+		ID:      summaryID,
+	}
+	cc.Summaries = append(cc.Summaries, summary)
+
+	// Remove the summarized messages from our in-memory context
+	cc.Messages = cc.Messages[messagesToSummarize:]
+
+	// Check if we need to consolidate summaries
+	if cc.shouldConsolidateSummaries(ctx) {
+		if err := cc.consolidateSummaries(ctx); err != nil {
+			log.Printf("Failed to consolidate summaries: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// shouldConsolidateSummaries checks if we have enough summaries to consolidate them
+func (cc *ConversationContext) shouldConsolidateSummaries(ctx context.Context) bool {
+	// Count the number of summaries at each level
+	levelCounts := make(map[int]int)
+
+	for _, summary := range cc.Summaries {
+		levelCounts[summary.Level]++
+	}
+
+	// For each level, check if we have enough summaries to consolidate
+	for _, count := range levelCounts {
+		if count >= config.GetConfig().Summarization.SummariesBeforeConsolidation {
+			return true
+		}
+	}
+
+	return false
+}
+
+// consolidateSummaries creates a summary of summaries for each level
+func (cc *ConversationContext) consolidateSummaries(ctx context.Context) error {
+	// Get all summaries for this conversation
+	allSummaries, err := storage.GetSummariesForConversation(ctx, cc.ConversationID)
+	if err != nil {
+		return fmt.Errorf("failed to get conversation summaries: %w", err)
+	}
+
+	// Group summaries by level
+	summariesByLevel := make(map[int][]storage.Summary)
+	for _, summary := range allSummaries {
+		summariesByLevel[summary.Level] = append(summariesByLevel[summary.Level], summary)
+	}
+
+	// For each level that has enough summaries, consolidate them
+	for level, summaries := range summariesByLevel {
+		if len(summaries) < config.GetConfig().Summarization.SummariesBeforeConsolidation {
+			continue
+		}
+
+		// Prepare messages for summarization
+		var messagesToSummarize []Message
+		var summaryIDs []int
+
+		for _, summary := range summaries {
+			messagesToSummarize = append(messagesToSummarize, Message{
+				Role:    "system",
+				Content: summary.Content,
+				ID:      summary.ID,
+			})
+			summaryIDs = append(summaryIDs, summary.ID)
+		}
+
+		// Generate a new higher-level summary
+		summaryContent, err := cc.generateSummary(ctx, messagesToSummarize)
+		if err != nil {
+			return fmt.Errorf("failed to generate higher-level summary: %w", err)
+		}
+
+		// Store the new summary with an incremented level
+		nextLevel := level + 1
+		summaryID, err := storage.CreateSummary(ctx, cc.ConversationID, summaryContent, nextLevel, summaryIDs)
+		if err != nil {
+			return fmt.Errorf("failed to store higher-level summary: %w", err)
+		}
+
+		// Add the summary to our context
+		cc.Summaries = append(cc.Summaries, Summary{
+			Content: summaryContent,
+			Level:   nextLevel,
+			ID:      summaryID,
+		})
+
+		// Remove the consolidated summaries from our in-memory context
+		var updatedSummaries []Summary
+		for _, s := range cc.Summaries {
+			shouldKeep := true
+			for _, id := range summaryIDs {
+				if s.ID == id {
+					shouldKeep = false
+					break
+				}
+			}
+			if shouldKeep {
+				updatedSummaries = append(updatedSummaries, s)
+			}
+		}
+
+		cc.Summaries = updatedSummaries
+	}
+
+	return nil
+}
+
+// generateSummary uses Ollama to generate a summary of the provided messages
+func (cc *ConversationContext) generateSummary(ctx context.Context, messages []Message) (string, error) {
+	// Determine which model to use for summarization
+	summaryModel := cc.Model
+	conf := config.GetConfig()
+	if conf.Summarization.SummaryModel != "" {
+		summaryModel = conf.Summarization.SummaryModel
+	}
+
+	// Format the messages into a conversation for Ollama
+	var ollamaMessages []map[string]string
+
+	// Add system prompt
+	ollamaMessages = append(ollamaMessages, map[string]string{
+		"role":    "system",
+		"content": conf.Summarization.SystemPrompt,
+	})
+
+	// Add conversation messages
+	for _, message := range messages {
+		ollamaMessages = append(ollamaMessages, map[string]string{
+			"role":    message.Role,
+			"content": message.Content,
+		})
+	}
+
+	// Create request payload
+	requestBody := map[string]interface{}{
+		"model":    summaryModel,
+		"messages": ollamaMessages,
+		"stream":   false,
+	}
+
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return "", fmt.Errorf("error marshaling summary request: %w", err)
+	}
+
+	// Send request to Ollama
+	ollamaURL := fmt.Sprintf("%s/api/chat", strings.TrimSuffix(conf.Ollama.BaseURL, "/"))
+	req, err := http.NewRequestWithContext(ctx, "POST", ollamaURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("error creating summary request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	// Use a client with a timeout
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("error sending summary request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("error response from Ollama: %s, status: %d", string(body), resp.StatusCode)
+	}
+
+	// Parse the response
+	var ollamaResponse map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&ollamaResponse); err != nil {
+		return "", fmt.Errorf("error decoding summary response: %w", err)
+	}
+
+	// Extract the summary from the response
+	messageObj, ok := ollamaResponse["message"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("unexpected response structure: %v", ollamaResponse)
+	}
+
+	content, ok := messageObj["content"].(string)
+	if !ok {
+		return "", fmt.Errorf("missing content in response: %v", messageObj)
+	}
+
+	return content, nil
 }
 
 // ToJSON converts the conversation context to Ollama-compatible format
@@ -133,11 +411,86 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 		Model: cc.Model,
 	}
 
-	// Convert our messages to Ollama format
-	for _, msg := range cc.Messages {
+	conf := config.GetConfig()
+	messagesBeforeSummary := conf.Summarization.MessagesBeforeSummary
+	summariesBeforeConsolidation := conf.Summarization.SummariesBeforeConsolidation
+
+	// Only add system messages if we actually have summaries to include
+	hasSummaries := len(cc.Summaries) > 0
+
+	if hasSummaries {
+		// Start with adding a system message to introduce the conversation
 		req.Messages = append(req.Messages, OllamaMessage{
-			Role:    msg.Role,
-			Content: msg.Content,
+			Role:    "system",
+			Content: "This is a continued conversation. The historical context is provided in the following messages.",
+		})
+
+		// Add summaries based on level - start with highest level summaries
+		// as they provide broader context, then move to more detailed ones
+		highestLevel := 0
+		for _, summary := range cc.Summaries {
+			if summary.Level > highestLevel {
+				highestLevel = summary.Level
+			}
+		}
+
+		// Helper function to collect summaries of a specific level
+		getSummariesByLevel := func(level int) []Summary {
+			var result []Summary
+			for _, summary := range cc.Summaries {
+				if summary.Level == level {
+					result = append(result, summary)
+				}
+			}
+			return result
+		}
+
+		// Add summaries from highest level to lowest level 1
+		summaryCount := 0
+		for level := highestLevel; level >= 1; level-- {
+			levelSummaries := getSummariesByLevel(level)
+
+			// For higher levels, include all summaries as they're already consolidated
+			// For level 1, limit to the most recent ones based on configuration
+			maxToInclude := len(levelSummaries)
+			if level == 1 && maxToInclude > summariesBeforeConsolidation {
+				maxToInclude = summariesBeforeConsolidation
+			}
+
+			// Add newest summaries first (they're more relevant)
+			for i := len(levelSummaries) - 1; i >= len(levelSummaries)-maxToInclude && i >= 0; i-- {
+				req.Messages = append(req.Messages, OllamaMessage{
+					Role:    "system",
+					Content: fmt.Sprintf("Previous conversation summary (level %d): %s", level, levelSummaries[i].Content),
+				})
+				summaryCount++
+			}
+
+			// If we've added enough summaries, stop
+			if summaryCount >= summariesBeforeConsolidation && level > 1 {
+				break
+			}
+		}
+	}
+
+	// Calculate how many recent messages to include
+	// If there are fewer messages than the configured limit, include all
+	messagesToInclude := len(cc.Messages)
+	if messagesToInclude > messagesBeforeSummary {
+		messagesToInclude = messagesBeforeSummary
+	}
+
+	// Add the most recent messages
+	startIndex := len(cc.Messages) - messagesToInclude
+	if startIndex < 0 {
+		startIndex = 0
+	}
+
+	// Add regular messages (most recent based on configuration)
+	for i := startIndex; i < len(cc.Messages); i++ {
+		req.Messages = append(req.Messages, OllamaMessage{
+			Role:    cc.Messages[i].Role,
+			Content: cc.Messages[i].Content,
 		})
 	}
 

@@ -6,14 +6,21 @@ auth:
   issuer: https://auth.longstorymedia.com
   audience: myclient
   jwks_uri: https://auth.longstorymedia.com/keys
+  jwks_endpoint: http://localhost:9091/dex/keys
 
 ollama:
-  base_url: http://ollama-service.ollama.svc.cluster.local:11434
+  base_url: http://localhost:11434
 
 database:
-  host: postgres.psql.svc.cluster.local
+  host: localhost
   port: 5432
-  user: ollama_user
-  password: supersecretpassword
-  dbname: ollama_history
+  user: postgres
+  password: postgres
+  dbname: proxyllama
   sslmode: disable
+
+summarization:
+  messages_before_summary: 10 # Number of messages before creating a summary
+  summaries_before_consolidation: 5 # Number of summaries before consolidation
+  summary_model: "fast3b:latest" # Model to use for summaries, leave empty to use same as conversation
+  system_prompt: "Summarize the conversation so far in a concise paragraph. Include key points and conclusions, but omit redundant details. The summary will be used as context for future interaction."

@@ -30,6 +30,7 @@ export type ChatMessage = {
   content: string;
   images?: string[];
   tool_calls?: unknown[];
+  model?: string;
 };
 
 export type ChatRequest = {
@@ -56,3 +57,20 @@ export type ChatResponse = {
   eval_count?: number;
   eval_duration?: number;
 };
+
+export type ModelDetails = {
+  parentModel: string;
+  format: string;
+  family: string;
+  families: string[];
+  parameterSize: number;
+  quantizationLevel: string;
+}
+
+export type Model = {
+  name: string;
+  modifiedAt: Date;
+  size: number;
+  digest: string;
+  details: ModelDetails;
+}

@@ -133,7 +133,7 @@ service:
     - port: 11434
       targetPort: 11434
       protocol: TCP
-      name: ollama-phi3-5
+      name: ollama
     - port: 9091
       targetPort: 9091
       protocol: TCP

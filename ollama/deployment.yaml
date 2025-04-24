@@ -19,19 +19,43 @@ spec:
         app.kubernetes.io/instance: ollama
         app.kubernetes.io/component: app
     spec:
+      volumes:
+        - name: ollama-models-volume
+          persistentVolumeClaim:
+            claimName: ollama-models
+        - name: init-script
+          configMap:
+            name: ollama-init-script
+            defaultMode: 0755
+      initContainers:
+        - name: create-modelfiles-dir
+          image: busybox:latest
+          command: ["sh", "-c", "mkdir -p /ollama/modelfiles"]
+          volumeMounts:
+            - name: ollama-models-volume
+              mountPath: /ollama
       containers:
         - name: ollama
           image: ollama/ollama:latest
+          command: ["/bin/sh", "/scripts/init.sh"]
           ports:
             - name: http
               containerPort: 11434
               protocol: TCP
           resources:
             requests:
-              memory: "128Mi"
-              cpu: "250m"
+              memory: "4Gi"
+              cpu: "1000m"
             limits:
-              memory: "256Mi"
-              cpu: "500m"
+              memory: "8Gi"
+              cpu: "4000m"
+          volumeMounts:
+            - name: ollama-models-volume
+              mountPath: /root/.ollama
+            - name: init-script
+              mountPath: /scripts
+          env:
+            - name: OLLAMA_HOST
+              value: "0.0.0.0"
   strategy:
     type: Recreate

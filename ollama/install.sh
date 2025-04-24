@@ -4,35 +4,44 @@ set -e
 
 source "${1}/../helpers.sh"
 
+kubectl delete namespace ollama --ignore-not-found=true
+
 # Create the namespace if it doesn't exist
 kubectl create namespace ollama || true
 
-kubectl apply \
-  --server-side=true \
-  -f https://raw.githubusercontent.com/nekomeowww/ollama-operator/v0.10.1/dist/install.yaml
+echo "Applying PVC..."
+kubectl apply -f "${1}/pvc.yaml" -n ollama --wait=true
 
-kubectl wait \
-  -n ollama-operator-system \
-  --for=jsonpath='{.status.readyReplicas}'=1 deployment/ollama-operator-controller-manager
+echo "Applying init script ConfigMap..."
+kubectl apply -f "${1}/init-script.yaml" -n ollama --wait=true
 
-# kubectl apply -f "${1}/pvc.yaml" -n ollama --wait=true
-kubectl apply -f "${1}/models" -n ollama --wait=true
+echo "Applying Ollama deployment..."
+kubectl apply -f "${1}/deployment.yaml" -n ollama --wait=true
 
-# Wait for the model pod to be ready
-# echo "Waiting for models to be ready..."
-# kubectl wait --for=condition=ready pod -l app=ollama-model-llama3-8b -n ollama --timeout=300s
-# kubectl wait --for=condition=ready pod -l app=ollama-model-phi3.5 -n ollama --timeout=300s
+echo "Applying Ollama service..."
+kubectl apply -f "${1}/service.yaml" -n ollama --wait=true
 
-# # Get the pod name
-# LLAMA38B=$(kubectl get pods -n ollama -l app=ollama-model-llama3-8b -o jsonpath="{.items[0].metadata.name}")
-# # PHI35=$(kubectl get pods -n ollama -l app=ollama-model-phi3.5 -o jsonpath="{.items[0].metadata.name}")
+# Wait for the Ollama pod to be running
+echo "Waiting for Ollama pod to be running..."
+sleep 5
+OLLAMA_POD=$(kubectl get pods -n ollama -l name=ollama -o jsonpath="{.items[0].metadata.name}")
+kubectl wait --for=condition=ready pod/$OLLAMA_POD -n ollama --timeout=120s
 
-# kubectl apply -f "${1}/configmap.yaml" -n ollama --wait=true
+echo "Copying model files to the PVC..."
+# Create the modelfiles directory in the pod if it doesn't exist
+kubectl exec -n ollama $OLLAMA_POD -- mkdir -p /root/.ollama/modelfiles
 
-# # Copy the modelfile into the pod
-# kubectl cp -n ollama llama3-8b-modelfile/Modelfile $LLAMA38B:/tmp/Modelfile
+# Copy each modelfile to the pod
+for file in "${1}"/models/*.modelfile; do
+  if [ -f "$file" ]; then
+    MODEL_NAME=$(basename $file)
+    echo "Copying $MODEL_NAME to the pod..."
+    kubectl cp -n ollama "$file" $OLLAMA_POD:/root/.ollama/modelfiles/$MODEL_NAME
+  fi
+done
 
-# # Apply the modelfile
-# kubectl exec -n ollama $LLAMA38B -- ollama create llama3-8b -f /tmp/Modelfile
+echo "Restarting Ollama pod to load new models..."
+kubectl delete pod $OLLAMA_POD -n ollama
 
-# echo "Quantized model llama3-8b created successfully!"
+echo "Ollama deployment complete! Service is available at ollama.ollama.svc.cluster.local:11434"
+echo "Wait a few minutes for the models to be loaded and configured."

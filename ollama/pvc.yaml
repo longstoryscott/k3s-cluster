@@ -17,9 +17,13 @@ metadata:
   namespace: ollama
 spec:
   storageClassName: ""
-  volumeName: ollama-models
   capacity:
     storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: /data/ollama-models
+    type: DirectoryOrCreate
   claimRef:
     namespace: ollama
     name: ollama-models

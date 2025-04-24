@@ -8,7 +8,7 @@ spec:
     - name: nextcloud
       port: 3000
       protocol: HTTP
-    - name: ollama-phi3-5
+    - name: ollama
       port: 11434
       protocol: HTTP
     - name: dex
@@ -67,40 +67,20 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: ollama-phi3-5-route
+  name: ollama-route
 spec:
   parentRefs:
     - name: lsm-gateway
-      sectionName: ollama-phi3-5
+      sectionName: ollama
   rules:
     - matches:
         - path:
             type: PathPrefix
-            value: /phi3-5
+            value: /
       backendRefs:
-        - name: phi3-5
+        - name: ollama
           namespace: ollama
           port: 11434
-      filters:
-        - type: URLRewrite
-          urlRewrite:
-            path:
-              type: ReplacePrefixMatch
-              replacePrefixMatch: "/"
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /llama3-8b
-      backendRefs:
-        - name: llama3-8b
-          namespace: ollama
-          port: 11434
-      filters:
-        - type: URLRewrite
-          urlRewrite:
-            path:
-              type: ReplacePrefixMatch
-              replacePrefixMatch: "/"
 --- # dex
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
