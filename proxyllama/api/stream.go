@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -42,17 +43,16 @@ type ChunkData struct {
 
 // Stream handles streaming responses from Ollama and collects the full assistant response
 // It properly streams to the client while also returning the accumulated content
-func Stream(c *fiber.Ctx, reqBody []byte, url, method string) (string, error) {
+func Stream(ctx context.Context, reqBody []byte, url, method string) (func(w *bufio.Writer) (string, error), int, error) {
 	log.Printf("Proxying request to: %s", url)
 
 	// Create a response content builder
 	var responseContent strings.Builder
-	var debugChunkCount int
 
 	// Create the request
-	req, err := http.NewRequestWithContext(c.Context(), method, url, bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(reqBody))
 	if err != nil {
-		return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to create proxy request")
+		return nil, fiber.StatusInternalServerError, err
 	}
 
 	// Set headers
@@ -69,88 +69,156 @@ func Stream(c *fiber.Ctx, reqBody []byte, url, method string) (string, error) {
 	// Make the request to Ollama
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fiber.NewError(fiber.StatusBadGateway, "Failed to contact Ollama: "+err.Error())
+		return nil, fiber.StatusBadGateway, err
 	}
-	defer resp.Body.Close()
 
 	// Handle error responses from Ollama
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
 		log.Printf("Ollama error response: %s", string(body))
-		return "", fiber.NewError(resp.StatusCode, "Ollama error: "+string(body))
+		return nil, resp.StatusCode, err
 	}
-
-	// Set response headers for streaming
-	c.Set("Content-Type", "application/json")
-	c.Set("Cache-Control", "no-cache")
-	c.Set("Connection", "keep-alive")
-	c.Set("Transfer-Encoding", "chunked")
-	c.Status(resp.StatusCode)
 	// Use a buffered channel to wait for streaming to complete
 	done := make(chan bool)
 
-	c.Response().SetBodyStreamWriter(func(w *bufio.Writer) {
-		defer close(done)       // Signal that streaming is complete
-		defer resp.Body.Close() // Ensure connection is closed when done
-		buffer := make([]byte, 1024)
-		lastFlushTime := time.Now()
-		log.Printf("Starting to stream chat response")
+	return func(w *bufio.Writer) (string, error) {
+		// Start a goroutine to handle the response streaming
+		return responseHandler(w, done, resp, &responseContent)
+	}, resp.StatusCode, nil
+	// return func(w *bufio.Writer) (string, error) {
+	// 	defer close(done)       // Signal that streaming is complete
+	// 	defer resp.Body.Close() // Ensure connection is closed when done
+	// 	buffer := make([]byte, 1024)
+	// 	lastFlushTime := time.Now()
+	// 	log.Printf("Starting to stream chat response")
 
-		// Read the stream chunk by chunk
-		for {
-			// Read a chunk from the response - each JSON object is on a separate line
-			n, err := resp.Body.Read(buffer)
-			if n > 0 {
-				data := buffer[:n]
+	// 	// Read the stream chunk by chunk
+	// 	for {
+	// 		// Read a chunk from the response - each JSON object is on a separate line
+	// 		n, err := resp.Body.Read(buffer)
+	// 		if err != nil {
+	// 			if err != io.EOF {
+	// 				log.Printf("Error reading from Ollama: %v", err)
+	// 			}
+	// 			break
+	// 		}
+	// 		if n > 0 {
+	// 			data := buffer[:n]
 
-				log.Printf("DEBUG: Read chunk %v", string(data))
-				// Check if the chunk is empty
-				if err != nil {
-					if err != io.EOF {
-						log.Printf("Error reading from Ollama: %v", err)
-					}
-					break
-				}
-				// Extract content from the JSON chunk
-				// content := extractContent(data)
-				// if content != "" {
-				// 	responseContent.WriteString(content)
-				// 	debugChunkCount++
-				// }
+	// 			log.Printf("DEBUG: Read chunk %v", string(data))
+	// 			// Check if the chunk is empty
+	// 			// Extract content from the JSON chunk
+	// 			content := extractContent(data)
+	// 			if content != "" {
+	// 				responseContent.WriteString(content)
+	// 				debugChunkCount++
+	// 			}
 
-				// Write to response
-				if _, writeErr := w.Write(data); writeErr != nil {
-					log.Printf("Error writing to response: %v", writeErr)
-					break
-				}
+	// 			// Write to response
+	// 			if _, writeErr := w.Write(data); writeErr != nil {
+	// 				log.Printf("Error writing to response: %v", writeErr)
+	// 				break
+	// 			}
 
-				// Flush frequently to avoid client timeouts
-				// Always flush at least every 10 seconds even if no data
-				if time.Since(lastFlushTime) > 10*time.Second {
-					if flushErr := w.Flush(); flushErr != nil {
-						log.Printf("Error flushing response: %v", flushErr)
-						break
-					}
-					lastFlushTime = time.Now()
-				} else if flushErr := w.Flush(); flushErr != nil {
+	// 			// Flush frequently to avoid client timeouts
+	// 			// Always flush at least every 10 seconds even if no data
+	// 			if time.Since(lastFlushTime) > 10*time.Second {
+	// 				if flushErr := w.Flush(); flushErr != nil {
+	// 					log.Printf("Error flushing response: %v", flushErr)
+	// 					break
+	// 				}
+	// 				lastFlushTime = time.Now()
+	// 			} else if flushErr := w.Flush(); flushErr != nil {
+	// 				log.Printf("Error flushing response: %v", flushErr)
+	// 				break
+	// 			}
+
+	// 			// Check if this is the last chunk (done=true)
+	// 			if isDone(data) {
+	// 				break
+	// 			}
+	// 		}
+	// 	}
+
+	// 	log.Printf("DEBUG: Final accumulated content size: %d bytes, chunk count: %d",
+	// 		responseContent.Len(), debugChunkCount)
+
+	// 	// Add conversation ID to response metadata (last chunk)
+	// 	// metadataChunk := fmt.Sprintf("\ndata: {\"conversation_id\": %d}\n\n", convCtx.ConversationID)
+	// 	// if _, err := w.WriteString(metadataChunk); err != nil {
+	// 	// 	log.Printf("Error writing metadata chunk: %v", err)
+	// 	// }
+
+	// 	// Wait for streaming to complete before returning
+	// 	<-done
+
+	// 	w.Flush()
+	// 	return responseContent.String(), nil
+	// }, nil
+}
+
+func responseHandler(w *bufio.Writer, ch chan bool, resp *http.Response, responseContent *strings.Builder) (string, error) {
+	defer close(ch)         // Signal that streaming is complete
+	defer resp.Body.Close() // Ensure connection is closed when done
+	buffer := make([]byte, 1024)
+	lastFlushTime := time.Now()
+	log.Printf("Starting to stream chat response")
+
+	// Read the stream chunk by chunk
+	for {
+		// Read a chunk from the response - each JSON object is on a separate line
+		n, err := resp.Body.Read(buffer)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("Error reading from Ollama: %v", err)
+			}
+			break
+		}
+		if n > 0 {
+			data := buffer[:n]
+			// Extract content from the JSON chunk
+			content := extractContent(data)
+			if content != "" {
+				responseContent.WriteString(content)
+			}
+
+			// Write to response
+			if _, writeErr := w.Write(data); writeErr != nil {
+				log.Printf("Error writing to response: %v", writeErr)
+				break
+			}
+
+			// Flush frequently to avoid client timeouts
+			// Always flush at least every 10 seconds even if no data
+			if time.Since(lastFlushTime) > 10*time.Second {
+				if flushErr := w.Flush(); flushErr != nil {
 					log.Printf("Error flushing response: %v", flushErr)
 					break
 				}
+				lastFlushTime = time.Now()
+			} else if flushErr := w.Flush(); flushErr != nil {
+				log.Printf("Error flushing response: %v", flushErr)
+				break
+			}
 
-				// Check if this is the last chunk (done=true)
-				if isDone(data) {
-					break
-				}
+			// Check if this is the last chunk (done=true)
+			if isDone(data) {
+				break
 			}
 		}
+	}
 
-		log.Printf("DEBUG: Final accumulated content size: %d bytes, chunk count: %d",
-			responseContent.Len(), debugChunkCount)
-	})
+	// Add conversation ID to response metadata (last chunk)
+	// metadataChunk := fmt.Sprintf("\ndata: {\"conversation_id\": %d}\n\n", convCtx.ConversationID)
+	// if _, err := w.WriteString(metadataChunk); err != nil {
+	// 	log.Printf("Error writing metadata chunk: %v", err)
+	// }
 
 	// Wait for streaming to complete before returning
-	<-done
+	<-ch
+	log.Printf("DEBUG: Final accumulated content size: %d bytes", responseContent.Len())
 
+	w.Flush()
 	return responseContent.String(), nil
 }
 

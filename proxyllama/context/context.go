@@ -1,20 +1,24 @@
 package context
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
+	"proxyllama/api"
 	"proxyllama/config"
 	"proxyllama/storage"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 )
+
+type OllamaRequest interface {
+	ToJSON() ([]byte, error)
+}
 
 // ConversationContext holds data needed to maintain context across requests
 type ConversationContext struct {
@@ -38,6 +42,23 @@ type Summary struct {
 	Content string `json:"content"`
 	Level   int    `json:"-"` // Internal use only, not sent to LLM
 	ID      int    `json:"-"` // Internal use only, not sent to LLM
+}
+type SummaryRequest struct {
+	Model    string    `json:"model"`
+	Messages []Message `json:"messages"`
+	Stream   bool      `json:"stream"`
+}
+
+// Ollama expects specific format for chat endpoints
+type OllamaMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type OllamaReq struct {
+	Model    string          `json:"model"`
+	Messages []OllamaMessage `json:"messages"`
+	Stream   bool            `json:"stream"`
 }
 
 // GetOrCreateConversation retrieves or creates a conversation context
@@ -177,10 +198,7 @@ func (cc *ConversationContext) shouldSummarize() bool {
 func (cc *ConversationContext) summarizeMessages(ctx context.Context) error {
 	// Calculate how many messages to summarize
 	// We always keep the most recent messages (the last N messages)
-	messagesToKeep := config.GetConfig().Summarization.MessagesBeforeSummary / 2
-	if messagesToKeep < 2 {
-		messagesToKeep = 2 // Always keep at least the last user and assistant message
-	}
+	messagesToKeep := max(config.GetConfig().Summarization.MessagesBeforeSummary/2, 2)
 
 	messagesToSummarize := len(cc.Messages) - messagesToKeep
 	if messagesToSummarize <= 0 {
@@ -191,12 +209,12 @@ func (cc *ConversationContext) summarizeMessages(ctx context.Context) error {
 	var messagesToSummarizeContent []Message
 	var messageIDs []int
 
-	for i := 0; i < messagesToSummarize; i++ {
+	for i := range messagesToSummarize {
 		messagesToSummarizeContent = append(messagesToSummarizeContent, cc.Messages[i])
 		messageIDs = append(messageIDs, cc.Messages[i].ID)
 	}
 
-	// Generate the summary using Ollama
+	// Use the long-lived context for summary generation
 	summaryContent, err := cc.generateSummary(ctx, messagesToSummarizeContent)
 	if err != nil {
 		return fmt.Errorf("failed to generate summary: %w", err)
@@ -220,7 +238,7 @@ func (cc *ConversationContext) summarizeMessages(ctx context.Context) error {
 	cc.Messages = cc.Messages[messagesToSummarize:]
 
 	// Check if we need to consolidate summaries
-	if cc.shouldConsolidateSummaries(ctx) {
+	if cc.shouldConsolidateSummaries() {
 		if err := cc.consolidateSummaries(ctx); err != nil {
 			log.Printf("Failed to consolidate summaries: %v", err)
 		}
@@ -230,7 +248,7 @@ func (cc *ConversationContext) summarizeMessages(ctx context.Context) error {
 }
 
 // shouldConsolidateSummaries checks if we have enough summaries to consolidate them
-func (cc *ConversationContext) shouldConsolidateSummaries(ctx context.Context) bool {
+func (cc *ConversationContext) shouldConsolidateSummaries() bool {
 	// Count the number of summaries at each level
 	levelCounts := make(map[int]int)
 
@@ -280,7 +298,6 @@ func (cc *ConversationContext) consolidateSummaries(ctx context.Context) error {
 			})
 			summaryIDs = append(summaryIDs, summary.ID)
 		}
-
 		// Generate a new higher-level summary
 		summaryContent, err := cc.generateSummary(ctx, messagesToSummarize)
 		if err != nil {
@@ -324,102 +341,62 @@ func (cc *ConversationContext) consolidateSummaries(ctx context.Context) error {
 
 // generateSummary uses Ollama to generate a summary of the provided messages
 func (cc *ConversationContext) generateSummary(ctx context.Context, messages []Message) (string, error) {
-	// Determine which model to use for summarization
 	summaryModel := cc.Model
 	conf := config.GetConfig()
 	if conf.Summarization.SummaryModel != "" {
 		summaryModel = conf.Summarization.SummaryModel
 	}
 
-	// Format the messages into a conversation for Ollama
-	var ollamaMessages []map[string]string
-
-	// Add system prompt
-	ollamaMessages = append(ollamaMessages, map[string]string{
-		"role":    "system",
-		"content": conf.Summarization.SystemPrompt,
+	var ollamaMessages []OllamaMessage
+	ollamaMessages = append(ollamaMessages, OllamaMessage{
+		Role:    "system",
+		Content: conf.Summarization.SystemPrompt,
 	})
 
-	// Add conversation messages
 	for _, message := range messages {
-		ollamaMessages = append(ollamaMessages, map[string]string{
-			"role":    message.Role,
-			"content": message.Content,
+		ollamaMessages = append(ollamaMessages, OllamaMessage{
+			Role:    message.Role,
+			Content: message.Content,
 		})
 	}
 
-	// Create request payload
-	requestBody := map[string]interface{}{
-		"model":    summaryModel,
-		"messages": ollamaMessages,
-		"stream":   false,
+	requestBody := OllamaReq{
+		Model:    summaryModel,
+		Messages: ollamaMessages,
+		Stream:   true,
 	}
 
-	jsonData, err := json.Marshal(requestBody)
+	reqBody, err := json.Marshal(requestBody)
 	if err != nil {
 		return "", fmt.Errorf("error marshaling summary request: %w", err)
 	}
 
-	// Send request to Ollama
-	ollamaURL := fmt.Sprintf("%s/api/chat", strings.TrimSuffix(conf.Ollama.BaseURL, "/"))
-	req, err := http.NewRequestWithContext(ctx, "POST", ollamaURL, bytes.NewBuffer(jsonData))
+	handler, _, err := api.Stream(ctx, reqBody, conf.Ollama.BaseURL+"/api/chat", http.MethodPost)
 	if err != nil {
-		return "", fmt.Errorf("error creating summary request: %w", err)
+		return "", fmt.Errorf("error streaming summary request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	w := &bytes.Buffer{}
+	wr := bufio.NewWriter(w)
 
-	// Use a client with a timeout
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	resp, err := client.Do(req)
+	res, err := handler(wr)
 	if err != nil {
-		return "", fmt.Errorf("error sending summary request: %w", err)
+		return "", fmt.Errorf("error handling summary response: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("error response from Ollama: %s, status: %d", string(body), resp.StatusCode)
+	if err := wr.Flush(); err != nil {
+		return "", fmt.Errorf("error flushing summary response: %w", err)
 	}
-
-	// Parse the response
-	var ollamaResponse map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&ollamaResponse); err != nil {
-		return "", fmt.Errorf("error decoding summary response: %w", err)
+	// Check if the response is empty
+	if res == "" {
+		return "", fmt.Errorf("empty summary response")
 	}
 
-	// Extract the summary from the response
-	messageObj, ok := ollamaResponse["message"].(map[string]interface{})
-	if !ok {
-		return "", fmt.Errorf("unexpected response structure: %v", ollamaResponse)
-	}
-
-	content, ok := messageObj["content"].(string)
-	if !ok {
-		return "", fmt.Errorf("missing content in response: %v", messageObj)
-	}
-
-	return content, nil
+	return res, nil
 }
 
 // ToJSON converts the conversation context to Ollama-compatible format
 func (cc *ConversationContext) ToJSON() ([]byte, error) {
-	// Ollama expects specific format for chat endpoints
-	type OllamaMessage struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
-
-	type OllamaRequest struct {
-		Model    string          `json:"model"`
-		Messages []OllamaMessage `json:"messages"`
-		Stream   bool            `json:"stream"`
-	}
-
-	req := OllamaRequest{
+	req := OllamaReq{
 		Model:  cc.Model,
 		Stream: true,
 	}
@@ -502,6 +479,11 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 	}
 
 	return json.Marshal(req)
+}
+
+// ToJSON converts the conversation context to Ollama-compatible format
+func (olr *OllamaReq) ToJSON() ([]byte, error) {
+	return json.Marshal(olr)
 }
 
 // Simple function to generate a title from the first message content

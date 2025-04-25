@@ -66,7 +66,7 @@ func main() {
 	api.RegisterConversationRoutes(app)
 
 	// Setup reverse proxy handler with chunk processing
-	app.All("/*", proxy.ReverseProxyHandler())
+	app.All("/*", proxy.ReverseProxyHandler)
 
 	// Use port from configuration instead of hardcoding it
 	serverAddress := fmt.Sprintf("%s:%d", conf.Server.Host, conf.Server.Port)
