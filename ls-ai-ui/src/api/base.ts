@@ -27,8 +27,15 @@ export async function* gen(opts: RequestOptions): AsyncGenerator<ChatResponse> {
     try {
       const res = JSON.parse(result) as ChatResponse;
       yield res;
-    } catch (e) {
-      console.error(e);
+    } catch (e: unknown) {
+      if (e instanceof Error) {
+        if (e instanceof SyntaxError && result.trim() === '') {
+          break;
+        }
+        console.error("Error parsing JSON:", e);
+      } else {
+        console.error("Unknown error parsing JSON:", e);
+      }
     }
   }
 }

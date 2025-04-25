@@ -179,6 +179,7 @@ func (cc *ConversationContext) AddAssistantMessage(ctx context.Context, content 
 
 	// Check if we need to summarize messages
 	if cc.shouldSummarize() {
+		log.Printf("Summarizing messages for conversation %d", cc.ConversationID)
 		if err := cc.summarizeMessages(ctx); err != nil {
 			log.Printf("Failed to summarize messages: %v", err)
 			// Continue even if summarization fails
@@ -214,6 +215,9 @@ func (cc *ConversationContext) summarizeMessages(ctx context.Context) error {
 		messageIDs = append(messageIDs, cc.Messages[i].ID)
 	}
 
+	// Log the message IDs being summarized
+	log.Printf("Summarizing messages with IDs: %v", messageIDs)
+
 	// Use the long-lived context for summary generation
 	summaryContent, err := cc.generateSummary(ctx, messagesToSummarizeContent)
 	if err != nil {
@@ -225,6 +229,8 @@ func (cc *ConversationContext) summarizeMessages(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to store summary: %w", err)
 	}
+
+	log.Printf("Created summary ID %d for messages %v", summaryID, messageIDs)
 
 	// Add the summary to our context
 	summary := Summary{

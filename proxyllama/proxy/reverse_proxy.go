@@ -133,53 +133,29 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 			c.Status(fiber.StatusInternalServerError).SendString("Error during handler execution")
 			return
 		}
-		log.Printf("Streaming response: %s", res)
 
-		// Flush the response to the client
-		if err := w.Flush(); err != nil {
-			log.Printf("Error flushing response: %v", err)
-			c.Status(fiber.StatusInternalServerError).SendString("Error flushing response")
-			return
+		// Only store the assistant response if there was no context errorå
+		if !contextError {
+			if res != "" {
+				log.Printf("Storing assistant response (length: %d)", len(res))
+				go func(res string) {
+					dbCtx := context.Background()
+					ctx, cancel := context.WithTimeout(dbCtx, time.Minute*10)
+					defer cancel()
+
+					if err := convCtx.AddAssistantMessage(ctx, res); err != nil {
+						log.Printf("Error storing assistant response: %v", err)
+					} else {
+						log.Printf("Successfully stored assistant message in conversation %d", convCtx.ConversationID)
+					}
+				}(res)
+			} else {
+				log.Printf("Empty assistant response, not storing")
+			}
 		}
-		log.Printf("Flushed response to client")
+
+		log.Printf("Chat streaming complete")
 	})
 
-	// Only store the assistant response if there was no context errorå
-	if !contextError {
-		if res != "" {
-			log.Printf("Storing assistant response (length: %d)", len(res))
-
-			dbCtx := context.Background()
-			ctx, cancel := context.WithTimeout(dbCtx, time.Minute*10)
-			defer cancel()
-
-			if err := convCtx.AddAssistantMessage(ctx, res); err != nil {
-				log.Printf("Error storing assistant response: %v", err)
-			} else {
-				log.Printf("Successfully stored assistant message in conversation %d", convCtx.ConversationID)
-			}
-		} else {
-			log.Printf("Empty assistant response, not storing")
-		}
-	}
-
-	log.Printf("Chat streaming complete")
-
 	return nil
-}
-
-// createStreamingHTTPClient returns a configured HTTP client optimized for streaming responses
-func createStreamingHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: 0, // No timeout for streaming
-		Transport: &http.Transport{
-			IdleConnTimeout:       0,
-			MaxIdleConns:          100,
-			MaxIdleConnsPerHost:   100,
-			DisableKeepAlives:     false,
-			ResponseHeaderTimeout: 0,
-			ExpectContinueTimeout: 0,
-			TLSHandshakeTimeout:   0,
-		},
-	}
 }
