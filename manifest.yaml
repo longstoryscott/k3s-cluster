@@ -248,7 +248,6 @@ spec:
               value: lsnet.longstorymedia.com
             - name: NEXTCLOUD_DATA_DIR
               value: "/var/www/html/data"
-
             - name: NEXTCLOUD_TRUSTED_DOMAINS
               value:
                 lsnet.longstorymedia.com lsnet.tplinkdns.com lsnode-0.local 192.168.0.71

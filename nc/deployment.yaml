@@ -1,0 +1,202 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nextcloud
+  namespace: nextcloud
+  labels:
+    app: nextcloud
+spec:
+  revisionHistoryLimit: 1
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: nextcloud
+  template:
+    metadata:
+      labels:
+        app: nextcloud
+    spec:
+      containers:
+        - name: nextcloud
+          image: nextcloud:apache
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            - name: NEXTCLOUD_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: nextcloud
+                  key: nextcloud-username
+            - name: NEXTCLOUD_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nextcloud
+                  key: nextcloud-password
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: nextcloud-db
+                  key: db-username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nextcloud-db
+                  key: db-password
+            - name: POSTGRES_DB
+              value: "nextcloud"
+            - name: POSTGRES_HOST
+              value: "postgres.psql.svc.cluster.local"
+            - name: NEXTCLOUD_DATA_DIR
+              value: "/var/www/html/data"
+            - name: NEXTCLOUD_TRUSTED_DOMAINS
+              value: "lsnet.longstorymedia.com lsnet.tplinkdns.com 192.168.0.71 192.168.0.122 192.168.0.209 192.168.0.237 10.43.233.0"
+            - name: TRUSTED_PROXIES
+              value: "lsnet.longstorymedia.com lsnet.tplinkdns.com 192.168.0.71 192.168.0.122 192.168.0.209 192.168.0.237 10.43.233.0"
+            - name: OVERWRITEPROTOCOL
+              value: "https"
+            - name: OVERWRITECLIURL
+              value: "https://lsnet.longstorymedia.com"
+            - name: OVERWRITEHOST
+              value: "lsnet.longstorymedia.com"
+            - name: APACHE_DISABLE_REWRITE_IP
+              value: "1"
+            - name: APACHE_BODY_LIMIT
+              value: "0"
+            - name: PHP_UPLOAD_LIMIT
+              value: 10G # Example: Set to 1000 Gigabytes
+            - name: PHP_MEMORY_LIMIT
+              value: 3G # Example: Set memory limit higher than upload limit
+            # You might also consider increasing execution times for very slow uploads
+            - name: PHP_MAX_EXECUTION_TIME
+              value: "3600" # Example: 1 hour
+            - name: PHP_MAX_INPUT_TIME
+              value: "3600" # Example: 1 hour
+          # lifecycle:
+          #   postStart:
+          #     exec:
+          #       command:
+          #         - "/bin/bash"
+          #         - "-c"
+          #         - |
+          #           # Optimize PHP for better performance
+          #           touch /usr/local/etc/php/php.ini
+          #           echo "php_value memory_limit 1500M" > /usr/local/etc/php/php.ini
+          #           echo "php_value max_execution_time 3600" >> /usr/local/etc/php/php.ini
+          #           echo "php_value upload_max_filesize 1000G" >> /usr/local/etc/php/php.ini
+          #           echo "php_value post_max_size 1000G" >> /usr/local/etc/php/php.ini
+          #           echo "php_value max_input_time 3600" >> /usr/local/etc/php/php.ini
+          #           echo "php_value max_execution_time 3600" >> /usr/local/etc/php/php.ini
+
+          #           # Configure Apache for better performance
+          #           echo "ServerLimit 32" > /etc/apache2/conf-available/performance.conf
+          #           echo "MaxRequestWorkers 32" >> /etc/apache2/conf-available/performance.conf
+          #           echo "KeepAliveTimeout 300" >> /etc/apache2/conf-available/performance.conf
+          #           echo "MaxKeepAliveRequests 200" >> /etc/apache2/conf-available/performance.conf
+          #           echo "KeepAlive On" >> /etc/apache2/conf-available/performance.conf
+          #           echo "LimitRequestBody 0" >> /etc/apache2/conf-available/performance.conf
+          #           # echo "FcgidMaxRequestInMem 3G" >> /etc/apache2/conf-available/performance.conf
+          #           a2enconf performance
+
+          #           ln -s /etc/apache2/conf-available/performance.conf /etc/apache2/conf-enabled/performance.conf
+
+          #           # Restart Apache to apply changes
+          #           service apache2 reload || true
+          resources:
+            requests:
+              cpu: 400m
+              memory: 1000Mi
+            limits:
+              cpu: 600m
+              memory: 10Gi
+          volumeMounts:
+            - name: nextcloud-data
+              mountPath: /var/www/
+              subPath: root
+            - name: nextcloud-data
+              mountPath: /var/www/html
+              subPath: html
+            - name: nextcloud-data
+              mountPath: /var/www/html/data
+              subPath: data
+            - name: nextcloud-data
+              mountPath: /var/www/html/config
+              subPath: config
+            - name: nextcloud-data
+              mountPath: /var/www/html/custom_apps
+              subPath: custom_apps
+            - name: nextcloud-data
+              mountPath: /var/www/tmp
+              subPath: tmp
+            - name: nextcloud-data
+              mountPath: /var/www/html/themes
+              subPath: themes
+            - name: nextcloud-config
+              mountPath: /var/www/html/config/apache-pretty-urls.config.php
+              subPath: apache-pretty-urls.config.php
+            - name: nextcloud-config
+              mountPath: /var/www/html/config/apcu.config.php
+              subPath: apcu.config.php
+            - name: nextcloud-config
+              mountPath: /var/www/html/config/apps.config.php
+              subPath: apps.config.php
+            - name: nextcloud-config
+              mountPath: /var/www/html/config/autoconfig.php
+              subPath: autoconfig.php
+            - name: nextcloud-config
+              mountPath: /var/www/html/config/z.config.php
+              subPath: z.config.php
+          livenessProbe:
+            httpGet:
+              path: /status.php
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: "lsnet.longstorymedia.com"
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 10
+            successThreshold: 1
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /status.php
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: "lsnet.longstorymedia.com"
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 10
+            successThreshold: 1
+            failureThreshold: 5
+      initContainers:
+        - name: postgresql-isready
+          image: docker.io/bitnami/postgresql:15.4.0-debian-11-r10
+          resources: {}
+          securityContext: {}
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: nextcloud-db
+                  key: db-username
+            - name: POSTGRES_HOST
+              value: postgres.psql.svc.cluster.local
+          command:
+            - "sh"
+            - "-c"
+            - "until pg_isready -h ${POSTGRES_HOST} -U ${POSTGRES_USER} ; do sleep 2 ; done"
+      volumes:
+        - name: nextcloud-data
+          persistentVolumeClaim:
+            claimName: nextcloud-data
+        - name: nextcloud-config
+          configMap:
+            name: nextcloud-config
+      securityContext:
+        # Will mount configuration files as www-data (id: 33) for nextcloud
+        fsGroup: 33

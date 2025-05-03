@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"proxyllama/auth"
 	"proxyllama/config"
+	"proxyllama/context"
 	"proxyllama/storage"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ func RegisterConversationRoutes(app *fiber.App) {
 	app.Put("/api/conversations/:id", UpdateConversation)
 	app.Post("/api/conversations", CreateConversation)
 	app.Get("/api/models", GetModels)
+	app.Get("/api/conversations/:id/summarize", SummarizeMessages)
 }
 
 // GetUserConversations returns all conversations for the authenticated user
@@ -217,4 +219,34 @@ func GetModels(c *fiber.Ctx) error {
 	// Return the response to the client
 	c.Set("Content-Type", "application/json")
 	return c.Status(resp.StatusCode).Send(body)
+}
+
+// summarizeMessages summarizes the messages with the specified ids
+func SummarizeMessages(c *fiber.Ctx) error {
+	userID := c.UserContext().Value(auth.UserIDKey).(string)
+	conversationID, err := c.ParamsInt("id")
+	if err != nil {
+		return handleError(err, fiber.StatusBadRequest, "Invalid conversation ID")
+	}
+
+	convCtx, err := context.GetCachedConversation(userID, "", conversationID)
+	if err != nil {
+		return handleError(err, fiber.StatusNotFound, "Conversation not found")
+	}
+
+	// Verify ownership
+	conversation, err := storage.GetConversation(c.Context(), conversationID)
+	if err != nil {
+		return handleError(err, fiber.StatusNotFound, "Conversation not found")
+	}
+	if conversation.UserID != userID {
+		return fiber.NewError(fiber.StatusForbidden, "Access denied")
+	}
+
+	summary, err := convCtx.SummarizeMessages(c.Context())
+	if err != nil {
+		return handleError(err, fiber.StatusInternalServerError, "Failed to summarize messages")
+	}
+
+	return c.JSON(summary)
 }

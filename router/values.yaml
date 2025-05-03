@@ -38,7 +38,7 @@ nginxGateway:
   image:
     ## The NGINX Gateway Fabric image to use
     repository: ghcr.io/nginxinc/nginx-gateway-fabric
-    tag: 1.4.0
+    tag: 1.5.1
     pullPolicy: IfNotPresent
 
   securityContext:
@@ -54,17 +54,23 @@ nginxGateway:
 
   ## extraVolumeMounts are the additional volume mounts for the nginx-gateway container.
   extraVolumeMounts: []
+  #   - name: custom-nginx-config
+  #     mountPath: /etc/nginx/conf.d/custom-timeouts.conf
+  #     subPath: custom-timeouts.conf
 
   gwAPIExperimentalFeatures:
     ## Enable the experimental features of Gateway API which are supported by NGINX Gateway Fabric. Requires the Gateway
     ## APIs installed from the experimental channel.
     enable: false
+  snippetsFilters:
+    ## Enable the snippets filters feature.
+    enable: true
 
 nginx:
   ## The NGINX image to use
   image:
     repository: ghcr.io/nginxinc/nginx-gateway-fabric/nginx
-    tag: 1.4.0
+    tag: 1.5.1
     pullPolicy: IfNotPresent
 
   ## Is NGINX Plus image being used
@@ -86,6 +92,9 @@ nginx:
 
   ## extraVolumeMounts are the additional volume mounts for the nginx container.
   extraVolumeMounts: []
+  #   - name: custom-nginx-config
+  #     mountPath: /etc/nginx/conf.d/custom-timeouts.conf
+  #     subPath: custom-timeouts.conf
 
 ## The termination grace period of the NGINX Gateway Fabric pod.
 terminationGracePeriodSeconds: 30
@@ -94,10 +103,23 @@ terminationGracePeriodSeconds: 30
 tolerations: []
 
 ##  The nodeSelector of the NGINX Gateway Fabric pod.
-nodeSelector: {}
+nodeSelector:
+  ingress: "true"
 
 ## The affinity of the NGINX Gateway Fabric pod.
-affinity: {}
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: "ingress"
+              operator: In
+              values:
+                - "true"
+            # - key: "node-role.kubernetes.io/ingress"
+            # operator: In
+            # values:
+            # - "true"
 
 serviceAccount:
   annotations: {}
@@ -114,17 +136,8 @@ serviceAccount:
   imagePullSecrets: []
 
 service:
-  ## Creates a service to expose the NGINX Gateway Fabric pods.
-  create: true
-  ## The type of service to create for the NGINX Gateway Fabric.
   type: LoadBalancer
-  ## The externalTrafficPolicy of the service. The value Local preserves the client source IP.
   externalTrafficPolicy: Local
-  ## The annotations of the NGINX Gateway Fabric service.
-  annotations: {}
-
-  ## A list of ports to expose through the NGINX Gateway Fabric service. Update it to match the listener ports from
-  ## your Gateway resource. Follows the conventional Kubernetes yaml syntax for service ports.
   ports:
     - port: 3000
       targetPort: 3000
@@ -142,6 +155,22 @@ service:
       targetPort: 5000
       protocol: TCP
       name: registry
+    - port: 3001
+      targetPort: 3001
+      protocol: TCP
+      name: grafana
+    - port: 9090
+      targetPort: 9090
+      protocol: TCP
+      name: prometheus
+    - port: 9093
+      targetPort: 9093
+      protocol: TCP
+      name: alertmanager
+    - port: 8082
+      targetPort: 8082
+      protocol: TCP
+      name: wordpress
 
 metrics:
   ## Enable exposing metrics in the Prometheus format.
@@ -151,7 +180,9 @@ metrics:
   ## Enable serving metrics via https. By default metrics are served via http.
   ## Please note that this endpoint will be secured with a self-signed certificate.
   secure: false
-
 ## extraVolumes for the NGINX Gateway Fabric pod. Use in conjunction with
 ## nginxGateway.extraVolumeMounts and nginx.extraVolumeMounts to mount additional volumes to the containers.
 extraVolumes: []
+#   - name: custom-nginx-config
+#     configMap:
+#       name: nginx-gateway-timeouts

@@ -2,160 +2,55 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
-	"proxyllama/api"
-	"proxyllama/auth"
 	"proxyllama/config"
-	pxcx "proxyllama/context"
-	"time"
-
-	"github.com/gofiber/fiber/v2"
+	"proxyllama/models"
 )
 
-// ChatRequest represents the structure of incoming chat requests
-type ChatRequest struct {
-	Model          string        `json:"model"`
-	Messages       []ChatMessage `json:"messages"`
-	ConversationID *int          `json:"conversationId"` // ui sends camelCase
-	Stream         bool          `json:"stream,omitempty"`
-}
+// SendOllamaRequest sends a request to the Ollama API and handles streaming the response
+func SendOllamaRequest(ctx context.Context, model string, messages []models.OllamaMessage, endpoint string) (string, error) {
+	conf := config.GetConfig()
+	url := conf.Ollama.BaseURL + endpoint
 
-// ChatMessage represents a single message in a chat
-type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// ChunkData represents the structure of a streaming chunk response
-type ChunkData struct {
-	Message            ChatMessage `json:"message"`
-	Done               bool        `json:"done"`
-	DoneReason         string      `json:"done_reason"`
-	TotalDuration      float64     `json:"total_duration"`
-	LoadDuration       float64     `json:"load_duration"`
-	PromptEvalCount    int         `json:"prompt_eval_count"`
-	PromptEvalDuration float64     `json:"prompt_eval_duration"`
-	EvalCount          int         `json:"eval_count"`
-	EvalDuration       float64     `json:"eval_duration"`
-}
-
-// ReverseProxyHandler forwards the request to Ollama and streams the response back to the client
-func ReverseProxyHandler(c *fiber.Ctx) error {
-	// Parse the incoming request
-	var chatReq ChatRequest
-	if err := c.BodyParser(&chatReq); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	requestBody := models.OllamaReq{
+		Model:    model,
+		Messages: messages,
+		Stream:   true,
 	}
 
-	log.Printf("Parsed chat request: %+v", chatReq)
-
-	// Always set streaming to true to prevent timeouts
-	chatReq.Stream = true
-
-	uid := c.UserContext().Value(auth.UserIDKey).(string)
-	// Get or create conversation context
-	ctx := c.Context()
-	convCtx, err := pxcx.GetOrCreateConversation(ctx, uid, chatReq.Model, chatReq.ConversationID)
+	reqBody, err := json.Marshal(requestBody)
 	if err != nil {
-		log.Printf("Error getting conversation context: %v", err)
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to process conversation")
+		return "", fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	// Get the user message from the request (last message from user)
-	var userMessage string
-	for i := len(chatReq.Messages) - 1; i >= 0; i-- {
-		if chatReq.Messages[i].Role == "user" {
-			userMessage = chatReq.Messages[i].Content
-			break
-		}
-	}
+	log.Printf("Sending request to %s with %d messages", url, len(messages))
 
-	// Add the user message to context
-	contextError := false
-	if err := convCtx.AddUserMessage(c.Context(), userMessage); err != nil {
-		log.Printf("Error adding user message: %v", err)
-		contextError = true
-	}
-
-	var ollamaReqBody []byte
-	var jsonErr error
-
-	// Only use context if there was no error adding the user message
-	if !contextError {
-		// Convert conversation context to Ollama format (includes summaries)
-		ollamaReqBody, jsonErr = convCtx.ToJSON()
-		if jsonErr != nil {
-			log.Printf("Error converting context to JSON: %v", jsonErr)
-			contextError = true
-		}
-	}
-
-	// Fall back to the original request if we had any context errors
-	if contextError {
-		log.Printf("Falling back to original request without context")
-		// Use the original request but ensure the model is set correctly and stream is true
-		fallbackReq := map[string]interface{}{
-			"model":    chatReq.Model,
-			"messages": chatReq.Messages,
-			"stream":   true, // Always force streaming
-		}
-		ollamaReqBody, jsonErr = json.Marshal(fallbackReq)
-		if jsonErr != nil {
-			return fiber.NewError(fiber.StatusInternalServerError, "Failed to format request")
-		}
-	}
-
-	// Build the target URL
-	targetUrl := config.GetConfig().Ollama.BaseURL + c.Path()
-
-	// Set response headers for streaming
-	c.Set("Content-Type", "application/json")
-	c.Set("Cache-Control", "no-cache")
-	c.Set("Connection", "keep-alive")
-	c.Set("Transfer-Encoding", "chunked")
-	c.Set("X-Accel-Buffering", "no")
-
-	handler, statusCode, err := api.Stream(c.Context(), ollamaReqBody, targetUrl, http.MethodPost)
+	handler, _, err := Stream(ctx, reqBody, url, http.MethodPost)
 	if err != nil {
-		log.Printf("Error during streaming: %v", err)
-		return c.Status(fiber.StatusBadGateway).SendString("Error during streaming")
+		return "", fmt.Errorf("error streaming request: %w", err)
 	}
-	c.Status(statusCode)
-	var res string
 
-	c.Response().SetBodyStreamWriter(func(w *bufio.Writer) {
-		res, err = handler(w)
-		if err != nil {
-			log.Printf("Error during handler execution: %v", err)
-			c.Status(fiber.StatusInternalServerError).SendString("Error during handler execution")
-			return
-		}
+	w := &bytes.Buffer{}
+	wr := bufio.NewWriter(w)
 
-		// Only store the assistant response if there was no context errorå
-		if !contextError {
-			if res != "" {
-				log.Printf("Storing assistant response (length: %d)", len(res))
-				go func(res string) {
-					dbCtx := context.Background()
-					ctx, cancel := context.WithTimeout(dbCtx, time.Minute*10)
-					defer cancel()
+	res, err := handler(wr)
+	if err != nil {
+		return "", fmt.Errorf("error handling response: %w", err)
+	}
 
-					if err := convCtx.AddAssistantMessage(ctx, res); err != nil {
-						log.Printf("Error storing assistant response: %v", err)
-					} else {
-						log.Printf("Successfully stored assistant message in conversation %d", convCtx.ConversationID)
-					}
-				}(res)
-			} else {
-				log.Printf("Empty assistant response, not storing")
-			}
-		}
+	if err := wr.Flush(); err != nil {
+		return "", fmt.Errorf("error flushing response: %w", err)
+	}
 
-		log.Printf("Chat streaming complete")
-	})
+	// Check if the response is empty
+	if res == "" {
+		return "", fmt.Errorf("empty response from Ollama")
+	}
 
-	return nil
+	return res, nil
 }

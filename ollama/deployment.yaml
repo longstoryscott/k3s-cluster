@@ -34,6 +34,9 @@ spec:
           volumeMounts:
             - name: ollama-models-volume
               mountPath: /ollama
+          env:
+            - name: DUMMY
+              value: "true"
       containers:
         - name: ollama
           image: ollama/ollama:latest
@@ -45,10 +48,12 @@ spec:
           resources:
             requests:
               memory: "4Gi"
-              cpu: "1000m"
+              cpu: "4000m"
+              nvidia.com/gpu: 1
             limits:
               memory: "8Gi"
-              cpu: "4000m"
+              cpu: "8000m"
+              nvidia.com/gpu: 1
           volumeMounts:
             - name: ollama-models-volume
               mountPath: /root/.ollama

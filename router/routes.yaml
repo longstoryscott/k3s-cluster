@@ -2,6 +2,9 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: lsm-gateway
+  namespace: nginx-gateway
+  labels:
+    app: lsm-gateway
 spec:
   gatewayClassName: nginx
   listeners:
@@ -17,25 +20,41 @@ spec:
     - name: registry
       port: 5000
       protocol: HTTP
---- # Nextcloud
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
-metadata:
-  name: access-to-nc
-  namespace: nextcloud
-spec:
-  to:
-    - group: ""
-      kind: Service
-  from:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      namespace: default
+    - name: grafana
+      port: 3001
+      protocol: HTTP
+    - name: prometheus
+      port: 9090
+      protocol: HTTP
+    - name: alertmanager
+      port: 9093
+      protocol: HTTP
+    - name: fnf
+      protocol: HTTP
+      port: 8082
+      # hostname: press.longstorymedia.com
+      # allowedRoutes:
+      #   namespaces:
+      #     from: Same
 ---
+apiVersion: gateway.nginx.org/v1alpha1
+kind: ClientSettingsPolicy
+metadata:
+  name: gateway-policy
+  namespace: nginx-gateway
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: lsm-gateway
+  body:
+    maxSize: "0"
+--- # Nextcloud
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: nc-route
+  namespace: nginx-gateway
 spec:
   parentRefs:
     - name: lsm-gateway
@@ -45,29 +64,33 @@ spec:
         - path:
             type: PathPrefix
             value: /
+      # filters:
+      #   - type: ExtensionRef
+      #     extensionRef:
+      #       name: nextcloud-max-body-size
+      #       kind: SnippetsFilter
+      #       group: gateway.nginx.org
       backendRefs:
         - name: nextcloud
           namespace: nextcloud
           port: 8080
+# ---
+# apiVersion: gateway.nginx.org/v1alpha1
+# kind: SnippetsFilter
+# metadata:
+#   name: nc-max-body-size
+#   namespace: nginx-gateway
+# spec:
+#   snippets:
+#     - context: http.server.location
+#       value: |
+#         client_max_body_size 0;
 --- # Ollama
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
-metadata:
-  name: access-to-ollama
-  namespace: ollama
-spec:
-  to:
-    - group: ""
-      kind: Service
-  from:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      namespace: default
----
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: ollama-route
+  namespace: nginx-gateway
 spec:
   parentRefs:
     - name: lsm-gateway
@@ -82,29 +105,15 @@ spec:
           namespace: ollama
           port: 11434
 --- # dex
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
-metadata:
-  name: access-to-dex
-  namespace: auth
-spec:
-  from:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      namespace: default
-  to:
-    - group: ""
-      kind: Service
----
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: dex-route
-  namespace: default
+  namespace: nginx-gateway
 spec:
   parentRefs:
     - name: lsm-gateway
-      namespace: default
+      namespace: nginx-gateway
       sectionName: dex
   hostnames:
     - "auth.longstorymedia.com"
@@ -134,38 +143,83 @@ spec:
                 value: "GET, POST, OPTIONS"
               - name: Access-Control-Allow-Headers
                 value: "Content-Type, Authorization"
---- # registry
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
-metadata:
-  name: access-to-registry
-  namespace: registry
-spec:
-  to:
-    - group: ""
-      kind: Service
-  from:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      namespace: default
----
+--- # Grafana
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: registry-route
+  name: grafana-route
+  namespace: nginx-gateway
 spec:
   parentRefs:
     - name: lsm-gateway
-      sectionName: registry
-  hostnames:
-    - "registry.longstorymedia.com"
-    - "localhost"
+      sectionName: grafana
   rules:
     - matches:
         - path:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: registry
-          namespace: registry
-          port: 5000
+        - name: grafana
+          namespace: monitoring
+          port: 80
+
+--- # Prometheus
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: prometheus-route
+  namespace: nginx-gateway
+spec:
+  parentRefs:
+    - name: lsm-gateway
+      sectionName: prometheus
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: prometheus-kube-prometheus-prometheus
+          namespace: monitoring
+          port: 9090
+--- # Alertmanager
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: alertmanager-route
+  namespace: nginx-gateway
+spec:
+  parentRefs:
+    - name: lsm-gateway
+      sectionName: alertmanager
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: prometheus-kube-prometheus-alertmanager
+          namespace: monitoring
+          port: 9093
+--- # fnf
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: fnf-route
+  namespace: nginx-gateway
+spec:
+  parentRefs:
+    - name: lsm-gateway
+      sectionName: fnf
+  # hostnames:
+  #   - press.longstorymedia.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: "/" # match all paths for this host
+      backendRefs:
+        - name: fnf
+          port: 80
+          namespace: fnf
+          weight: 1

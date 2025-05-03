@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init-scripts
+  namespace: mysql
+data:
+  create-multiple-dbs.sh: |
+    #!/bin/bash
+    set -e
+    echo "Starting database initialization script..."
+
+    # First check if MySQL is ready
+    until mysqladmin ping -h localhost -u root -p"${MYSQL_ROOT_PASSWORD}" --silent; do
+      echo "Waiting for MySQL to be ready..."
+      sleep 2
+    done
+
+    echo "MySQL is ready. Creating databases..."
+    echo "Creating database 'fnf' and user '${MYSQL_USER}'..."
+    echo "DB Password: ${MYSQL_PASSWORD}"
+
+    # Use password from environment variable - use root for administrative operations
+    MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" mysql -uroot <<EOSQL
+      CREATE DATABASE IF NOT EXISTS fnf;
+      
+      # Drop user if exists to ensure clean recreation
+      DROP USER IF EXISTS '${MYSQL_USER}'@'%';
+      
+      # Create user with proper authentication
+      CREATE USER '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';
+      
+      # Grant privileges to the user for the database
+      GRANT ALL PRIVILEGES ON fnf.* TO '${MYSQL_USER}'@'%';
+      
+      # Make sure the changes take effect immediately
+      FLUSH PRIVILEGES;
+    EOSQL
+
+    # List all databases to confirm
+    echo "Listing all databases:"
+    MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" mysql -u root -e "SHOW DATABASES;"
+
+    # List all users to verify user creation
+    echo "Listing all users:"
+    MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" mysql -u root -e "SELECT User, Host FROM mysql.user;"
+
+    # Test connection with the created user
+    echo "Testing connection as ${MYSQL_USER}..."
+    if MYSQL_PWD="${MYSQL_PASSWORD}" mysql -u "${MYSQL_USER}" -e "SELECT 'Connection successful';" 2>/dev/null; then
+      echo "Database user '${MYSQL_USER}' connection test: SUCCESS"
+    else
+      echo "Database user '${MYSQL_USER}' connection test: FAILED"
+      echo "This might cause issues with WordPress connectivity."
+    fi
+
+    echo "Database initialization completed successfully!"

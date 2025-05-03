@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nextcloud-config
+  namespace: nextcloud
+data:
+  # redis.config.php: |
+  #   <?php
+  #   $CONFIG = array (
+  #     'memcache.locking' => '\OC\Memcache\Redis',
+  #     'redis' => array(
+  #       'host' => 'redis',
+  #       'port' => 6379,
+  #     ),
+  #   );
+  CAN_INSTALL: ""
+
+  apache-pretty-urls.config.php: |
+    <?php
+    $CONFIG = array (
+      'htaccess.RewriteBase' => '/',
+    );
+
+  apcu.config.php: |
+    <?php
+    $CONFIG = array (
+      'memcache.local' => '\OC\Memcache\APCu',
+    );
+
+  apps.config.php: |
+    <?php
+    $CONFIG = array (
+      'apps_paths' => array (
+        0 => array (
+          'path'     => OC::$SERVERROOT . '/apps',
+          'url'      => '/apps',
+          'writable' => false,
+        ),
+        1 => array (
+          'path'     => OC::$SERVERROOT . '/custom_apps',
+          'url'      => '/custom_apps',
+          'writable' => true,
+        ),
+      ),
+    );
+
+  z.config.php: |
+    <?php
+    $CONFIG = array (
+      'trusted_domains'   => ['lsnet.longstorymedia.com'],
+      'trusted_proxies'   => ['lsnet.longstorymedia.com', 'lsnet.tplinkdns.com', '192.168.0.71', '192.168.0.122', '192.168.0.209', '192.168.0.237', '10.43.233.0'],
+      'overwritehost'     => 'lsnet.longstorymedia.com',
+      'overwriteprotocol' => 'https',
+      'overwrite.cli.url' => 'https://lsnet.longstorymedia.com',
+      'overwritehost'     => 'lsnet.longstorymedia.com',
+      "log_type"          => "file",
+      "logfile"           => "nextcloud.log",
+      "loglevel"          => 3,
+      "logdateformat"     => "F d, Y H:i:s",
+    );
+
+  autoconfig.php: |
+    <?php
+    $autoconfig = array (
+      'directory'   => '/var/www/html/data',
+      'dbtype'      => 'pgsql',
+      'dbname'      => 'nextcloud',
+      'dbuser'      => getenv('POSTGRES_USER'),
+      'dbpass'      => getenv('POSTGRES_PASSWORD'),
+      'dbhost'      => 'postgres.psql.svc.cluster.local',
+      'dbtableprefix' => 'oc_',
+    );

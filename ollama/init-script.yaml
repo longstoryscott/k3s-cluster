@@ -14,36 +14,17 @@ data:
     # Give Ollama some time to start up
     sleep 10
 
-    # Check if modelfiles directory exists in the PVC
-    if [ -d "/root/.ollama/modelfiles" ]; then
-      echo "Found modelfiles directory, creating custom models..."
-      
-      # Process each modelfile in the directory
-      for modelfile in /root/.ollama/modelfiles/*; do
-        if [ -f "$modelfile" ]; then
-          model_name=$(basename "$modelfile" | sed 's/\.modelfile$//')
-          echo "Processing model $model_name from $modelfile"
-          
-          # Extract the base model name from the modelfile using grep
-          base_model=$(grep -m 1 "^FROM" "$modelfile" | awk '{print $2}')
-          if [ -n "$base_model" ]; then
-            echo "Pulling base model $base_model first..."
-            ollama pull "$base_model"
-            echo "Base model $base_model pulled successfully"
-          fi
-          
-          echo "Creating model $model_name from $modelfile"
-          ollama create "$model_name" -f "$modelfile"
-          echo "Model $model_name created successfully"
-        fi
-      done
-      
-      # List available models
-      echo "Available models:"
-      ollama list
-    else
-      echo "No modelfiles directory found. No custom models will be created."
-    fi
+    echo "Gettings models..."
+
+    ollama pull llama3.2
+    ollama pull mistral
+    ollama pull opencoder
+    ollama pull phi3.5
+    ollama pull qwen3:0.6b
+
+    # List available models
+    echo "Available models:"
+    ollama list
 
     # Wait for the ollama process
     wait

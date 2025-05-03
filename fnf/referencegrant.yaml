@@ -1,0 +1,33 @@
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: fnf-route-grant
+  namespace: fnf
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: nginx-gateway
+  to:
+    - group: ""
+      kind: Service
+---
+# Allow WordPress in fnf namespace to access MySQL service in mysql namespace
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: fnf-mysql-grant
+  namespace: mysql
+spec:
+  from:
+    - group: ""
+      kind: Service
+      namespace: fnf
+    - group: "apps"
+      kind: Deployment
+      namespace: fnf
+  to:
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: Secret

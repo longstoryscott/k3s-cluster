@@ -7,7 +7,7 @@ mkdir -p "${SECRETS_DIR}"
 function gen_secret() {
     local name=$1
     local path="${SECRETS_DIR}/${name}"
-    [[ -f "$path" ]] || openssl rand -hex 32 >"$path"
+    [[ -f "$path" ]] || openssl rand -hex 12 >"$path"
 
     echo "--from-file=${name}=${path}"
 }

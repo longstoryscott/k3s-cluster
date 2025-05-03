@@ -1,12 +1,3 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: postgres
-  namespace: "psql"
-  labels:
-    app: postgres
-automountServiceAccountToken: false
----
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -59,7 +50,7 @@ spec:
               drop:
                 - ALL
             privileged: false
-            readOnlyRootFilesystem: true
+            readOnlyRootFilesystem: false
             runAsGroup: 1001
             runAsNonRoot: true
             runAsUser: 1001
@@ -67,15 +58,8 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           env:
-            # - name: BITNAMI_DEBUG
-            #   value: "false"
-            # - name: POSTGRESQL_PORT_NUMBER
-            #   value: "5432"
             - name: POSTGRESQL_VOLUME_DIR
               value: "/home/postgres/pgdata"
-            # - name: PGDATA
-            #   value: "/bitnami/postgresql/data"
-            # Authentication
             - name: POSTGRES_USER
               value: "lsm"
             - name: POSTGRES_PASSWORD
@@ -84,9 +68,9 @@ spec:
                   name: secrets
                   key: psqlpw
             - name: POSTGRES_MULTIPLE_DATABASES
-              value: "dex_db,ollama"
+              value: "dex_db,ollama,nextcloud"
             - name: PGROOT
-              value: /home/postgres \
+              value: /home/postgres
             - name: PGDATA
               value: /home/postgres/pgdata/data
             - name: PGHOST
@@ -95,28 +79,14 @@ spec:
               value: /home/postgres/pg_log
             - name: PGSOCKET
               value: /home/postgres/pgdata
-            - name: BACKUPROOT
-              value: /home/postgres/pgdata/backup
-            - name: PGBACKREST_CONFIG
-              value: /home/postgres/pgdata/backup/pgbackrest.conf
-            - name: PGBACKREST_STANZA
-              value: poddb
-            - name: POSTGRES_DATABASE
-              value: "ollama"
             - name: POSTGRES_DB
               value: ollama
-            # Replication
-            # Initdb
-            # Standby
-            # LDAP
             - name: POSTGRESQL_UNIX_SOCKET_DIRECTORIES
               value: /home/postgres/pgdata
             - name: POSTGRESQL_ENABLE_LDAP
               value: "no"
-            # TLS
             - name: POSTGRESQL_ENABLE_TLS
               value: "no"
-            # Audit
             - name: POSTGRESQL_LOG_HOSTNAME
               value: "false"
             - name: POSTGRESQL_LOG_CONNECTIONS
@@ -125,15 +95,25 @@ spec:
               value: "false"
             - name: POSTGRESQL_PGAUDIT_LOG_CATALOG
               value: "off"
-            # Others
             - name: POSTGRESQL_CLIENT_MIN_MESSAGES
               value: "error"
             - name: POSTGRESQL_SHARED_PRELOAD_LIBRARIES
-              value: "pgaudit"
+              value: "pgaudit,timescaledb"
           ports:
             - name: tcp-postgresql
               containerPort: 5432
           livenessProbe:
+            failureThreshold: 6
+            initialDelaySeconds: 90
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exec pg_isready -U "lsm" -h 127.0.0.1 -p 5432
+          readinessProbe:
             failureThreshold: 6
             initialDelaySeconds: 30
             periodSeconds: 10
@@ -143,21 +123,8 @@ spec:
               command:
                 - /bin/sh
                 - -c
-                - exec pg_isready -U "lsm" -d "dbname=ollama" -h 127.0.0.1 -p 5432
-          readinessProbe:
-            failureThreshold: 6
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            successThreshold: 1
-            timeoutSeconds: 5
-            exec:
-              command:
-                - /bin/sh
-                - -c
                 - -e
-                - |
-                  exec pg_isready -U "lsm" -d "dbname=ollama" -h 127.0.0.1 -p 5432
-                  [ -f /opt/postgresql/tmp/.initialized ] || [ -f /home/postgres/pgdata/.initialized ]
+                - exec pg_isready -U "lsm" -h 127.0.0.1 -p 5432
           resources:
             limits:
               cpu: 150m
@@ -171,12 +138,6 @@ spec:
             - name: empty-dir
               mountPath: /tmp
               subPath: tmp-dir
-            # - name: empty-dir
-            #   mountPath: /opt/postgresql/conf
-            #   subPath: app-conf-dir
-            # - name: empty-dir
-            #   mountPath: /opt/postgresql/tmp
-            #   subPath: app-tmp-dir
             - name: dshm
               mountPath: /dev/shm
             - name: data

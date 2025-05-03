@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -11,7 +12,7 @@ import (
 	"proxyllama/api"
 	"proxyllama/auth"
 	"proxyllama/config"
-	"proxyllama/proxy"
+	convContext "proxyllama/context"
 	"proxyllama/storage"
 )
 
@@ -37,6 +38,10 @@ func main() {
 
 	// Initialize database schema
 	storage.InitSchema(ctx)
+
+	// Initialize the conversation cache with a 30-minute TTL
+	convContext.InitCache(30 * time.Minute)
+	log.Printf("Initialized conversation cache with 30-minute TTL")
 
 	// Create a new Fiber app
 	app := fiber.New(fiber.Config{
@@ -66,7 +71,7 @@ func main() {
 	api.RegisterConversationRoutes(app)
 
 	// Setup reverse proxy handler with chunk processing
-	app.All("/*", proxy.ReverseProxyHandler)
+	app.All("/*", api.ReverseProxyHandler)
 
 	// Use port from configuration instead of hardcoding it
 	serverAddress := fmt.Sprintf("%s:%d", conf.Server.Host, conf.Server.Port)

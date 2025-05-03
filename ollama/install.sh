@@ -43,5 +43,7 @@ done
 echo "Restarting Ollama pod to load new models..."
 kubectl delete pod $OLLAMA_POD -n ollama
 
+kubectl apply -f "${1}/referencegrant.yaml"
+
 echo "Ollama deployment complete! Service is available at ollama.ollama.svc.cluster.local:11434"
 echo "Wait a few minutes for the models to be loaded and configured."

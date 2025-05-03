@@ -160,3 +160,31 @@ func DeleteSummariesForConversation(ctx context.Context, conversationID int) err
 
 	return nil
 }
+
+// GetSummary retrieves a single summary by its ID
+func GetSummary(ctx context.Context, summaryID int) (*Summary, error) {
+	const sqlGetSummary = `
+		SELECT id, conversation_id, content, level, source_ids, created_at
+		FROM summaries
+		WHERE id = $1
+	`
+
+	var summary Summary
+	var sourceIDsJSON []byte
+
+	err := Pool.QueryRow(ctx, sqlGetSummary, summaryID).Scan(
+		&summary.ID, &summary.ConversationID, &summary.Content, &summary.Level,
+		&sourceIDsJSON, &summary.CreatedAt,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get summary: %w", err)
+	}
+
+	// Parse source IDs from JSON
+	if err := json.Unmarshal(sourceIDsJSON, &summary.SourceIDs); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal source IDs: %w", err)
+	}
+
+	return &summary, nil
+}

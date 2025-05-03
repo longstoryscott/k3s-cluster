@@ -1,0 +1,84 @@
+persistence:
+  enabled: true
+  size: 5Gi
+
+adminPassword: "6u!tar00!QAZ"
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-kube-prometheus-prometheus:9090
+        access: proxy
+        isDefault: true
+      - name: Loki
+        type: loki
+        url: http://loki:3100
+        access: proxy
+        isDefault: false
+        jsonData:
+          maxLines: 1000
+
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: "default"
+        orgId: 1
+        folder: "Default"
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+      - name: "kubernetes"
+        orgId: 1
+        folder: "Kubernetes"
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/kubernetes
+      - name: "logs"
+        orgId: 1
+        folder: "Logs"
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/logs
+
+dashboards:
+  default:
+    k8s-cluster-monitoring:
+      gnetId: 10000
+      revision: 1
+      datasource: Prometheus
+    k8s-node-monitoring:
+      gnetId: 10856
+      revision: 1
+      datasource: Prometheus
+    k8s-capacity-planning:
+      gnetId: 11345
+      revision: 1
+      datasource: Prometheus
+  kubernetes:
+    k8s-pod-monitoring:
+      gnetId: 10099
+      revision: 1
+      datasource: Prometheus
+    k8s-resource-requests:
+      gnetId: 13610
+      revision: 1
+      datasource: Prometheus
+  logs:
+    loki-logs-dashboard:
+      gnetId: 12611
+      revision: 1
+      datasource: Loki
+    loki-pod-logs:
+      gnetId: 15141
+      revision: 1
+      datasource: Loki

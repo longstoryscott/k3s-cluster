@@ -8,6 +8,16 @@ export async function* gen(opts: RequestOptions): AsyncGenerator<ChatResponse> {
   }
   opts.method = opts.method || 'GET';
   const response = await fetch(`${config.server.baseUrl}/${opts.path}`, opts);
+
+  // Handle authentication errors
+  if (response.status === 401 || response.status === 403) {
+    // Force logout by clearing session storage and redirecting
+    sessionStorage.removeItem(config.auth.tokenStorageKey);
+    sessionStorage.removeItem(config.auth.userStorageKey);
+    window.location.href = '/login';
+    throw new Error('Authentication failed');
+  }
+
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
@@ -70,6 +80,16 @@ export async function req<T>(opts: RequestOptions): Promise<T> {
     }
 
     const response = await fetch(`${config.server.baseUrl}/${opts.path}`, opts);
+
+    // Handle authentication errors
+    if (response.status === 401 || response.status === 403) {
+      // Force logout by clearing session storage and redirecting
+      sessionStorage.removeItem(config.auth.tokenStorageKey);
+      sessionStorage.removeItem(config.auth.userStorageKey);
+      window.location.href = '/login';
+      throw new Error('Authentication failed');
+    }
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }

@@ -1,0 +1,40 @@
+config:
+  clients:
+    - url: http://loki.monitoring.svc:3100/loki/api/v1/push
+  snippets:
+    pipelineStages:
+      - cri: {}
+      - json:
+          expressions:
+            output: message
+            stream: stream
+            timestamp: time
+      - labels:
+          app:
+          namespace:
+          pod:
+          container:
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      - output:
+          source: output
+
+serviceMonitor:
+  enabled: true
+
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+  - key: node-role.kubernetes.io/master
+    operator: Exists
+    effect: NoSchedule
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi

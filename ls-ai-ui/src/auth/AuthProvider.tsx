@@ -4,6 +4,7 @@ import {
   ReactNode,
   useCallback
 } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import config from '../config';
 import { AuthContext } from './useAuth';
 
@@ -36,6 +37,8 @@ let refreshTimer: ReturnType<typeof setTimeout>;
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User>(defaultUser);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const clearSession = () => {
     sessionStorage.removeItem(config.auth.tokenStorageKey);
@@ -44,6 +47,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setIsAuthenticated(false);
     if (refreshTimer) {
       clearTimeout(refreshTimer);
+    }
+    
+    // Navigate to login page if not already there
+    if (location.pathname !== '/login') {
+      navigate('/login');
     }
   };
 
@@ -121,7 +129,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const expiresIn = tokens.expires_in || 300;
     scheduleRefresh(expiresIn, tokens.refresh_token);
-  }, []);
+    
+    // Navigate to chat page after successful login
+    navigate('/');
+  }, [navigate]);
 
   const logout = useCallback(() => {
     clearSession();
@@ -144,8 +155,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } catch {
         clearSession();
       }
+    } else if (location.pathname !== '/login') {
+      // If not authenticated and not on login page, redirect to login
+      navigate('/login');
     }
-  }, []);
+  }, [location.pathname, navigate]);
 
   return (
     <AuthContext.Provider value={{ user, isAuthenticated, login, logout }}>

@@ -1,7 +1,8 @@
-import { Box, List, ListItem, ListItemText, Divider } from '@mui/material';
+import { Box, Divider, Typography } from '@mui/material';
 import { useAuth } from '../../auth';
 import ChatHistory from '../Sidebar/ChatHistory';
 import NewChatButton from '../Sidebar/NewChatButton';
+import Navigation from './Navigation';
 
 const Sidebar = () => {
   const { user } = useAuth();
@@ -17,15 +18,21 @@ const Sidebar = () => {
         padding: 2
       }}
     >
-      <h2>Welcome, {user.name || 'User'}</h2>
-      <Divider />
-      <List>
-        <ListItem>
-          <ListItemText primary="Chat History" />
-        </ListItem>
-        <ChatHistory />
+      <Typography variant="h6" sx={{ mb: 2 }}>
+        Welcome, {user.name || 'User'}
+      </Typography>
+      
+      <Navigation />
+      
+      <Box sx={{ mt: 2, mb: 2 }}>
         <NewChatButton />
-      </List>
+      </Box>
+      
+      <Divider sx={{ my: 1 }} />
+      
+      <Box sx={{ flex: 1, overflow: 'auto' }}>
+        <ChatHistory />
+      </Box>
     </Box>
   );
 };

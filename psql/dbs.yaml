@@ -8,24 +8,38 @@ data:
   create-multiple-dbs.sh: |
     #!/bin/bash
     set -e
+    echo "Starting database initialization script..."
+
+    # First check if PostgreSQL is ready
+    until pg_isready -h localhost -p 5432 -U "lsm" --dbname "postgres"; do
+      echo "Waiting for PostgreSQL to be ready..."
+      sleep 2
+    done
+
+    echo "PostgreSQL is ready. Creating databases..."
 
     # Use password from environment variable
     export PGPASSWORD="${POSTGRES_PASSWORD}"
 
     # Create databases
-    psql -v ON_ERROR_STOP=1 --username "lsm" --dbname "postgres" <<-EOSQL
-      CREATE DATABASE ollama;
-      CREATE DATABASE dex_db;      
-
-      -- Create TimescaleDB extension in each database
-      \c ollama
-      CREATE EXTENSION IF NOT EXISTS timescaledb;
-      
-      \c dex_db  
-      CREATE EXTENSION IF NOT EXISTS timescaledb;
+    echo "Creating databases if they don't exist..."
+    psql -v ON_ERROR_STOP=0 --username "lsm" --dbname "postgres" <<-EOSQL
+      SELECT 'CREATE DATABASE ollama' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'ollama') \gexec
+      SELECT 'CREATE DATABASE nextcloud' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'nextcloud') \gexec
+      SELECT 'CREATE DATABASE wordpress' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'wordpress') \gexec
     EOSQL
+
+    # Add TimescaleDB extension to required databases
+    echo "Creating TimescaleDB extension in ollama database..."
+    psql -v ON_ERROR_STOP=0 --username "lsm" --dbname "ollama" -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+
+    # List all databases to confirm
+    echo "Listing all databases:"
+    psql -U "lsm" --dbname "postgres" -c "\l"
 
     # Unset password for security
     unset PGPASSWORD
+
+    echo "Database initialization completed successfully!"
 
 # Then update your StatefulSet to mount this ConfigMap

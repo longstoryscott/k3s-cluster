@@ -1,0 +1,54 @@
+loki:
+  enabled: true
+  isDefault: false
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: http-metrics
+    initialDelaySeconds: 30
+    timeoutSeconds: 1
+  livenessProbe:
+    httpGet:
+      path: /ready
+      port: http-metrics
+    initialDelaySeconds: 45
+    timeoutSeconds: 1
+  config:
+    compactor:
+      retention_enabled: true
+      retention_delete_delay: 2h
+      retention_delete_worker_count: 150
+      compaction_interval: 10m
+      delete_request_cancel_period: 2h
+    limits_config:
+      enforce_metric_name: false
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+      max_entries_limit_per_query: 5000
+    schema_config:
+      configs:
+        - from: 2020-05-15
+          store: boltdb-shipper
+          object_store: filesystem
+          schema: v11
+          index:
+            prefix: index_
+            period: 24h
+    server:
+      http_listen_port: 3100
+    storage_config:
+      boltdb_shipper:
+        active_index_directory: /data/loki/index
+        shared_store: filesystem
+        cache_location: /data/loki/index_cache
+        cache_ttl: 24h
+      filesystem:
+        directory: /data/loki/chunks
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClassName: null
+
+serviceMonitor:
+  enabled: true

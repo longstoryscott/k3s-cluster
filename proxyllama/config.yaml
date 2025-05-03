@@ -23,4 +23,4 @@ summarization:
   messages_before_summary: 10 # Number of messages before creating a summary
   summaries_before_consolidation: 5 # Number of summaries before consolidation
   summary_model: "fast3b:latest" # Model to use for summaries, leave empty to use same as conversation
-  system_prompt: "Summarize the conversation so far in a concise paragraph. Include key points and conclusions, but omit redundant details. The summary will be used as context for future interaction."
+  system_prompt: "Summarize the conversation so far in a concise paragraph. Include key points and conclusions, but omit redundant details. The summary will be used as context for future interaction. It should be as small as possible and does not need to be human readable."

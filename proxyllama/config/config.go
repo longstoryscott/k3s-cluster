@@ -1,3 +1,4 @@
+// Package config provides configuration handling
 package config
 
 import (
@@ -9,6 +10,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// SummaryModel is a global variable for the summary model name
+var SummaryModel string
 
 type Config struct {
 	Server struct {
@@ -35,10 +39,13 @@ type Config struct {
 	} `yaml:"auth"`
 
 	Summarization struct {
-		MessagesBeforeSummary        int    `yaml:"messages_before_summary"`
-		SummariesBeforeConsolidation int    `yaml:"summaries_before_consolidation"`
-		SummaryModel                 string `yaml:"summary_model"`
-		SystemPrompt                 string `yaml:"system_prompt"`
+		MessagesBeforeSummary        int     `yaml:"messages_before_summary"`
+		SummariesBeforeConsolidation int     `yaml:"summaries_before_consolidation"`
+		SummaryModel                 string  `yaml:"summary_model"`
+		SystemPrompt                 string  `yaml:"system_prompt"`
+		MaxSummaryLevels             int     `yaml:"max_summary_levels"`         // Maximum depth of summary hierarchy
+		SummaryWeightCoefficient     float64 `yaml:"summary_weight_coefficient"` // Weight reduction factor for deeper summaries
+		MasterSummaryPrompt          string  `yaml:"master_summary_prompt"`      // Prompt for the master summary of summaries
 	} `yaml:"summarization"`
 }
 
@@ -90,8 +97,11 @@ func setDefaults(cfg *Config) {
 	// Summarization defaults
 	cfg.Summarization.MessagesBeforeSummary = 10
 	cfg.Summarization.SummariesBeforeConsolidation = 5
-	cfg.Summarization.SummaryModel = "" // Default to same as conversation model
-	cfg.Summarization.SystemPrompt = "Summarize the conversation so far in a concise paragraph. Include key points and conclusions, but omit redundant details. The summary will be used as context for future interaction."
+	cfg.Summarization.SummaryModel = "qwen3:0.6b" // Set default model to qwen3:0.6b
+	cfg.Summarization.SystemPrompt = "Summarize the conversation so far in a concise paragraph. Include key points and conclusions, but omit redundant details. The summary will be used as context for future interaction. It should be as small as possible and does not need to be human readable."
+	cfg.Summarization.MaxSummaryLevels = 3           // Default to 3 levels of summary depth
+	cfg.Summarization.SummaryWeightCoefficient = 0.7 // Each level gets 70% of the weight of the level below
+	cfg.Summarization.MasterSummaryPrompt = "Create a comprehensive summary of the conversation, giving most weight to the most recent points and gradually less weight to older information. This is a master summary that will be used for long-term context. It should be as small as possible and does not need to be human readable."
 }
 
 // loadFromFile loads configuration from config.yaml
@@ -191,4 +201,7 @@ func applyEnvironmentOverrides(cfg *Config) {
 	if systemPrompt := os.Getenv("SUMMARIZATION_SYSTEM_PROMPT"); systemPrompt != "" {
 		cfg.Summarization.SystemPrompt = systemPrompt
 	}
+
+	// Set the global SummaryModel variable
+	SummaryModel = cfg.Summarization.SummaryModel
 }

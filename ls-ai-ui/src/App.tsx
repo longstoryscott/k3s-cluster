@@ -7,7 +7,7 @@ import MainLayout from './components/Layout/MainLayout';
 import ChatPage from './pages/ChatPage';
 import LoginPage from './pages/LoginPage';
 import SettingsPage from './pages/SettingsPage';
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import { Route, Routes, Navigate } from 'react-router-dom';
 import ThemeToggle from './components/Shared/ThemeToggle';
 import useColorMode from './hooks/useColorMode';
 
@@ -22,15 +22,21 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Router>
-        <MainLayout>
-          <Routes>
-            <Route path="/" element={auth.isAuthenticated ? <ChatPage /> : <LoginPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Routes>
-        </MainLayout>
-      </Router>
-      <ThemeToggle mode={mode} setMode={setMode}  />
+      <Routes>
+        {/* Login route outside of MainLayout */}
+        <Route path="/login" element={
+          auth.isAuthenticated ? <Navigate to="/" /> : <LoginPage />
+        } />
+        
+        {/* Protected routes inside MainLayout */}
+        <Route path="/" element={
+          auth.isAuthenticated ? <MainLayout> <ChatPage /> </MainLayout> : <Navigate to="/login" />
+        } />
+        <Route path="/settings" element={
+          auth.isAuthenticated ? <MainLayout> <SettingsPage /> </MainLayout> : <Navigate to="/login" />
+        } />
+      </Routes>
+      <ThemeToggle mode={mode} setMode={setMode} />
     </ThemeProvider>
   );
 }

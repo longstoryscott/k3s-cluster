@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fnf
+  namespace: fnf
+  labels:
+    app: fnf
+spec:
+  revisionHistoryLimit: 1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fnf
+  template:
+    metadata:
+      labels:
+        app: fnf
+    spec:
+      revisionHistoryLimit:
+      serviceAccountName: fnf-sa
+      containers:
+        - name: fnf
+          image: wordpress:latest
+          ports:
+            - containerPort: 80
+              name: http
+          env:
+            - name: WORDPRESS_DB_HOST
+              value: "mysql.mysql.svc.cluster.local"
+            - name: WORDPRESS_DB_NAME
+              value: "fnf"
+            - name: WORDPRESS_DB_USER
+              value: "lsm"
+            - name: WORDPRESS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fnf-db
+                  key: db-password
+            - name: WORDPRESS_TABLE_PREFIX
+              value: "fnf_"
+            - name: WORDPRESS_DEBUG
+              value: "1"
+            - name: PHP_MEMORY_LIMIT
+              value: "256M"
+            - name: PHP_MAX_EXECUTION_TIME
+              value: "300"
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - "/bin/bash"
+                  - "-c"
+                  - |
+                    # Optimize PHP for better performance
+                    echo "memory_limit = 2G" > /usr/local/etc/php/conf.d/memory-limit.ini
+                    echo "max_execution_time = 900" > /usr/local/etc/php/conf.d/max-execution-time.ini
+                    echo "upload_max_filesize = 10G" > /usr/local/etc/php/conf.d/upload-max-filesize.ini
+                    echo "post_max_size = 10G" > /usr/local/etc/php/conf.d/post-max-size.ini
+
+                    # Make sure the wp-content directory exists
+                    mkdir -p /var/www/html/wp-content
+
+                    # Create debug log file with proper permissions
+                    touch /var/www/html/wp-content/debug.log
+                    chown www-data:www-data /var/www/html/wp-content/debug.log
+                    chmod 664 /var/www/html/wp-content/debug.log
+
+                    # Copy wp-config.php from ConfigMap
+                    if [ -f /tmp/wp-config/wp-config.php ]; then
+                      cp /tmp/wp-config/wp-config.php /var/www/html/wp-config.php
+                      echo "Custom wp-config.php installed"
+                    fi
+
+                    # Set proper permissions
+                    chown -R www-data:www-data /var/www/html
+                    chmod -R 755 /var/www/html
+
+                    # Configure Apache for better performance
+                    echo "ServerLimit 32" > /etc/apache2/conf-available/performance.conf
+                    echo "MaxRequestWorkers 32" >> /etc/apache2/conf-available/performance.conf
+                    echo "KeepAliveTimeout 300" >> /etc/apache2/conf-available/performance.conf
+                    echo "MaxKeepAliveRequests 200" >> /etc/apache2/conf-available/performance.conf
+                    echo "KeepAlive On" >> /etc/apache2/conf-available/performance.conf
+                    a2enconf performance
+
+                    # Restart Apache to apply changes
+                    service apache2 reload || true
+
+                    echo "WordPress configured with MySQL"
+          volumeMounts:
+            - name: fnf-storage
+              mountPath: /var/www/html
+            - name: wp-config
+              mountPath: /tmp/wp-config
+              readOnly: true
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          # Use a simple TCP probe for liveness since we just want to check if Apache is running
+          livenessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            failureThreshold: 6
+            timeoutSeconds: 10
+          # Use a simple static file for readiness that doesn't depend on PHP or DB
+          readinessProbe:
+            httpGet:
+              path: /wp-login.php
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
+      volumes:
+        - name: fnf-storage
+          persistentVolumeClaim:
+            claimName: fnf-pvc
+        - name: wp-config
+          configMap:
+            name: fnf-config
+            defaultMode: 0444

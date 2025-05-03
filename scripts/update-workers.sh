@@ -1,7 +1,7 @@
 #!/bin/bash
 
 MASTER_IP=$(./set-static-ip.sh)
-NODES=(lsnode-1 lsnode-2)
+NODES=(lsnode-1 lsnode-2 lsnode-3)
 CONF=$(sudo cat /etc/rancher/k3s/k3s.yaml | sed "s|127.0.0.1|${MASTER_IP}|g")
 
 for node in "${NODES[@]}"; do
