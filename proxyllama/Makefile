@@ -6,6 +6,6 @@ start:
 	@export LOCAL=true && air
 
 deploy:
-	@chmod +x ./deploy.sh
+	@chmod +x ./install.sh
 	@echo "Deploying image..."
-	@./deploy.sh $(CURDIR)
+	@./install.sh $(CURDIR)

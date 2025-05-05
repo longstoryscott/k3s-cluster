@@ -11,15 +11,14 @@ AUTH = $(CURDIR)/auth
 PROXYLLAMA = $(CURDIR)/proxyllama
 MONITORING = $(CURDIR)/monitoring
 
-.DEFAULT_GOAL := all
-
 export HELM_KUBECONTEXT=lsnet
+export NODES=(lsnode-0 lsnode-1 lsnode-2 lsnode-3)
+export MASTER_NODE=lsnode-0
+export WORKER_NODES=(lsnode-1 lsnode-2 lsnode-3)
 
 .SILENT:
 
-all: ex auth nc wp ollama router
-
-install: init install-registry all
+install: init registry ex auth nc wp ollama router registry
 
 init: ex
 	cd $(SCRIPTS) && bash make-server.sh && cd ..
@@ -28,16 +27,31 @@ update-workers: ex
 	cd $(SCRIPTS) && bash update-workers.sh && cd ..
 
 ex:
-	for f in $(SCRIPTS)/*.sh $(ROUTER)/*.sh $(REGISTRY)/*.sh $(NEXTCLOUD)/*.sh $(FNF)/*.sh $(MYSQL)/*.sh $(AUTH)/*sh $(MONITORING)/*.sh; do chmod +x "$$f"; done;
+	for f in $(SCRIPTS)/*.sh $(ROUTER)/*.sh $(REGISTRY)/*.sh $(NEXTCLOUD)/*.sh $(FNF)/*.sh $(MYSQL)/*.sh $(AUTH)/*sh $(PROXYLLAMA)/*sh $(MONITORING)/*.sh; do chmod +x "$$f"; done;
 
 auth: ex
 	$(AUTH)/install.sh $(AUTH)
 
-install-registry:
-	$(REGISTRY)/install.sh $(REGISTRY) "patch"
+registry:
+	$(REGISTRY)/registry-mgmt.sh install
 
-update-registry:
-	$(REGISTRY)/install.sh $(REGISTRY) 
+registry-%:
+	$(REGISTRY)/registry-mgmt.sh $*
+
+registry-help:
+	$(REGISTRY)/registry-mgmt.sh
+
+registry-user:
+	$(REGISTRY)/registry-mgmt.sh manage-users add
+
+registry-cert:
+	$(REGISTRY)/registry-mgmt.sh manage-certs
+	
+configure-docker:
+	$(REGISTRY)/registry-mgmt.sh configure-docker
+
+docker-login:
+	REGISTRY_USER=$$(cat $(CURDIR)/registry/.secrets/registryuser) && REGISTRY_PW=$$(cat $(CURDIR)/registry/.secrets/registrypw) && echo $$REGISTRY_PW | docker login https://registry.local -u $$REGISTRY_USER --password-stdin
 
 router: ex
 	$(ROUTER)/install.sh $(ROUTER)
@@ -51,9 +65,6 @@ mysql:
 nc: ex
 	$(NEXTCLOUD)/install.sh $(NEXTCLOUD)
 
-delete-nc:
-	$(NEXTCLOUD)/delete.sh
-
 fnf: ex
 	$(FNF)/install.sh $(FNF)
 
@@ -61,7 +72,7 @@ ollama:
 	$(OLLAMA)/install.sh $(OLLAMA)
 
 proxyllama:
-	$(PROXYLLAMA)/deploy.sh $(PROXYLLAMA)
+	$(PROXYLLAMA)/install.sh $(PROXYLLAMA)
 
 monitoring: ex
 	$(MONITORING)/install.sh $(MONITORING)
@@ -75,4 +86,4 @@ sync:
 apply: sync
 	ssh -p 2222 lsm@lsnet.tplinkdns.com "cd k8s && make"
 
-.PHONY: router ex ollama psql mysql proxyllama nc monitoring fnf
+.PHONY: router ex ollama psql mysql proxyllama nc monitoring fnf registry registry-user registry-renew-cert configure-docker registry-trust-cert

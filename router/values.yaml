@@ -151,7 +151,7 @@ service:
       targetPort: 9091
       protocol: TCP
       name: dex
-    - port: 5000
+    - port: 443
       targetPort: 5000
       protocol: TCP
       name: registry

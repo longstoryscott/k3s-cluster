@@ -19,7 +19,22 @@ spec:
       protocol: HTTP
     - name: registry
       port: 5000
-      protocol: HTTP
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: registry-certs-secret
+            namespace: registry
+    - name: registry-default-port
+      port: 443
+      protocol: HTTPS
+      hostname: registry.local
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: registry-certs-secret
+            kind: Secret
+            namespace: registry
     - name: grafana
       port: 3001
       protocol: HTTP
@@ -32,10 +47,6 @@ spec:
     - name: fnf
       protocol: HTTP
       port: 8082
-      # hostname: press.longstorymedia.com
-      # allowedRoutes:
-      #   namespaces:
-      #     from: Same
 ---
 apiVersion: gateway.nginx.org/v1alpha1
 kind: ClientSettingsPolicy
@@ -64,27 +75,10 @@ spec:
         - path:
             type: PathPrefix
             value: /
-      # filters:
-      #   - type: ExtensionRef
-      #     extensionRef:
-      #       name: nextcloud-max-body-size
-      #       kind: SnippetsFilter
-      #       group: gateway.nginx.org
       backendRefs:
         - name: nextcloud
           namespace: nextcloud
           port: 8080
-# ---
-# apiVersion: gateway.nginx.org/v1alpha1
-# kind: SnippetsFilter
-# metadata:
-#   name: nc-max-body-size
-#   namespace: nginx-gateway
-# spec:
-#   snippets:
-#     - context: http.server.location
-#       value: |
-#         client_max_body_size 0;
 --- # Ollama
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -223,3 +217,25 @@ spec:
           port: 80
           namespace: fnf
           weight: 1
+--- # Registry
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: registry-route
+  namespace: nginx-gateway
+spec:
+  parentRefs:
+    - name: lsm-gateway
+      sectionName: registry
+  hostnames:
+    - "registry.local"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: registry
+          namespace: registry
+          port: 5000
+          kind: Service
