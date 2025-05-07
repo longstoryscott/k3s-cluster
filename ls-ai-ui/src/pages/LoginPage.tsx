@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, TextField, Typography, Paper, Box, Alert, CircularProgress } from '@mui/material';
+import { Button, TextField, Typography, Paper, Box, Alert, CircularProgress, useTheme } from '@mui/material';
 import { useAuth } from '../auth';
 
 const LoginPage = () => {
@@ -8,6 +8,7 @@ const LoginPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const auth = useAuth();
+  const theme = useTheme();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,12 +39,12 @@ const LoginPage = () => {
       <Paper 
         elevation={3} 
         sx={{ 
-          p: 4, 
+          p: theme.spacing(4), 
           maxWidth: 400, 
           width: '100%',
           display: 'flex',
           flexDirection: 'column',
-          gap: 2
+          gap: theme.spacing(2)
         }}
       >
         <Typography variant="h4" align="center" gutterBottom>
@@ -55,12 +56,12 @@ const LoginPage = () => {
         </Typography>
 
         {error && (
-          <Alert severity="error" sx={{ mt: 2 }}>
+          <Alert severity="error" sx={{ mt: theme.spacing(2) }}>
             {error}
           </Alert>
         )}
 
-        <Box component="form" onSubmit={handleLogin} sx={{ mt: 2 }}>
+        <Box component="form" onSubmit={handleLogin} sx={{ mt: theme.spacing(2) }}>
           <TextField
             label="Username"
             variant="outlined"
@@ -88,7 +89,7 @@ const LoginPage = () => {
             fullWidth 
             type="submit"
             disabled={isLoading || !username || !password}
-            sx={{ mt: 3, mb: 2 }}
+            sx={{ mt: theme.spacing(3), mb: theme.spacing(2) }}
           >
             {isLoading ? <CircularProgress size={24} /> : 'Sign In'}
           </Button>

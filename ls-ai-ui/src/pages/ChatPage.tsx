@@ -1,4 +1,4 @@
-import { Box, Button } from '@mui/material';
+import { Box, Button, useTheme } from '@mui/material';
 import ChatContainer from '../components/Chat/ChatContainer';
 import ChatBubble from '../components/Chat/ChatBubble';
 import { useChat } from '../chat';
@@ -15,6 +15,7 @@ const ChatPage = () => {
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
   const { user } = useAuth();
+  const theme = useTheme();
 
   const handleSummarize = async () => {
     if (!currentConversation?.id || isSummarizing) {
@@ -61,15 +62,15 @@ const ChatPage = () => {
           {summary && (
             <Box 
               sx={{ 
-                padding: 2, 
-                margin: 2, 
+                padding: theme.spacing(2), 
+                margin: theme.spacing(2), 
                 bgcolor: 'background.paper', 
-                borderRadius: 2,
+                borderRadius: theme.shape.borderRadius,
                 border: '1px dashed',
                 borderColor: 'primary.main'
               }}
             >
-              <Box sx={{ fontWeight: 'bold', mb: 1 }} className="markdown-body">Conversation Summary:</Box>
+              <Box sx={{ fontWeight: 'bold', mb: theme.spacing(1) }} className="markdown-body">Conversation Summary:</Box>
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {summary}
               </ReactMarkdown>
@@ -90,7 +91,7 @@ const ChatPage = () => {
           
           {/* Summarize button */}
           {currentConversation?.id && messages.length > 5 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', my: theme.spacing(2) }}>
               <Button
                 variant="outlined"
                 color="primary"

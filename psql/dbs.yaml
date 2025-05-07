@@ -26,7 +26,6 @@ data:
     psql -v ON_ERROR_STOP=0 --username "lsm" --dbname "postgres" <<-EOSQL
       SELECT 'CREATE DATABASE ollama' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'ollama') \gexec
       SELECT 'CREATE DATABASE nextcloud' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'nextcloud') \gexec
-      SELECT 'CREATE DATABASE wordpress' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'wordpress') \gexec
     EOSQL
 
     # Add TimescaleDB extension to required databases

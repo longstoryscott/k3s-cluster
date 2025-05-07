@@ -27,33 +27,45 @@ spec:
           configMap:
             name: ollama-init-script
             defaultMode: 0755
-      initContainers:
-        - name: create-modelfiles-dir
-          image: busybox:latest
-          command: ["sh", "-c", "mkdir -p /ollama/modelfiles"]
-          volumeMounts:
-            - name: ollama-models-volume
-              mountPath: /ollama
-          env:
-            - name: DUMMY
-              value: "true"
       containers:
         - name: ollama
           image: ollama/ollama:latest
           command: ["/bin/sh", "/scripts/init.sh"]
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - "/bin/bash"
+                  - "-c"
+                  - |
+                    # Start Ollama in the background
+                    ollama serve &
+                    # Give Ollama some time to start up
+                    sleep 10
+                    echo "Gettings models..."
+                    ollama pull llama3.2
+                    ollama pull mistral
+                    ollama pull opencoder
+                    ollama pull phi3.5
+                    ollama pull qwen3:0.6b
+                    # List available models
+                    echo "Available models:"
+                    ollama list
+                    # Wait for the ollama process
+                    wait
           ports:
             - name: http
               containerPort: 11434
               protocol: TCP
           resources:
             requests:
-              memory: "4Gi"
-              cpu: "4000m"
-              nvidia.com/gpu: 1
+              memory: "24Gi"
+              cpu: "8"
+              nvidia.com/gpu: "1"
             limits:
-              memory: "8Gi"
-              cpu: "8000m"
-              nvidia.com/gpu: 1
+              memory: "30Gi"
+              cpu: "10"
+              nvidia.com/gpu: "1"
           volumeMounts:
             - name: ollama-models-volume
               mountPath: /root/.ollama

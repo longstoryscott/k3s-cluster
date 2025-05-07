@@ -75,43 +75,13 @@ spec:
               value: "3600" # Example: 1 hour
             - name: PHP_MAX_INPUT_TIME
               value: "3600" # Example: 1 hour
-          # lifecycle:
-          #   postStart:
-          #     exec:
-          #       command:
-          #         - "/bin/bash"
-          #         - "-c"
-          #         - |
-          #           # Optimize PHP for better performance
-          #           touch /usr/local/etc/php/php.ini
-          #           echo "php_value memory_limit 1500M" > /usr/local/etc/php/php.ini
-          #           echo "php_value max_execution_time 3600" >> /usr/local/etc/php/php.ini
-          #           echo "php_value upload_max_filesize 1000G" >> /usr/local/etc/php/php.ini
-          #           echo "php_value post_max_size 1000G" >> /usr/local/etc/php/php.ini
-          #           echo "php_value max_input_time 3600" >> /usr/local/etc/php/php.ini
-          #           echo "php_value max_execution_time 3600" >> /usr/local/etc/php/php.ini
-
-          #           # Configure Apache for better performance
-          #           echo "ServerLimit 32" > /etc/apache2/conf-available/performance.conf
-          #           echo "MaxRequestWorkers 32" >> /etc/apache2/conf-available/performance.conf
-          #           echo "KeepAliveTimeout 300" >> /etc/apache2/conf-available/performance.conf
-          #           echo "MaxKeepAliveRequests 200" >> /etc/apache2/conf-available/performance.conf
-          #           echo "KeepAlive On" >> /etc/apache2/conf-available/performance.conf
-          #           echo "LimitRequestBody 0" >> /etc/apache2/conf-available/performance.conf
-          #           # echo "FcgidMaxRequestInMem 3G" >> /etc/apache2/conf-available/performance.conf
-          #           a2enconf performance
-
-          #           ln -s /etc/apache2/conf-available/performance.conf /etc/apache2/conf-enabled/performance.conf
-
-          #           # Restart Apache to apply changes
-          #           service apache2 reload || true
           resources:
             requests:
               cpu: 400m
               memory: 1000Mi
             limits:
               cpu: 600m
-              memory: 10Gi
+              memory: 2Gi
           volumeMounts:
             - name: nextcloud-data
               mountPath: /var/www/
@@ -174,6 +144,28 @@ spec:
             successThreshold: 1
             failureThreshold: 5
       initContainers:
+        # - name: fix-db-config
+        #   image: alpine:3.18
+        #   command: ["/bin/sh", "-c"]
+        #   args:
+        #     - |
+        #       echo "Fixing Nextcloud database configuration..."
+        #       if [ -f /var/www/html/config/config.php ]; then
+        #         # Create backup
+        #         cp /var/www/html/config/config.php /var/www/html/config/config.php.bak
+
+        #         # Change oc_lsm to lsm in the config file
+        #         sed -i "s/'dbuser' => 'oc_lsm'/'dbuser' => 'lsm'/g" /var/www/html/config/config.php
+
+        #         echo "Configuration updated. Original backed up to config.php.bak"
+        #         echo "New configuration:"
+        #         grep dbuser /var/www/html/config/config.php
+        #       else
+        #         echo "config.php file not found. Nothing to update."
+        #       fi
+        #   volumeMounts:
+        #     - name: nextcloud-data
+        #       mountPath: /var/www/html
         - name: postgresql-isready
           image: docker.io/bitnami/postgresql:15.4.0-debian-11-r10
           resources: {}

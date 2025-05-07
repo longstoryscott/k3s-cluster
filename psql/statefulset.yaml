@@ -1,24 +1,24 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: postgres
+  name: psql
   namespace: "psql"
   labels:
-    app: postgres
+    app: psql
 spec:
   replicas: 1
-  serviceName: postgres
+  serviceName: psql
   updateStrategy:
     rollingUpdate: {}
     type: RollingUpdate
   selector:
     matchLabels:
-      app: postgres
+      app: psql
   template:
     metadata:
-      name: postgres
+      name: psql
       labels:
-        app: postgres
+        app: psql
     spec:
       serviceAccountName: postgres
       automountServiceAccountToken: false
@@ -29,10 +29,18 @@ spec:
             - podAffinityTerm:
                 labelSelector:
                   matchLabels:
-                    app: postgres
+                    app: psql
                 topologyKey: kubernetes.io/hostname
               weight: 1
-        nodeAffinity: {}
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: workload
+                    operator: In
+                    values:
+                      - storage
       securityContext:
         fsGroup: 1001
         fsGroupChangePolicy: Always
@@ -68,7 +76,7 @@ spec:
                   name: secrets
                   key: psqlpw
             - name: POSTGRES_MULTIPLE_DATABASES
-              value: "dex_db,ollama,nextcloud"
+              value: "ollama,nextcloud"
             - name: PGROOT
               value: /home/postgres
             - name: PGDATA
@@ -112,7 +120,7 @@ spec:
               command:
                 - /bin/sh
                 - -c
-                - exec pg_isready -U "lsm" -h 127.0.0.1 -p 5432
+                - exec pg_isready -U "lsm" -d postgres -h 127.0.0.1 -p 5432
           readinessProbe:
             failureThreshold: 6
             initialDelaySeconds: 30
@@ -124,12 +132,12 @@ spec:
                 - /bin/sh
                 - -c
                 - -e
-                - exec pg_isready -U "lsm" -h 127.0.0.1 -p 5432
+                - exec pg_isready -U "lsm" -d postgres -h 127.0.0.1 -p 5432
           resources:
             limits:
-              cpu: 150m
-              ephemeral-storage: 1024Mi
-              memory: 192Mi
+              cpu: "3"
+              ephemeral-storage: 10Gi
+              memory: 1Gi
             requests:
               cpu: 100m
               ephemeral-storage: 50Mi
@@ -156,7 +164,7 @@ spec:
           emptyDir: {}
         - name: init-scripts
           configMap:
-            name: postgres-init-scripts
+            name: psql-init-scripts
   volumeClaimTemplates:
     - apiVersion: v1
       kind: PersistentVolumeClaim

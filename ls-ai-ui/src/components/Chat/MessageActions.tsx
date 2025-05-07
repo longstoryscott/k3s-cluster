@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, IconButton, Tooltip } from '@mui/material';
+import { Button, IconButton, Tooltip, Box, useTheme } from '@mui/material';
 import { Delete, Edit, Reply } from '@mui/icons-material';
 
 interface MessageActionsProps {
@@ -9,24 +9,34 @@ interface MessageActionsProps {
 }
 
 const MessageActions: React.FC<MessageActionsProps> = ({ onEdit, onDelete, onReply }) => {
+  const theme = useTheme();
+  
   return (
-    <div style={{ display: 'flex', gap: '8px' }}>
+    <Box sx={{ 
+      display: 'flex', 
+      gap: theme.spacing(1)
+    }}>
       <Tooltip title="Edit">
-        <IconButton onClick={onEdit}>
-          <Edit />
+        <IconButton onClick={onEdit} size="small">
+          <Edit fontSize="small" />
         </IconButton>
       </Tooltip>
       <Tooltip title="Delete">
-        <IconButton onClick={onDelete}>
-          <Delete />
+        <IconButton onClick={onDelete} size="small">
+          <Delete fontSize="small" />
         </IconButton>
       </Tooltip>
       <Tooltip title="Reply">
-        <Button variant="contained" onClick={onReply} startIcon={<Reply />}>
+        <Button 
+          variant="contained" 
+          onClick={onReply} 
+          startIcon={<Reply />}
+          size="small"
+        >
           Reply
         </Button>
       </Tooltip>
-    </div>
+    </Box>
   );
 };
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Paper, Typography, Link, Table, TableBody, TableCell, TableHead, TableRow } from '@mui/material';
+import { Box, Paper, Typography, Link, Table, TableBody, TableCell, TableHead, TableRow, useTheme } from '@mui/material';
 import { ChatMessage } from '../../api/types';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter, SyntaxHighlighterProps } from 'react-syntax-highlighter';
@@ -13,45 +13,50 @@ interface ChatBubbleProps {
 
 const ChatBubble: React.FC<ChatBubbleProps> = ({ message, inProgress = false }) => {
   const isUser = message.role === 'user';
+  const theme = useTheme();
 
   return (
     <Box
       sx={{
         display: 'flex',
-        justifyContent: isUser ? 'flex-end' : 'flex-start', // Restore original positioning
-        mb: 2
+        justifyContent: isUser ? 'flex-end' : 'flex-start',
+        mb: theme.spacing(2)
       }}
     >
       <Paper
         elevation={1}
         sx={{
-          p: 2,
+          p: theme.spacing(2),
           maxWidth: '75%',
-          backgroundColor: isUser ? 'primary.light' : 'background.paper',
-          color: isUser ? 'primary.contrastText' : 'text.primary',
-          borderRadius: 2,
+          backgroundColor: isUser ? theme.palette.primary.light : theme.palette.background.paper,
+          color: isUser ? theme.palette.primary.contrastText : theme.palette.text.primary,
+          borderRadius: theme.shape.borderRadius * 2,
           opacity: inProgress ? 0.9 : 1,
-          borderLeft: isUser ? 'none' : '4px solid',
-          borderLeftColor: isUser ? undefined : 'primary.main',
-          textAlign: 'left' // Ensure text inside bubbles is left-aligned
+          borderLeft: isUser ? 'none' : `${theme.spacing(0.5)} solid`,
+          borderLeftColor: isUser ? undefined : theme.palette.primary.main,
+          textAlign: 'left'
         }}
       >
         <Typography 
           variant="subtitle2" 
-          sx={{ fontWeight: 'bold', mb: 1 }}
+          sx={{ fontWeight: 'bold', mb: theme.spacing(1) }}
         >
           {isUser ? 'You' : 'Assistant'}
           {inProgress ? ' (typing...)' : ''}
         </Typography>
         
         <ReactMarkdown
-          remarkPlugins={[remarkGfm]} // Adds support for tables, strikethrough, etc.
+          remarkPlugins={[remarkGfm]}
           components={{
             // Code blocks with syntax highlighting
             code({node, className, children, ...props}) {
               const match = /language-(\w+)/.exec(className || '');
               return !className ? (
-                <code style={{ backgroundColor: '#f0f0f0', padding: '0.2em 0.4em', borderRadius: '3px' }} {...props}>
+                <code style={{ 
+                  backgroundColor: theme.palette.background.paper, 
+                  padding: `${theme.spacing(0.25)} ${theme.spacing(0.5)}`, 
+                  borderRadius: theme.shape.borderRadius / 2
+                }} {...props}>
                   {children}
                 </code>
               ) : (
@@ -85,7 +90,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, inProgress = false }) 
             // Table components
             table({node, children, ...props}) {
               return (
-                <Box sx={{ overflowX: 'auto', my: 2 }}>
+                <Box sx={{ overflowX: 'auto', my: theme.spacing(2) }}>
                   <Table size="small" {...props}>
                     {children}
                   </Table>
@@ -115,17 +120,33 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, inProgress = false }) 
                 <Box 
                   component="blockquote"
                   sx={{ 
-                    borderLeft: '4px solid',
-                    borderColor: 'grey.400',
-                    pl: 2,
-                    py: 0.5,
-                    my: 1,
-                    bgcolor: 'grey.100',
-                    borderRadius: 1
+                    borderLeft: `${theme.spacing(0.5)} solid`,
+                    borderColor: theme.palette.grey[400],
+                    pl: theme.spacing(2),
+                    py: theme.spacing(0.5),
+                    my: theme.spacing(1),
+                    bgcolor: theme.palette.grey[100],
+                    borderRadius: theme.shape.borderRadius / 4
                   }}
                   {...props}
                 >
                   {children}
+                </Box>
+              );
+            },
+
+            img({node, alt, src, ...props}) {
+              return (
+                <Box sx={{ textAlign: 'center', my: theme.spacing(2) }}>
+                  <img 
+                    src={src} 
+                    alt={alt} 
+                    style={{ 
+                      maxWidth: '100%', 
+                      borderRadius: theme.shape.borderRadius 
+                    }} 
+                    {...props} 
+                  />
                 </Box>
               );
             }

@@ -1,17 +1,33 @@
-import { CircularProgress, Typography } from '@mui/material';
+import { Box, CircularProgress, Typography, useTheme } from '@mui/material';
 
 interface ControlLoaderProps {
   text?: string;
 }
 
-const ControlLoader: React.FC<ControlLoaderProps> = ({text}) => {
+const ControlLoader = ({ text = 'Loading...' }: ControlLoaderProps) => {
+  const theme = useTheme();
+  
   return (
-    <div style={{ display: 'flex', alignItems: 'center', padding: '10px' }}>
+    <Box 
+      sx={{ 
+        display: 'flex', 
+        flexDirection: 'column',
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        p: theme.spacing(2)
+      }}
+    >
       <CircularProgress size={24} />
-      <Typography variant="body2" style={{ marginLeft: '8px' }}>
-        {text || 'Loading...'}
-      </Typography>
-    </div>
+      {text && (
+        <Typography 
+          variant="body2" 
+          color="text.secondary" 
+          sx={{ mt: theme.spacing(1) }}
+        >
+          {text}
+        </Typography>
+      )}
+    </Box>
   );
 };
 

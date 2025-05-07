@@ -27,6 +27,7 @@ export interface ChatContextType {
   setConversationTitle: ReturnType<typeof useChatOperations>['setConversationTitle'];
   setSelectedModel: ReturnType<typeof useChatState>[1]['setSelectedModel'];
   fetchModels: ReturnType<typeof useChatOperations>['fetchModels'];
+  setCurrentConversation: ReturnType<typeof useChatState>[1]['setCurrentConversation'];
 }
 
 export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -75,6 +76,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     selectConversation: operations.selectConversation,
     setConversationTitle: operations.setConversationTitle,
     setSelectedModel: actions.setSelectedModel,
+    setCurrentConversation: actions.setCurrentConversation,
     fetchModels: operations.fetchModels
   };
 

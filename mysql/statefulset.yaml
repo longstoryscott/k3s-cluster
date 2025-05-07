@@ -21,6 +21,15 @@ spec:
       securityContext:
         fsGroup: 1001
         fsGroupChangePolicy: Always
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: workload
+                    operator: In
+                    values:
+                      - storage
       containers:
         - name: mysql
           image: mysql:8.0

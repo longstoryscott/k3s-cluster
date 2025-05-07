@@ -57,16 +57,21 @@ data:
       "logfile"           => "nextcloud.log",
       "loglevel"          => 3,
       "logdateformat"     => "F d, Y H:i:s",
+      'dbname'            => 'nextcloud',
+      'dbuser'            => getenv('POSTGRES_USER'),
+      'dbpass'            => getenv('POSTGRES_PASSWORD'),  
+      'dbpassword'        => getenv('POSTGRES_PASSWORD'),
     );
 
   autoconfig.php: |
     <?php
     $autoconfig = array (
-      'directory'   => '/var/www/html/data',
-      'dbtype'      => 'pgsql',
-      'dbname'      => 'nextcloud',
-      'dbuser'      => getenv('POSTGRES_USER'),
-      'dbpass'      => getenv('POSTGRES_PASSWORD'),
-      'dbhost'      => 'postgres.psql.svc.cluster.local',
+      'directory'     => '/var/www/html/data',
+      'dbtype'        => 'pgsql',
+      'dbname'        => 'nextcloud',
+      'dbuser'        => getenv('POSTGRES_USER'),
+      'dbpass'        => getenv('POSTGRES_PASSWORD'),  
+      'dbpassword'    => getenv('POSTGRES_PASSWORD'),
+      'dbhost'        => 'postgres.psql.svc.cluster.local',
       'dbtableprefix' => 'oc_',
     );

@@ -1,5 +1,5 @@
 import './App.css'
-import { Box, Button, Grid, Paper, TextField, Typography } from "@mui/material";
+import { Box, Button, Grid, Paper, TextField, Typography, useTheme } from "@mui/material";
 import * as React from "react";
 import { gen } from "./api";
 import { useAuth } from './auth';
@@ -13,6 +13,7 @@ function Prompt() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [model, setModel] = React.useState('phi3.5');
   const auth = useAuth();
+  const theme = useTheme();
 
   const generateResponse = async () => {
     const generator = gen({
@@ -51,7 +52,7 @@ function Prompt() {
   }
 
   return (
-    <Grid container spacing={2} style={{ padding: 20 }}>
+    <Grid container spacing={2} sx={{ padding: theme.spacing(2.5) }}>
       <TextField
         placeholder="Prompt"
         color="secondary"
@@ -68,7 +69,7 @@ function Prompt() {
       <Button onClick={generateResponse} type='submit'>Generate</Button>
 
       {response && (
-        <Paper elevation={2} sx={{ p: 2, mt: 2 }}>
+        <Paper elevation={2} sx={{ p: theme.spacing(2), mt: theme.spacing(2) }}>
           <Typography variant="h6" gutterBottom>Response:</Typography>
           <Box className="markdown-response">
             <ReactMarkdown>

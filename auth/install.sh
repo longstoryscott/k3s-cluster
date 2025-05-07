@@ -18,3 +18,4 @@ kubectl create configmap config \
 kubectl apply -f "${1}/deployment.yaml" --wait=true
 kubectl rollout status deployment/dex -n auth
 kubectl apply -f "${1}/service.yaml" --wait=true
+kubectl apply -f "${1}/referencegrant.yaml" --wait=true

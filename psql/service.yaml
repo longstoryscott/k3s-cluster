@@ -5,7 +5,7 @@ metadata:
   namespace: "psql"
 spec:
   selector:
-    app: postgres
+    app: psql
   ports:
     - name: tcp-postgresql
       port: 5432

@@ -1,4 +1,4 @@
-import { Box, Divider, Typography } from '@mui/material';
+import { Box, Divider, Typography, useTheme } from '@mui/material';
 import { useAuth } from '../../auth';
 import ChatHistory from '../Sidebar/ChatHistory';
 import NewChatButton from '../Sidebar/NewChatButton';
@@ -6,6 +6,7 @@ import Navigation from './Navigation';
 
 const Sidebar = () => {
   const { user } = useAuth();
+  const theme = useTheme();
 
   return (
     <Box
@@ -15,20 +16,20 @@ const Sidebar = () => {
         height: '100vh',
         display: 'flex',
         flexDirection: 'column',
-        padding: 2
+        padding: theme.spacing(2)
       }}
     >
-      <Typography variant="h6" sx={{ mb: 2 }}>
+      <Typography variant="h6" sx={{ mb: theme.spacing(2) }}>
         Welcome, {user.name || 'User'}
       </Typography>
       
       <Navigation />
       
-      <Box sx={{ mt: 2, mb: 2 }}>
+      <Box sx={{ mt: theme.spacing(2), mb: theme.spacing(2) }}>
         <NewChatButton />
       </Box>
       
-      <Divider sx={{ my: 1 }} />
+      <Divider sx={{ my: theme.spacing(1) }} />
       
       <Box sx={{ flex: 1, overflow: 'auto' }}>
         <ChatHistory />

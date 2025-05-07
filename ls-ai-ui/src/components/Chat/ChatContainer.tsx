@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react';
 import ChatInput from './ChatInput';
-import { Box } from '@mui/material';
+import { Box, useTheme } from '@mui/material';
 import { useChat } from '../../chat';
 
 const ChatContainer = ({children}: React.PropsWithChildren<unknown>) => {
   const { response, isTyping } = useChat();
   const containerRef = useRef<HTMLDivElement>(null);
+  const theme = useTheme();
 
   useEffect(() => {
     // Scroll to the bottom of the chat when messages change or during typing
@@ -24,7 +25,7 @@ const ChatContainer = ({children}: React.PropsWithChildren<unknown>) => {
         overflow: 'auto'
       }}
     >
-      <Box sx={{ flex: 1, p: 2, overflow: 'auto' }}>
+      <Box sx={{ flex: 1, p: theme.spacing(2), overflow: 'auto' }}>
         {/* Children will contain the messages displayed by ChatPage */}
         {children}
       </Box>
