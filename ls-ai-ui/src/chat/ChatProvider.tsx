@@ -19,6 +19,7 @@ export interface ChatContextType {
   
   // Actions
   sendMessage: ReturnType<typeof useChatOperations>['sendMessage'];
+  retryMessage: ReturnType<typeof useChatOperations>['retryMessage'];
   fetchMessages: ReturnType<typeof useChatOperations>['fetchMessages'];
   fetchConversations: ReturnType<typeof useChatOperations>['fetchConversations'];
   deleteConversation: ReturnType<typeof useChatOperations>['deleteConversation'];
@@ -69,6 +70,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     // Actions
     sendMessage: operations.sendMessage,
+    retryMessage: operations.retryMessage,
     fetchMessages: operations.fetchMessages,
     fetchConversations: operations.fetchConversations,
     deleteConversation: operations.deleteConversation,

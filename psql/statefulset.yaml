@@ -137,7 +137,7 @@ spec:
             limits:
               cpu: "3"
               ephemeral-storage: 10Gi
-              memory: 1Gi
+              memory: 6Gi
             requests:
               cpu: 100m
               ephemeral-storage: 50Mi

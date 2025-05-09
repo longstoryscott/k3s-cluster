@@ -7,20 +7,24 @@ import (
 	"log"
 	"proxyllama/config"
 	"proxyllama/models"
+	"proxyllama/proxy"
 	"proxyllama/storage"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// ConversationContext holds data needed to maintain context across requests
+// ConversationContext manages context for a conversation
 type ConversationContext struct {
-	ConversationID int              `json:"conversation_id"`
-	Title          string           `json:"title"`
-	UserID         string           `json:"user_id"`
-	Model          string           `json:"model"`
-	Messages       []models.Message `json:"messages"`
-	Summaries      []models.Summary `json:"summaries"`                // Holds summaries of older messages
-	MasterSummary  *models.Summary  `json:"master_summary,omitempty"` // Special summary of all summaries
+	UserID            string
+	ConversationID    int
+	Title             string
+	Model             string
+	MasterSummary     *models.Summary
+	Summaries         []models.Summary
+	Messages          []models.Message
+	RetrievedMemories []models.Message // Memories retrieved using semantic or keyword search
 }
 
 // GetOrCreateConversation retrieves or creates a conversation context
@@ -227,6 +231,34 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 		Stream: true,
 	}
 
+	// Add retrieved memories first if available
+	if len(cc.RetrievedMemories) > 0 {
+		req.Messages = append(req.Messages, CreateSystemMessage(
+			"Here is some potentially relevant context from our past discussions:"))
+
+		for _, mem := range cc.RetrievedMemories {
+			// For system role messages, keep them as system
+			role := "system"
+			if strings.Contains(mem.Content, "From conversation") {
+				// Already formatted as system message
+				content := mem.Content
+				req.Messages = append(req.Messages, models.OllamaMessage{
+					Role:    role,
+					Content: content,
+				})
+			} else {
+				// Format the memory with role information
+				content := fmt.Sprintf("Previously (%s): %s", mem.Role, mem.Content)
+				req.Messages = append(req.Messages, models.OllamaMessage{
+					Role:    role,
+					Content: content,
+				})
+			}
+		}
+
+		log.Printf("Added %d retrieved memories to request context", len(cc.RetrievedMemories))
+	}
+
 	// Add master summary if available
 	if cc.MasterSummary != nil {
 		// Add system message to introduce the conversation with master summary
@@ -249,9 +281,22 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 		return nil, err
 	}
 
+	// Apply RAG enhancement if enabled (adds relevant memories from previous conversations)
+	conf := config.GetConfig()
+	if conf.Summarization.EnableRAG {
+		ctx := context.Background()
+		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		if err := EnhanceRequestWithRAG(timeoutCtx, &req); err != nil {
+			// Log the error but continue without RAG
+			log.Printf("Failed to enhance request with RAG: %v", err)
+		}
+	}
+
 	// debug log the content of each message in the request
-	for _, msg := range req.Messages {
-		log.Printf("Message: %s", msg.Content)
+	for i, msg := range req.Messages {
+		log.Printf("Message %d [%s]: %s", i, msg.Role, truncateForLog(msg.Content))
 	}
 
 	log.Printf("Message chain order: %s", describeMessageChain(req.Messages))
@@ -323,4 +368,178 @@ func (cc *ConversationContext) addRecentMessagesToReq(req *models.OllamaReq) err
 	}
 
 	return nil
+}
+
+// CreateSystemMessage is a helper to create a system message
+func CreateSystemMessage(content string) models.OllamaMessage {
+	return models.OllamaMessage{
+		Role:    "system",
+		Content: content,
+	}
+}
+
+// describeMessageChain returns a string describing the message chain order
+func describeMessageChain(messages []models.OllamaMessage) string {
+	result := ""
+	for _, msg := range messages {
+		// Append first character of role (S for system, U for user, A for assistant)
+		result += string(msg.Role[0])
+	}
+	return result
+}
+
+// generateTitle creates a title from the first user message
+func generateTitle(content string) string {
+	// Simple implementation: use first 30 chars of content or less
+	maxLen := 30
+	title := content
+	if len(title) > maxLen {
+		title = title[:maxLen] + "..."
+	}
+	return title
+}
+
+// truncateForLog truncates a string for logging purposes
+func truncateForLog(content string) string {
+	maxLen := 100
+	if len(content) <= maxLen {
+		return content
+	}
+	return content[:maxLen] + "..."
+}
+
+// RetrieveAndInjectMemories retrieves relevant memories based on the current user query
+func (cc *ConversationContext) RetrieveAndInjectMemories(ctx context.Context, currentUserQuery string) error {
+	// Clear any previous memories
+	cc.RetrievedMemories = nil
+
+	conf := config.GetConfig()
+	if !conf.Retrieval.Enabled {
+		return nil // Retrieval disabled in config
+	}
+
+	// Check if query suggests memory retrieval would be helpful
+	shouldRetrieve := cc.shouldRetrieveMemories(currentUserQuery)
+	if !shouldRetrieve && !conf.Retrieval.AlwaysRetrieve {
+		log.Printf("Query doesn't appear to need memory retrieval, skipping")
+		return nil
+	}
+
+	// Set a search limit from config or default
+	limit := conf.Retrieval.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+
+	// First try vector similarity search if RAG is enabled
+	if conf.Summarization.EnableRAG {
+		log.Printf("Performing semantic search for memories")
+		queryEmbedding, err := proxy.GetEmbedding(ctx, currentUserQuery, conf.Summarization.EmbeddingModel)
+		if err == nil && len(queryEmbedding) > 0 {
+			// Search in the current conversation first
+			similarMessages, err := storage.SearchMessagesBySimilarity(ctx, cc.ConversationID, queryEmbedding, limit)
+			if err == nil && len(similarMessages) > 0 {
+				log.Printf("Found %d semantically similar messages in current conversation", len(similarMessages))
+				// Convert and add to retrieved memories
+				for _, msg := range similarMessages {
+					cc.RetrievedMemories = append(cc.RetrievedMemories, models.Message{
+						Role:    msg.Role,
+						Content: msg.Content,
+						ID:      msg.ID,
+					})
+				}
+				return nil
+			}
+
+			// If cross-conversation memory retrieval is enabled, try that
+			if conf.Retrieval.EnableCrossConversation {
+				// Search across all conversations with similarity threshold
+				threshold := conf.Retrieval.SimilarityThreshold
+				if threshold <= 0 {
+					threshold = 0.7 // Default threshold
+				}
+
+				similarMessages, err = storage.SearchAllMessagesBySimilarity(ctx, queryEmbedding, threshold, limit)
+				if err == nil && len(similarMessages) > 0 {
+					log.Printf("Found %d semantically similar messages across conversations", len(similarMessages))
+					// Convert and add to retrieved memories
+					for _, msg := range similarMessages {
+						formattedContent := fmt.Sprintf(
+							"From conversation #%d (%s): %s",
+							msg.ConversationID,
+							msg.Role,
+							msg.Content,
+						)
+						cc.RetrievedMemories = append(cc.RetrievedMemories, models.Message{
+							Role:    "system", // Treat cross-conversation memories as system context
+							Content: formattedContent,
+							ID:      msg.ID,
+						})
+					}
+					return nil
+				}
+			}
+		}
+	}
+
+	// Fall back to keyword search if vector search didn't yield results
+	log.Printf("Falling back to keyword search")
+	keywordMessages, err := storage.SearchMessagesByKeyword(ctx, cc.ConversationID, currentUserQuery, limit)
+	if err == nil && len(keywordMessages) > 0 {
+		log.Printf("Found %d keyword-matched messages", len(keywordMessages))
+		// Convert and add to retrieved memories
+		for _, msg := range keywordMessages {
+			cc.RetrievedMemories = append(cc.RetrievedMemories, models.Message{
+				Role:    msg.Role,
+				Content: msg.Content,
+				ID:      msg.ID,
+			})
+		}
+		return nil
+	}
+
+	log.Printf("No relevant memories found for query: %s", truncateForLog(currentUserQuery))
+	return nil
+}
+
+// shouldRetrieveMemories determines if a query likely needs memory retrieval
+func (cc *ConversationContext) shouldRetrieveMemories(query string) bool {
+	// Convert query to lowercase for case-insensitive matching
+	lowercaseQuery := strings.ToLower(query)
+
+	// List of keywords and phrases that suggest the user is asking about past information
+	memoryTriggers := []string{
+		"remember", "recall", "previous", "earlier", "before", "last time",
+		"you said", "mentioned", "told me", "yesterday", "last week",
+		"forgot", "remind me", "i asked", "we discussed", "we talked about",
+		"what did i", "what did you", "did i tell", "did you tell",
+	}
+
+	// Check if any memory trigger is in the query
+	for _, trigger := range memoryTriggers {
+		if strings.Contains(lowercaseQuery, trigger) {
+			log.Printf("Memory retrieval triggered by keyword: %s", trigger)
+			return true
+		}
+	}
+
+	// Question patterns that often benefit from memory retrieval
+	questionPatterns := []string{
+		"what was", "who was", "where was", "when was", "how was",
+		"what were", "who were", "where were", "when were", "how were",
+		"what did", "who did", "where did", "when did", "how did",
+	}
+
+	// Check for question patterns
+	for _, pattern := range questionPatterns {
+		if strings.Contains(lowercaseQuery, pattern) {
+			// Check if the question appears to be about past interactions
+			if strings.Contains(lowercaseQuery, "you") || strings.Contains(lowercaseQuery, "we") || strings.Contains(lowercaseQuery, "i") {
+				log.Printf("Memory retrieval triggered by question pattern: %s", pattern)
+				return true
+			}
+		}
+	}
+
+	return false
 }

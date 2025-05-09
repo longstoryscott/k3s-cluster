@@ -1,10 +1,13 @@
 import React from 'react';
-import { Box, Paper, Typography, Link, Table, TableBody, TableCell, TableHead, TableRow, useTheme } from '@mui/material';
-import { ChatMessage } from '../../api/types';
+import { Box, Paper, Typography, Link, Table, TableBody, TableCell, TableHead, TableRow, useTheme, Button } from '@mui/material';
+import { ChatMessage, ChatUserMessage } from '../../api/types';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter, SyntaxHighlighterProps } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import remarkGfm from 'remark-gfm';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import ReplayIcon from '@mui/icons-material/Replay';
+import { useChat } from '../../chat';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -13,7 +16,16 @@ interface ChatBubbleProps {
 
 const ChatBubble: React.FC<ChatBubbleProps> = ({ message, inProgress = false }) => {
   const isUser = message.role === 'user';
+  const isError = message.status === 'error';
   const theme = useTheme();
+  const { retryMessage } = useChat();
+
+  const handleRetry = () => {
+    // Only retry if this is an error message from the user that has a conversation ID
+    if (isError && isUser && 'conversationId' in message) {
+      retryMessage(message as ChatUserMessage);
+    }
+  };
 
   return (
     <Box
@@ -33,17 +45,47 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, inProgress = false }) 
           borderRadius: theme.shape.borderRadius * 2,
           opacity: inProgress ? 0.9 : 1,
           borderLeft: isUser ? 'none' : `${theme.spacing(0.5)} solid`,
-          borderLeftColor: isUser ? undefined : theme.palette.primary.main,
+          borderLeftColor: isUser ? undefined : isError ? theme.palette.error.main : theme.palette.primary.main,
           textAlign: 'left'
         }}
       >
-        <Typography 
-          variant="subtitle2" 
-          sx={{ fontWeight: 'bold', mb: theme.spacing(1) }}
-        >
-          {isUser ? 'You' : 'Assistant'}
-          {inProgress ? ' (typing...)' : ''}
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: theme.spacing(1) }}>
+          <Typography 
+            variant="subtitle2" 
+            sx={{ fontWeight: 'bold' }}
+          >
+            {isUser ? 'You' : 'Assistant'}
+            {inProgress ? ' (typing...)' : ''}
+          </Typography>
+          
+          {isError && isUser && (
+            <Button
+              startIcon={<ReplayIcon />}
+              color="error"
+              size="small"
+              onClick={handleRetry}
+              variant="outlined"
+              sx={{ ml: theme.spacing(1) }}
+            >
+              Retry
+            </Button>
+          )}
+        </Box>
+
+        {isError && isUser && (
+          <Box sx={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            color: theme.palette.error.main, 
+            mb: theme.spacing(1),
+            p: theme.spacing(1),
+            bgcolor: theme.palette.error.light,
+            borderRadius: theme.shape.borderRadius
+          }}>
+            <ErrorOutlineIcon fontSize="small" sx={{ mr: theme.spacing(1) }} />
+            <Typography variant="caption">Failed to send. Click retry to try again.</Typography>
+          </Box>
+        )}
         
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}

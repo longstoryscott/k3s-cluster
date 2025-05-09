@@ -2,6 +2,7 @@ import React from 'react';
 import { ListItem, ListItemText, ListItemIcon, IconButton } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useChat } from '../../chat';
+import { useNavigate } from 'react-router-dom';
 
 interface ChatItemProps {
   chatId: number;
@@ -11,6 +12,12 @@ interface ChatItemProps {
 
 const ChatItem: React.FC<ChatItemProps> = ({ chatId, chatTitle, onSelect }) => {
   const { deleteConversation } = useChat();
+  const navigate = useNavigate();
+
+  const handleSelect = () => {
+    navigate(`/chat/${chatId}`);
+    onSelect(chatId);
+  };
 
   const handleDelete = (event: React.MouseEvent) => {
     event.stopPropagation();
@@ -18,7 +25,7 @@ const ChatItem: React.FC<ChatItemProps> = ({ chatId, chatTitle, onSelect }) => {
   };
 
   return (
-    <ListItem sx={{ cursor: 'pointer' }} onClick={() => onSelect(chatId)}>
+    <ListItem sx={{ cursor: 'pointer' }} onClick={handleSelect}>
       <ListItemText primary={chatTitle} />
       <ListItemIcon>
         <IconButton edge="end" aria-label="delete" onClick={handleDelete}>

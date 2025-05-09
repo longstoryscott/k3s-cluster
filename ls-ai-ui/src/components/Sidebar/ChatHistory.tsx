@@ -17,6 +17,8 @@ const ChatHistory = () => {
     selectConversation(chatId);
   };
 
+  console.log('ChatHistory conversations:', conversations);
+
   return (
     <Box>
       <Typography variant="subtitle1" sx={{ mb: theme.spacing(1) }}>

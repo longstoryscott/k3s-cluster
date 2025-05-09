@@ -60,15 +60,15 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
       if (conversation) {
         actions.setCurrentConversation(conversation);
       } else {
-        // If not in our list, fetch the conversation details
+        // If not in our list, fetch all conversations
         const conversationsData = await getManyConversations(getToken());
+        // Update the full conversations list
+        actions.setConversations(conversationsData);
+
+        // Find and set the current conversation from the fetched data
         const foundConversation = conversationsData.find(c => c.id === conversationId);
         if (foundConversation) {
           actions.setCurrentConversation(foundConversation);
-          actions.setConversations([
-            foundConversation,
-            ...state.conversations.filter(c => c.id !== conversationId)
-          ]);
         }
       }
     } catch (err: unknown) {
@@ -120,6 +120,14 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     // Clear previous response
     actions.setResponse('');
 
+    // Create a unique ID for this message instance to help with tracking
+    const messageId = Date.now().toString();
+    const messageWithStatus = {
+      ...message,
+      status: 'sending' as const,
+      _clientId: messageId // Add a client-side ID to track this specific message instance
+    };
+
     try {
       // Make sure we have a conversation
       let conversationId = state.currentConversation?.id;
@@ -128,7 +136,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
       }
 
       // Update UI immediately with the user message
-      actions.addMessage(message);
+      actions.addMessage(messageWithStatus);
 
       // Stream the assistant's response
       const generator = chat(getToken(), state.selectedModel, state.messages, message);
@@ -150,21 +158,36 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
       if (completeResponse) {
         const assistantMessage: ChatAgentMessage = {
           role: 'assistant',
-          content: completeResponse
+          content: completeResponse,
+          status: 'success'
         };
         actions.addMessage(assistantMessage);
       }
 
+      // Update the original message to success status by finding it with the client ID
+      const updatedMessages = state.messages.map(msg =>
+        ('_clientId' in msg && msg._clientId === messageId)
+          ? { ...msg, status: 'success' as const }
+          : msg
+      );
+      actions.setMessages(updatedMessages);
+
       // Keep the final response visible
       actions.setIsTyping(false);
 
-      // Don't reset the response after streaming
-      // The response will stay visible until the user starts a new conversation
-      // or clicks on a different conversation
-
     } catch (err: unknown) {
-      actions.setError((err as Error).message);
       console.error("Error sending message:", err);
+      actions.setError((err as Error).message);
+
+      // Find the message by client ID and update its status to error
+      const updatedMessages = state.messages.map(msg =>
+        ('_clientId' in msg && msg._clientId === messageId)
+          ? { ...msg, status: 'error' as const }
+          : msg
+      );
+
+      // Important: Use the updated messages, not the original state.messages
+      actions.setMessages(updatedMessages);
     } finally {
       actions.setIsLoading(false);
       actions.setIsTyping(false);
@@ -178,6 +201,37 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     getToken,
     startNewConversation
   ]);
+
+  // Retry a failed message
+  const retryMessage = useCallback(async (failedMessage: ChatUserMessage) => {
+    if (state.isTyping) {
+      console.warn("Already processing a message, please wait.");
+      return;
+    }
+
+    // Find the message in the current state that needs to be retried
+    const messageToRetry = state.messages.find(msg =>
+      msg.role === failedMessage.role &&
+      msg.content === failedMessage.content &&
+      msg.status === 'error'
+    );
+
+    if (!messageToRetry) {
+      console.warn("Failed message not found in current state.");
+      return;
+    }
+
+    // Create a new message object from the failed one, without the error status
+    const newMessage: ChatUserMessage = {
+      role: failedMessage.role,
+      content: failedMessage.content,
+      conversationId: failedMessage.conversationId
+      // Don't include the error status
+    };
+
+    // Send the message again
+    await sendMessage(newMessage);
+  }, [state.isTyping, state.messages, sendMessage]);
 
   // Delete a conversation
   const deleteConversation = useCallback(async (id: number) => {
@@ -243,6 +297,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     fetchMessages,
     startNewConversation,
     sendMessage,
+    retryMessage,
     deleteConversation,
     selectConversation,
     setConversationTitle,

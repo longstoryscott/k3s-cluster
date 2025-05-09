@@ -25,16 +25,22 @@ export type ChatConversation = {
   updatedAt?: Date;
 }
 
-export type ChatMessage = {
-  id?: number;
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
-  createdAt?: Date;
-  updatedAt?: Date;
-};
+export type MessageStatus = 'sending' | 'success' | 'error';
 
-export type ChatUserMessage = ChatMessage & {
-  conversationId: number;
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  status?: MessageStatus;
+  _clientId?: string;  // For tracking message in UI during send process
+}
+
+export interface ChatUserMessage extends ChatMessage {
+  role: 'user';
+  conversationId?: number;
+}
+
+export interface ChatAgentMessage extends ChatMessage {
+  role: 'assistant';
 }
 
 export type ChatRequest = {
@@ -46,9 +52,6 @@ export type ChatRequest = {
   stream?: boolean;
   keep_alive?: string;
 }
-
-export type ChatAgentMessage = ChatMessage;
-
 
 export type ChatResponse = {
   done: boolean;

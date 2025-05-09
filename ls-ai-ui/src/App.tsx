@@ -32,6 +32,9 @@ function App() {
         <Route path="/" element={
           auth.isAuthenticated ? <MainLayout> <ChatPage /> </MainLayout> : <Navigate to="/login" />
         } />
+        <Route path="/chat/:conversationId" element={
+          auth.isAuthenticated ? <MainLayout> <ChatPage /> </MainLayout> : <Navigate to="/login" />
+        } />
         <Route path="/settings" element={
           auth.isAuthenticated ? <MainLayout> <SettingsPage /> </MainLayout> : <Navigate to="/login" />
         } />

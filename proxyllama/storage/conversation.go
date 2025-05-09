@@ -33,12 +33,6 @@ const (
 		WHERE user_id = $1 
 		ORDER BY updated_at DESC
 	`
-	sqlGetConversationHistory = `
-		SELECT id, conversation_id, role, content, created_at
-		FROM messages
-		WHERE conversation_id = $1
-		ORDER BY created_at ASC
-	`
 	sqlUpdateConversationTitle = `
 		UPDATE conversations 
 		SET title = $1, updated_at = NOW() 
@@ -58,36 +52,39 @@ func CreateConversation(ctx context.Context, userID, model string, title string)
 
 	var conversationID int
 	err := Pool.QueryRow(ctx, sqlCreateConversation, userID, model, title).Scan(&conversationID)
-	return conversationID, err
-}
-
-// GetConversationHistory retrieves all messages for a conversation
-func GetConversationHistory(ctx context.Context, conversationID int) ([]Message, error) {
-	rows, err := Pool.Query(ctx, sqlGetConversationHistory, conversationID)
 	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var messages []Message
-	for rows.Next() {
-		var msg Message
-		if err := rows.Scan(&msg.ID, &msg.ConversationID, &msg.Role, &msg.Content, &msg.CreatedAt); err != nil {
-			return nil, err
-		}
-		messages = append(messages, msg)
+		return 0, err
 	}
 
-	// Check for errors from iterating over rows
-	if err := rows.Err(); err != nil {
-		return nil, err
+	// Create a conversation object for caching
+	conversation := &Conversation{
+		ID:        conversationID,
+		UserID:    userID,
+		Title:     title,
+		Model:     model,
+		CreatedAt: time.Now(), // Approximate time until we fetch from DB
+		UpdatedAt: time.Now(),
 	}
 
-	return messages, nil
+	// Cache the new conversation
+	if err := CacheConversation(ctx, conversation); err != nil {
+		// Log but don't fail on cache error
+	}
+
+	// Invalidate the user's conversations list cache
+	InvalidateUserConversationsCache(ctx, userID)
+
+	return conversationID, nil
 }
 
 // GetUserConversations gets all conversations for a user, ordered by most recent
 func GetUserConversations(ctx context.Context, userID string) ([]Conversation, error) {
+	// Try to get from cache first
+	if conversations, found := GetConversationsByUserIDFromCache(ctx, userID); found {
+		return conversations, nil
+	}
+
+	// Not in cache, get from database
 	rows, err := Pool.Query(ctx, sqlGetUserConversations, userID)
 	if err != nil {
 		return nil, err
@@ -108,11 +105,22 @@ func GetUserConversations(ctx context.Context, userID string) ([]Conversation, e
 		return nil, err
 	}
 
+	// Cache the conversations list
+	if err := CacheConversationsByUserID(ctx, userID, conversations); err != nil {
+		// Just log, don't fail on cache error
+	}
+
 	return conversations, nil
 }
 
 // GetConversation retrieves a single conversation by ID
 func GetConversation(ctx context.Context, conversationID int) (*Conversation, error) {
+	// Try to get from cache first
+	if conversation, found := GetConversationFromCache(ctx, conversationID); found {
+		return conversation, nil
+	}
+
+	// Not in cache, get from database
 	var conv Conversation
 	err := Pool.QueryRow(ctx, sqlGetConversation, conversationID).Scan(
 		&conv.ID, &conv.UserID, &conv.Title, &conv.Model, &conv.CreatedAt, &conv.UpdatedAt,
@@ -122,17 +130,45 @@ func GetConversation(ctx context.Context, conversationID int) (*Conversation, er
 		return nil, err
 	}
 
+	// Cache for future use
+	if err := CacheConversation(ctx, &conv); err != nil {
+		// Just log, don't fail on cache error
+	}
+
 	return &conv, nil
 }
 
 // UpdateConversationTitle updates the title of a conversation
 func UpdateConversationTitle(ctx context.Context, conversationID int, title string) error {
 	_, err := Pool.Exec(ctx, sqlUpdateConversationTitle, title, conversationID)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// If successful, invalidate the conversation cache
+	InvalidateConversationCache(ctx, conversationID)
+
+	// Also invalidate any user conversations lists that might include this conversation
+	// Get the conversation to find the userID
+	conversation, err := GetConversation(ctx, conversationID)
+	if err == nil {
+		// We got the conversation after the update, so let's invalidate the user's list
+		InvalidateUserConversationsCache(ctx, conversation.UserID)
+	}
+
+	return nil
 }
 
 // DeleteConversation deletes a conversation and all its messages using transaction
 func DeleteConversation(ctx context.Context, conversationID int) error {
+	// Get the conversation to find the userID before deletion
+	conversation, err := GetConversation(ctx, conversationID)
+	if err != nil {
+		return fmt.Errorf("failed to get conversation before deletion: %w", err)
+	}
+
+	userID := conversation.UserID
+
 	// Start a transaction for atomicity
 	tx, err := Pool.Begin(ctx)
 	if err != nil {
@@ -152,6 +188,12 @@ func DeleteConversation(ctx context.Context, conversationID int) error {
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+
+	// Invalidate caches
+	InvalidateConversationCache(ctx, conversationID)
+	InvalidateConversationMessagesCache(ctx, conversationID)
+	InvalidateConversationSummariesCache(ctx, conversationID)
+	InvalidateUserConversationsCache(ctx, userID)
 
 	return nil
 }

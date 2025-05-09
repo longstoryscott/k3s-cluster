@@ -71,6 +71,9 @@ fnf: ex
 ollama:
 	$(OLLAMA)/install.sh $(OLLAMA)
 
+redis:
+	$(REDIS)/install.sh $(REDIS)
+
 proxyllama:
 	$(PROXYLLAMA)/install.sh $(PROXYLLAMA)
 
@@ -86,4 +89,4 @@ sync:
 apply: sync
 	ssh -p 2222 lsm@lsnet.tplinkdns.com "cd k8s && make"
 
-.PHONY: router ex ollama psql mysql proxyllama nc monitoring fnf registry registry-user registry-renew-cert configure-docker registry-trust-cert
+.PHONY: router ex ollama psql mysql proxyllama nc monitoring fnf registry redis auth

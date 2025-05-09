@@ -7,12 +7,90 @@ import (
 	"proxyllama/config"
 	"proxyllama/models"
 	"proxyllama/storage"
+	"strings"
 )
 
 // shouldSummarize checks if we have enough messages to create a summary
 func (cc *ConversationContext) shouldSummarize() bool {
 	// We need at least N messages (where N is configurable) to create a summary
 	return len(cc.Messages) >= config.GetConfig().Summarization.MessagesBeforeSummary
+}
+
+// determinePromptType analyzes messages to determine the most appropriate system prompt type
+func (cc *ConversationContext) determinePromptType(messages []models.Message) string {
+	// Default to standard summary prompt
+	promptType := "standard"
+
+	// If no messages, return default
+	if len(messages) == 0 {
+		return promptType
+	}
+
+	// Calculate average message length
+	totalLength := 0
+	for _, msg := range messages {
+		totalLength += len(msg.Content)
+	}
+	avgLength := totalLength / len(messages)
+
+	// Very short messages (less than 50 chars on average) might benefit from a brief prompt
+	if avgLength < 50 {
+		promptType = "brief"
+		log.Printf("Using brief summary prompt due to short average message length (%d chars)", avgLength)
+	} else if avgLength > 500 {
+		// Long messages might benefit from key points extraction
+		promptType = "keypoints"
+		log.Printf("Using key points summary prompt due to long average message length (%d chars)", avgLength)
+	}
+
+	// Check if the messages are mostly code-related (containing code blocks or technical terms)
+	codeIndicators := []string{"```", "function", "class", "import ", "const ", "var ", "let ", "def ", "return"}
+	codeCount := 0
+	for _, msg := range messages {
+		for _, indicator := range codeIndicators {
+			if strings.Contains(strings.ToLower(msg.Content), indicator) {
+				codeCount++
+				break
+			}
+		}
+	}
+
+	// If more than half the messages appear to be code-related, use a code summary prompt
+	if codeCount > len(messages)/2 {
+		promptType = "code"
+		log.Printf("Using code summary prompt as %d/%d messages contain code patterns", codeCount, len(messages))
+	}
+
+	return promptType
+}
+
+// getSystemPrompt selects the appropriate system prompt based on prompt type
+func (cc *ConversationContext) getSystemPrompt(promptType string) string {
+	conf := config.GetConfig()
+
+	switch promptType {
+	case "brief":
+		// Use brief prompt if configured, otherwise use a default brief prompt
+		if conf.Summarization.BriefSystemPrompt != "" {
+			return conf.Summarization.BriefSystemPrompt
+		}
+		return "Create a very concise summary of these short messages. Focus only on essential information and be extremely brief."
+
+	case "keypoints":
+		// Use key points prompt if configured, otherwise use a default key points prompt
+		if conf.Summarization.KeyPointsSystemPrompt != "" {
+			return conf.Summarization.KeyPointsSystemPrompt
+		}
+		return "Extract and list the key points from these detailed messages. Identify the main ideas and important details, organizing them in a clear structure."
+
+	case "code":
+		// Default code summarization prompt (could also be moved to config)
+		return "Summarize this code-related conversation. Focus on technical concepts, code snippets, programming decisions, and implementation details. Include relevant function names, variables, and technical terminology."
+
+	default:
+		// Use the standard summary prompt from config
+		return conf.Summarization.SystemPrompt
+	}
 }
 
 // SummarizeMessages creates a summary of the oldest messages
@@ -49,8 +127,14 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 
 	log.Printf("Summarizing messages with IDs: %v", messageIDsToSummarize)
 
-	// Generate the summary using the appropriate prompt
-	summaryContent, err := cc.generateText(ctx, messagesToSummarizeContent, conf.Summarization.SystemPrompt, config.SummaryModel)
+	// Determine the appropriate prompt type based on message content
+	promptType := cc.determinePromptType(messagesToSummarizeContent)
+
+	// Get the appropriate system prompt for the detected prompt type
+	systemPrompt := cc.getSystemPrompt(promptType)
+
+	// Generate the summary using the selected prompt
+	summaryContent, err := cc.generateText(ctx, messagesToSummarizeContent, systemPrompt, config.SummaryModel)
 	if err != nil {
 		return models.Summary{}, fmt.Errorf("failed to generate summary: %w", err)
 	}
@@ -61,7 +145,7 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 		return models.Summary{}, fmt.Errorf("failed to store summary: %w", err)
 	}
 
-	log.Printf("Created summary ID %d for messages %v", summaryID, messageIDsToSummarize)
+	log.Printf("Created summary ID %d for messages %v using prompt type '%s'", summaryID, messageIDsToSummarize, promptType)
 
 	// Add the summary to our context
 	summary := models.Summary{
@@ -175,8 +259,46 @@ func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) 
 
 	// Generate the next level summary
 	nextLevel := level + 1
-	summaryContent, err := cc.generateText(ctx, messagesToSummarize,
-		fmt.Sprintf("Create a comprehensive summary of these level %d conversation summaries:", level), config.SummaryModel)
+
+	// Determine the appropriate prompt type for consolidation
+	promptType := "standard"
+
+	// For higher-level summaries (level 2+), focus more on key points and structure
+	if level >= 2 {
+		promptType = "keypoints"
+	}
+
+	// Check if the summaries are mostly code-related
+	codeRelatedCount := 0
+	codeIndicators := []string{"function", "class", "method", "variable", "import", "```"}
+	for _, summary := range summariesToConsolidate {
+		for _, indicator := range codeIndicators {
+			if strings.Contains(strings.ToLower(summary.Content), indicator) {
+				codeRelatedCount++
+				break
+			}
+		}
+	}
+
+	// If more than half seem code-related, use a code-focused prompt
+	if codeRelatedCount > len(summariesToConsolidate)/2 {
+		promptType = "code"
+	}
+
+	// Select the appropriate consolidation prompt
+	var consolidationPrompt string
+	switch promptType {
+	case "keypoints":
+		consolidationPrompt = fmt.Sprintf("Extract and organize the most important points from these level %d summaries. Focus on creating a structured, comprehensive view that preserves important details while eliminating redundancy.", level)
+	case "code":
+		consolidationPrompt = fmt.Sprintf("Create a technical summary consolidating these level %d code-related summaries. Preserve key technical concepts, programming patterns, and implementation details while maintaining a coherent narrative.", level)
+	default:
+		consolidationPrompt = fmt.Sprintf("Create a comprehensive summary of these level %d conversation summaries:", level)
+	}
+
+	log.Printf("Using %s prompt type for level %d consolidation", promptType, level)
+
+	summaryContent, err := cc.generateText(ctx, messagesToSummarize, consolidationPrompt, config.SummaryModel)
 	if err != nil {
 		return fmt.Errorf("failed to generate level %d summary: %w", nextLevel, err)
 	}
@@ -187,8 +309,8 @@ func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) 
 		return fmt.Errorf("failed to store level %d summary: %w", nextLevel, err)
 	}
 
-	log.Printf("Created level %d summary ID %d from %d level %d summaries",
-		nextLevel, summaryID, len(summariesToConsolidate), level)
+	log.Printf("Created level %d summary ID %d from %d level %d summaries using prompt type '%s'",
+		nextLevel, summaryID, len(summariesToConsolidate), level, promptType)
 
 	// Add the new summary to our context
 	newSummary := models.Summary{
@@ -315,8 +437,29 @@ func (cc *ConversationContext) updateMasterSummary(ctx context.Context) error {
 	// Add new summaries to the messages list
 	messagesToSummarize = append(messagesToSummarize, newSummaryMessages...)
 
-	// Generate the updated master summary
-	updatedMasterPrompt := "Update the master summary with new information, maintaining the most important points while integrating new context."
+	// Determine the appropriate prompt type for the master summary update
+	promptType := "standard"
+
+	// Check if the master summary is code-related
+	codeIndicators := []string{"function", "class", "method", "variable", "import", "```"}
+	for _, indicator := range codeIndicators {
+		if strings.Contains(strings.ToLower(cc.MasterSummary.Content), indicator) {
+			promptType = "code"
+			break
+		}
+	}
+
+	// Select an appropriate prompt for the master summary update
+	var updatedMasterPrompt string
+	switch promptType {
+	case "code":
+		updatedMasterPrompt = "Update the technical master summary with new information. Integrate new code concepts and implementation details while maintaining the most important information from the previous summary. Create a cohesive technical overview that prioritizes accuracy and clarity."
+	default:
+		updatedMasterPrompt = "Update the master summary with new information, maintaining the most important points while integrating new context. Create a cohesive overview that flows naturally and captures the most significant developments."
+	}
+
+	log.Printf("Using %s prompt type for master summary update", promptType)
+
 	masterSummaryContent, err := cc.generateText(ctx, messagesToSummarize, updatedMasterPrompt, config.SummaryModel)
 	if err != nil {
 		return fmt.Errorf("failed to update master summary: %w", err)
@@ -338,7 +481,7 @@ func (cc *ConversationContext) updateMasterSummary(ctx context.Context) error {
 		return fmt.Errorf("failed to store updated master summary: %w", err)
 	}
 
-	log.Printf("Updated master summary with ID %d", masterSummaryID)
+	log.Printf("Updated master summary with ID %d using prompt type '%s'", masterSummaryID, promptType)
 
 	// Update the master summary in our context
 	cc.MasterSummary = &models.Summary{
@@ -448,4 +591,35 @@ func (cc *ConversationContext) getNewSummariesForMasterUpdate(ctx context.Contex
 	}
 
 	return newSummaryMessages
+}
+
+// FindMaxLevel returns the highest summary level in a slice of summaries
+func FindMaxLevel(summaries []models.Summary) int {
+	maxLevel := 0
+	for _, summary := range summaries {
+		if summary.Level > maxLevel {
+			maxLevel = summary.Level
+		}
+	}
+	return maxLevel
+}
+
+// GroupSummariesByLevel organizes summaries into a map keyed by level
+func GroupSummariesByLevel(summaries []models.Summary) map[int][]models.Summary {
+	summariesByLevel := make(map[int][]models.Summary)
+	for _, summary := range summaries {
+		summariesByLevel[summary.Level] = append(summariesByLevel[summary.Level], summary)
+	}
+	return summariesByLevel
+}
+
+// CountSummariesAtLevel counts how many summaries exist at a specific level
+func CountSummariesAtLevel(summaries []models.Summary, level int) int {
+	count := 0
+	for _, summary := range summaries {
+		if summary.Level == level {
+			count++
+		}
+	}
+	return count
 }

@@ -1,4 +1,4 @@
-// Package context provides conversation context management for the proxy
+// Package models defines data structures used across the proxyllama application
 package models
 
 // Message represents a single exchange in the conversation
@@ -26,7 +26,22 @@ type OllamaReq struct {
 	Model          string          `json:"model"`
 	Messages       []OllamaMessage `json:"messages"`
 	Stream         bool            `json:"stream"`
+	Format         any             `json:"format"`
 	ConversationId *int            `json:"conversationId,omitempty"` // ui sends camelCase
+}
+
+// OllamaResp represents a response from the Ollama API
+type OllamaResp struct {
+	Model              string        `json:"model"`
+	CreatedAt          string        `json:"created_at"`
+	Message            OllamaMessage `json:"message"`
+	Done               bool          `json:"done"`
+	TotalDuration      float64       `json:"total_duration"`
+	LoadDuration       float64       `json:"load_duration"`
+	PromptEvalCount    int           `json:"prompt_eval_count"`
+	PromptEvalDuration float64       `json:"prompt_eval_duration"`
+	EvalCount          int           `json:"eval_count"`
+	EvalDuration       float64       `json:"eval_duration"`
 }
 
 // ChunkData represents the structure of a streaming chunk response

@@ -141,6 +141,14 @@ func InitSchema(ctx context.Context) {
 		log.Printf("Continuing without TimescaleDB hypertable support")
 	}
 
+	// Add pgvector extension for vector embeddings
+	_, err = Pool.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS vector;`)
+	if err != nil {
+		log.Printf("Warning: pgvector extension could not be enabled: %v. Semantic search will not be available.", err)
+	} else {
+		log.Printf("pgvector extension enabled successfully.")
+	}
+
 	// Create users table
 	_, err = Pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS users (
@@ -181,6 +189,52 @@ func InitSchema(ctx context.Context) {
 	`)
 	if err != nil {
 		log.Printf("Error creating messages table: %v", err)
+	}
+
+	// Create full-text search index on messages content
+	_, err = Pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_messages_content_fts ON messages USING GIN (to_tsvector('english', content))
+	`)
+	if err != nil {
+		log.Printf("Warning: Could not create full-text search index on messages: %v", err)
+	} else {
+		log.Printf("Full-text search index on messages created successfully")
+	}
+
+	// Create message_embeddings table for vector embeddings
+	_, err = Pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS message_embeddings (
+			message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+			embedding VECTOR(768), -- Dimension based on embedding model
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	if err != nil {
+		log.Printf("Error creating message_embeddings table: %v", err)
+	}
+
+	// Create hypertable for message_embeddings with optimal chunk interval
+	_, err = Pool.Exec(ctx, `
+		SELECT create_hypertable('message_embeddings', 'created_at', 
+							   if_not_exists => TRUE, 
+							   migrate_data => TRUE,
+							   chunk_time_interval => INTERVAL '7 days')
+	`)
+	if err != nil {
+		log.Printf("Note: Could not create hypertable for message_embeddings: %v", err)
+	} else {
+		log.Printf("Message_embeddings hypertable created or already exists")
+
+		// Create vector similarity search index
+		_, err = Pool.Exec(ctx, `
+			CREATE INDEX IF NOT EXISTS idx_message_embeddings_embedding ON message_embeddings 
+			USING HNSW (embedding vector_cosine_ops)
+		`)
+		if err != nil {
+			log.Printf("Warning: Could not create vector index on message_embeddings: %v", err)
+		} else {
+			log.Printf("Vector index on message_embeddings created successfully")
+		}
 	}
 
 	// Create summaries table with TimescaleDB compatible schema

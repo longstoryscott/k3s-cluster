@@ -1,4 +1,6 @@
 import { Box, Button, useTheme } from '@mui/material';
+import { useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import ChatContainer from '../components/Chat/ChatContainer';
 import ChatBubble from '../components/Chat/ChatBubble';
 import { useChat } from '../chat';
@@ -11,11 +13,31 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 const ChatPage = () => {
-  const { messages, response, isTyping, currentConversation } = useChat();
+  const { messages, response, isTyping, currentConversation, selectConversation } = useChat();
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
   const { user } = useAuth();
   const theme = useTheme();
+  const { conversationId } = useParams();
+  const navigate = useNavigate();
+
+  // Load conversation from URL parameter when component mounts or conversationId changes
+  useEffect(() => {
+    if (conversationId) {
+      const numericId = parseInt(conversationId, 10);
+      if (!isNaN(numericId)) {
+        selectConversation(numericId);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+
+  // Update URL when currentConversation changes
+  useEffect(() => {
+    if (currentConversation?.id && (!conversationId || parseInt(conversationId, 10) !== currentConversation.id)) {
+      navigate(`/chat/${currentConversation.id}`, { replace: true });
+    }
+  }, [currentConversation, navigate, conversationId]);
 
   const handleSummarize = async () => {
     if (!currentConversation?.id || isSummarizing) {

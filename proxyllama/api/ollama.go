@@ -16,12 +16,17 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// RegisterOllamaRoutes adds Ollama-related endpoints to the app
+func RegisterOllamaRoutes(app *fiber.App) {
+	app.Post("/api/chat", ReverseProxyHandler)
+}
+
 // ReverseProxyHandler forwards the request to Ollama and streams the response back to the client
 func ReverseProxyHandler(c *fiber.Ctx) error {
 	// Parse the incoming request
 	var chatReq models.OllamaReq
 	if err := c.BodyParser(&chatReq); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+		return handleError(err, fiber.StatusBadRequest, "Invalid request body")
 	}
 
 	// Always set streaming to true to prevent timeouts
@@ -32,8 +37,7 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 	ctx := c.Context()
 	convCtx, err := pxcx.GetOrCreateConversation(ctx, uid, chatReq.Model, chatReq.ConversationId)
 	if err != nil {
-		log.Printf("Error getting conversation context: %v", err)
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to process conversation")
+		return handleError(err, fiber.StatusInternalServerError, "Failed to process conversation")
 	}
 
 	// Get the user message from the request (last message from user)
@@ -50,6 +54,15 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 	if err := convCtx.AddUserMessage(c.Context(), userMessage); err != nil {
 		log.Printf("Error adding user message: %v", err)
 		contextError = true
+	}
+
+	// Retrieve memories if there was no error adding the user message
+	if !contextError {
+		// Attempt to retrieve and inject relevant memories for the user's query
+		if err := convCtx.RetrieveAndInjectMemories(c.Context(), userMessage); err != nil {
+			log.Printf("Error retrieving memories: %v", err)
+			// Non-critical error, we can continue without memories
+		}
 	}
 
 	var ollamaReqBody []byte
@@ -76,7 +89,7 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 		}
 		ollamaReqBody, jsonErr = json.Marshal(fallbackReq)
 		if jsonErr != nil {
-			return fiber.NewError(fiber.StatusInternalServerError, "Failed to format request")
+			return handleError(jsonErr, fiber.StatusInternalServerError, "Failed to format request")
 		}
 	}
 
@@ -92,8 +105,7 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 
 	handler, statusCode, err := proxy.Stream(c.Context(), ollamaReqBody, targetUrl, http.MethodPost)
 	if err != nil {
-		log.Printf("Error during streaming: %v", err)
-		return c.Status(fiber.StatusBadGateway).SendString("Error during streaming")
+		return handleError(err, fiber.StatusBadGateway, "Error during streaming")
 	}
 	c.Status(statusCode)
 	var res string
@@ -102,28 +114,60 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 		res, err = handler(w)
 		if err != nil {
 			log.Printf("Error during handler execution: %v", err)
-			c.Status(fiber.StatusInternalServerError).SendString("Error during handler execution")
 			return
 		}
 
-		// Only store the assistant response if there was no context errorå
-		if !contextError {
-			if res != "" {
-				log.Printf("Storing assistant response (length: %d)", len(res))
-				go func(res string) {
-					dbCtx := context.Background()
-					ctx, cancel := context.WithTimeout(dbCtx, time.Minute*10)
-					defer cancel()
+		// Only store the assistant response if there was no context error
+		if res != "" && !contextError {
+			// Apply refinement steps to the response
+			refinedRes := res // Start with the original response
+			conf := config.GetConfig()
 
-					if err := convCtx.AddAssistantMessage(ctx, res); err != nil {
-						log.Printf("Error storing assistant response: %v", err)
-					} else {
-						log.Printf("Successfully stored assistant message in conversation %d", convCtx.ConversationID)
-					}
-				}(res)
-			} else {
-				log.Printf("Empty assistant response, not storing")
+			// Step 1: Apply basic filtering if enabled
+			if conf.Summarization.EnableResponseFiltering {
+				refinedRes = pxcx.FilterResponseText(refinedRes)
 			}
+
+			// Step 2: Apply self-critique if enabled
+			if conf.Summarization.EnableResponseCritique {
+				critique, err := pxcx.GetCritiqueForResponse(c.Context(), refinedRes, convCtx.Model)
+				if err == nil && critique != "" {
+					log.Printf("Got critique for response: length %d characters", len(critique))
+					improvedRes, err := pxcx.ImproveResponseWithCritique(c.Context(), userMessage, refinedRes, critique, convCtx.Model)
+					if err != nil {
+						log.Printf("Failed to improve response with critique: %v", err)
+					} else if improvedRes != "" {
+						log.Printf("Applied critique improvements to response")
+						refinedRes = improvedRes
+					}
+				} else if err != nil {
+					log.Printf("Failed to get critique: %v", err)
+				}
+			}
+
+			// Store the refined response
+			var finalRes string
+			if refinedRes != res {
+				log.Printf("Response was refined/improved before storing")
+				finalRes = refinedRes
+			} else {
+				finalRes = res
+			}
+
+			log.Printf("Storing assistant response (length: %d)", len(finalRes))
+			go func(finalResponse string) {
+				dbCtx := context.Background()
+				ctx, cancel := context.WithTimeout(dbCtx, time.Minute*10)
+				defer cancel()
+
+				if err := convCtx.AddAssistantMessage(ctx, finalResponse); err != nil {
+					log.Printf("Error storing assistant response: %v", err)
+				} else {
+					log.Printf("Successfully stored assistant message in conversation %d", convCtx.ConversationID)
+				}
+			}(finalRes)
+		} else if res == "" {
+			log.Printf("Empty assistant response, not storing")
 		}
 
 		log.Printf("Chat streaming complete")

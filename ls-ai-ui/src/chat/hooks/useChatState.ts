@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { ChatUserMessage, ChatConversation, Model, ChatMessage } from '../../api/types';
+import { ChatConversation, Model, ChatMessage } from '../../api/types';
 
 export interface ChatState {
   messages: ChatMessage[];
@@ -14,7 +14,7 @@ export interface ChatState {
 }
 
 export interface ChatActions {
-  setMessages: (messages: ChatUserMessage[]) => void;
+  setMessages: (messages: ChatMessage[]) => void;
   setConversations: (conversations: ChatConversation[]) => void;
   setCurrentConversation: (conversation: ChatConversation | null) => void;
   setIsLoading: (loading: boolean) => void;

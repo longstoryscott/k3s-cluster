@@ -69,11 +69,35 @@ func CreateSummary(ctx context.Context, conversationID int, content string, leve
 		return 0, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
+	// Create a summary object for caching
+	summary := &Summary{
+		ID:             summaryID,
+		ConversationID: conversationID,
+		Content:        content,
+		Level:          level,
+		SourceIDs:      sourceIDs,
+		CreatedAt:      time.Now(), // Approximate time until we fetch from DB
+	}
+
+	// Cache the new summary
+	if err := CacheSummary(ctx, summary); err != nil {
+		// Log but don't fail on cache error
+	}
+
+	// Invalidate the conversation summaries cache since we added a new one
+	InvalidateConversationSummariesCache(ctx, conversationID)
+
 	return summaryID, nil
 }
 
 // GetSummariesForConversation retrieves all summaries for a conversation with efficient error handling
 func GetSummariesForConversation(ctx context.Context, conversationID int) ([]Summary, error) {
+	// Try to get from cache first
+	if summaries, found := GetSummariesByConversationIDFromCache(ctx, conversationID); found {
+		return summaries, nil
+	}
+
+	// Not in cache, get from database
 	rows, err := Pool.Query(ctx, sqlGetSummariesForConversation, conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query summaries: %w", err)
@@ -102,6 +126,11 @@ func GetSummariesForConversation(ctx context.Context, conversationID int) ([]Sum
 		return nil, fmt.Errorf("error iterating summary rows: %w", err)
 	}
 
+	// Cache the summaries for this conversation
+	if err := CacheSummariesByConversationID(ctx, conversationID, summaries); err != nil {
+		// Just log, don't fail on cache error
+	}
+
 	return summaries, nil
 }
 
@@ -128,6 +157,11 @@ func GetRecentSummaries(ctx context.Context, conversationID, level, limit int) (
 		}
 
 		summaries = append(summaries, summary)
+
+		// Cache each summary individually
+		if err := CacheSummary(ctx, &summary); err != nil {
+			// Just log, don't fail on cache error
+		}
 	}
 
 	// Check for any errors during iteration
@@ -158,11 +192,20 @@ func DeleteSummariesForConversation(ctx context.Context, conversationID int) err
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
+	// Remove from cache
+	InvalidateConversationSummariesCache(ctx, conversationID)
+
 	return nil
 }
 
 // GetSummary retrieves a single summary by its ID
 func GetSummary(ctx context.Context, summaryID int) (*Summary, error) {
+	// Try to get from cache first
+	if summary, found := GetSummaryFromCache(ctx, summaryID); found {
+		return summary, nil
+	}
+
+	// Not in cache, get from database
 	const sqlGetSummary = `
 		SELECT id, conversation_id, content, level, source_ids, created_at
 		FROM summaries
@@ -184,6 +227,11 @@ func GetSummary(ctx context.Context, summaryID int) (*Summary, error) {
 	// Parse source IDs from JSON
 	if err := json.Unmarshal(sourceIDsJSON, &summary.SourceIDs); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal source IDs: %w", err)
+	}
+
+	// Cache for future use
+	if err := CacheSummary(ctx, &summary); err != nil {
+		// Just log, don't fail on cache error
 	}
 
 	return &summary, nil

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -39,9 +38,27 @@ func main() {
 	// Initialize database schema
 	storage.InitSchema(ctx)
 
-	// Initialize the conversation cache with a 30-minute TTL
-	convContext.InitCache(30 * time.Minute)
-	log.Printf("Initialized conversation cache with 30-minute TTL")
+	// Initialize research schema
+	storage.InitResearchSchema(ctx)
+
+	// Initialize Redis for storage caching
+	if err := storage.InitStorageCache(); err != nil {
+		log.Printf("Warning: Failed to initialize Redis storage cache: %v", err)
+		log.Printf("Storage will operate without Redis caching")
+	} else if conf.Redis.Enabled {
+		log.Printf("Redis storage cache initialized successfully")
+		// Clean up Redis connections when the application exits
+		defer storage.CloseRedisCache()
+	}
+
+	// Initialize the conversation cache with configured settings
+	if conf.Redis.Enabled {
+		log.Printf("Initializing conversation cache with Redis at %s:%d, TTL: %v",
+			conf.Redis.Host, conf.Redis.Port, conf.Redis.ConversationTTL)
+	} else {
+		log.Printf("Redis disabled, using in-memory cache with TTL: %v", conf.Redis.ConversationTTL)
+	}
+	convContext.InitCache(conf.Redis.ConversationTTL)
 
 	// Create a new Fiber app
 	app := fiber.New(fiber.Config{
@@ -69,6 +86,9 @@ func main() {
 
 	// Register conversation API routes
 	api.RegisterConversationRoutes(app)
+
+	// Register research API routes
+	api.RegisterResearchRoutes(app)
 
 	// Setup reverse proxy handler with chunk processing
 	app.All("/*", api.ReverseProxyHandler)
