@@ -6,10 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
+	"path/filepath"
 	"proxyllama/config"
 	"proxyllama/models"
+	"runtime"
+
+	"github.com/sirupsen/logrus"
 )
 
 // SendOllamaRequest sends a request to the Ollama API and handles streaming the response
@@ -28,7 +31,13 @@ func SendOllamaRequest(ctx context.Context, model string, messages []models.Olla
 		return "", fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	log.Printf("Sending request to %s with %d messages", url, len(messages))
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":         filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":         line,
+		"url":          url,
+		"messageCount": len(messages),
+	}).Info("Sending request to Ollama")
 
 	handler, _, err := Stream(ctx, reqBody, url, http.MethodPost)
 	if err != nil {

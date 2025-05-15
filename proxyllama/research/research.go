@@ -24,7 +24,7 @@ func StartResearchTask(ctx context.Context, userID, query, model string, convers
 	taskID := uuid.New().String()
 
 	// Create the research task
-	task := &models.ResearchTask{
+	task := models.ResearchTask{
 		ID:             taskID,
 		UserID:         userID,
 		Query:          query,
@@ -42,25 +42,47 @@ func StartResearchTask(ctx context.Context, userID, query, model string, convers
 	}
 
 	// Start the research process asynchronously using the deep research orchestrator
-	go PerformDeepResearch(context.Background(), taskID, userID, query, model, conversationID)
+	go PerformDeepResearch(context.Background(), taskID, userID, query, conversationID)
 
-	return task, nil
+	return &task, nil
 }
 
 // GetResearchTask gets a research task by ID
-func GetResearchTask(ctx context.Context, taskID, userID string) (*models.ResearchTask, error) {
-	return storage.GetResearchTaskByUserID(ctx, taskID, userID)
+func GetResearchTask(ctx context.Context, taskID string) (*models.ResearchTask, error) {
+	return storage.GetTaskByID(ctx, taskID)
 }
 
 // GetUserResearchTasks gets all research tasks for a user
 func GetUserResearchTasks(ctx context.Context, userID string) ([]*models.ResearchTask, error) {
-	return storage.GetUserResearchTasks(ctx, userID)
+	tasks, err := storage.ListTasksByUserID(ctx, userID, 100, 0) // Default limit 100, offset 0
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert []storage.ResearchTask to []*models.ResearchTask
+	result := make([]*models.ResearchTask, len(tasks))
+	for i, task := range tasks {
+		result[i] = &models.ResearchTask{
+			ID:             task.ID,
+			UserID:         task.UserID,
+			Query:          task.Query,
+			Model:          task.Model,
+			Status:         task.Status,
+			ConversationID: task.ConversationID,
+			CreatedAt:      task.CreatedAt,
+			UpdatedAt:      task.UpdatedAt,
+			CompletedAt:    task.CompletedAt,
+			ErrorMessage:   task.ErrorMessage,
+		}
+	}
+
+	return result, nil
 }
 
 // CancelResearchTask cancels a research task
-func CancelResearchTask(ctx context.Context, taskID, userID string) error {
+func CancelResearchTask(ctx context.Context, taskID string) error {
 	// Get the task first to verify ownership
-	task, err := storage.GetResearchTaskByUserID(ctx, taskID, userID)
+	task, err := storage.GetTaskByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("failed to get research task: %w", err)
 	}
@@ -73,6 +95,8 @@ func CancelResearchTask(ctx context.Context, taskID, userID string) error {
 	// Update the status to canceled
 	task.Status = models.ResearchTaskStatusCanceled
 	task.UpdatedAt = time.Now()
+	errMessage := "Task was canceled by the user"
 
-	return storage.UpdateResearchTask(ctx, task)
+	_, err = storage.UpdateTask(ctx, taskID, string(models.ResearchTaskStatusCanceled), &errMessage)
+	return err
 }

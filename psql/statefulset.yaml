@@ -164,7 +164,7 @@ spec:
           emptyDir: {}
         - name: init-scripts
           configMap:
-            name: psql-init-scripts
+            name: postgres-init-scripts
   volumeClaimTemplates:
     - apiVersion: v1
       kind: PersistentVolumeClaim

@@ -3,110 +3,34 @@ package context
 import (
 	"context"
 	"fmt"
-	"log"
+	"path/filepath"
 	"proxyllama/config"
 	"proxyllama/models"
 	"proxyllama/storage"
-	"strings"
+	"runtime"
+
+	"github.com/sirupsen/logrus"
 )
 
-// shouldSummarize checks if we have enough messages to create a summary
-func (cc *ConversationContext) shouldSummarize() bool {
-	// We need at least N messages (where N is configurable) to create a summary
-	return len(cc.Messages) >= config.GetConfig().Summarization.MessagesBeforeSummary
-}
-
-// determinePromptType analyzes messages to determine the most appropriate system prompt type
-func (cc *ConversationContext) determinePromptType(messages []models.Message) string {
-	// Default to standard summary prompt
-	promptType := "standard"
-
-	// If no messages, return default
-	if len(messages) == 0 {
-		return promptType
-	}
-
-	// Calculate average message length
-	totalLength := 0
-	for _, msg := range messages {
-		totalLength += len(msg.Content)
-	}
-	avgLength := totalLength / len(messages)
-
-	// Very short messages (less than 50 chars on average) might benefit from a brief prompt
-	if avgLength < 50 {
-		promptType = "brief"
-		log.Printf("Using brief summary prompt due to short average message length (%d chars)", avgLength)
-	} else if avgLength > 500 {
-		// Long messages might benefit from key points extraction
-		promptType = "keypoints"
-		log.Printf("Using key points summary prompt due to long average message length (%d chars)", avgLength)
-	}
-
-	// Check if the messages are mostly code-related (containing code blocks or technical terms)
-	codeIndicators := []string{"```", "function", "class", "import ", "const ", "var ", "let ", "def ", "return"}
-	codeCount := 0
-	for _, msg := range messages {
-		for _, indicator := range codeIndicators {
-			if strings.Contains(strings.ToLower(msg.Content), indicator) {
-				codeCount++
-				break
-			}
-		}
-	}
-
-	// If more than half the messages appear to be code-related, use a code summary prompt
-	if codeCount > len(messages)/2 {
-		promptType = "code"
-		log.Printf("Using code summary prompt as %d/%d messages contain code patterns", codeCount, len(messages))
-	}
-
-	return promptType
-}
-
-// getSystemPrompt selects the appropriate system prompt based on prompt type
-func (cc *ConversationContext) getSystemPrompt(promptType string) string {
-	conf := config.GetConfig()
-
-	switch promptType {
-	case "brief":
-		// Use brief prompt if configured, otherwise use a default brief prompt
-		if conf.Summarization.BriefSystemPrompt != "" {
-			return conf.Summarization.BriefSystemPrompt
-		}
-		return "Create a very concise summary of these short messages. Focus only on essential information and be extremely brief."
-
-	case "keypoints":
-		// Use key points prompt if configured, otherwise use a default key points prompt
-		if conf.Summarization.KeyPointsSystemPrompt != "" {
-			return conf.Summarization.KeyPointsSystemPrompt
-		}
-		return "Extract and list the key points from these detailed messages. Identify the main ideas and important details, organizing them in a clear structure."
-
-	case "code":
-		// Default code summarization prompt (could also be moved to config)
-		return "Summarize this code-related conversation. Focus on technical concepts, code snippets, programming decisions, and implementation details. Include relevant function names, variables, and technical terminology."
-
-	default:
-		// Use the standard summary prompt from config
-		return conf.Summarization.SystemPrompt
-	}
-}
+// TODO: Work in dynamic model profile functionality for summaries
 
 // SummarizeMessages creates a summary of the oldest messages
 func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Summary, error) {
-	conf := config.GetConfig()
+	usrCfg, err := GetUserConfig(cc.UserID)
+	if err != nil {
+		return models.Summary{}, fmt.Errorf("failed to get user config: %w", err)
+	}
 
 	// Find messages that haven't been summarized yet
 	unsummarizedMessages, messageIDs := cc.getUnsummarizedMessages(ctx)
 
 	// Only summarize when we have enough unsummarized messages
-	if len(unsummarizedMessages) < conf.Summarization.MessagesBeforeSummary {
+	if len(unsummarizedMessages) < usrCfg.Summarization.MessagesBeforeSummary {
 		return models.Summary{}, nil // Not enough unsummarized messages to summarize
 	}
 
 	// Calculate how many messages to summarize (N/2)
-	messagesToSummarize := conf.Summarization.MessagesBeforeSummary / 2
+	messagesToSummarize := usrCfg.Summarization.MessagesBeforeSummary / 2
 	if messagesToSummarize < 1 {
 		messagesToSummarize = 1 // Always summarize at least 1 message
 	}
@@ -125,16 +49,13 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 		messageIDsToSummarize = append(messageIDsToSummarize, messageIDs[i])
 	}
 
-	log.Printf("Summarizing messages with IDs: %v", messageIDsToSummarize)
-
-	// Determine the appropriate prompt type based on message content
-	promptType := cc.determinePromptType(messagesToSummarizeContent)
-
-	// Get the appropriate system prompt for the detected prompt type
-	systemPrompt := cc.getSystemPrompt(promptType)
+	summaryProfile, err := storage.GetModelProfile(ctx, usrCfg.ModelProfiles.ImprovementProfileID)
+	if err != nil {
+		return models.Summary{}, fmt.Errorf("failed to get self-critique profile: %w", err)
+	}
 
 	// Generate the summary using the selected prompt
-	summaryContent, err := cc.generateText(ctx, messagesToSummarizeContent, systemPrompt, config.SummaryModel)
+	summaryContent, err := cc.generateText(ctx, messagesToSummarizeContent, summaryProfile)
 	if err != nil {
 		return models.Summary{}, fmt.Errorf("failed to generate summary: %w", err)
 	}
@@ -144,8 +65,6 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 	if err != nil {
 		return models.Summary{}, fmt.Errorf("failed to store summary: %w", err)
 	}
-
-	log.Printf("Created summary ID %d for messages %v using prompt type '%s'", summaryID, messageIDsToSummarize, promptType)
 
 	// Add the summary to our context
 	summary := models.Summary{
@@ -161,7 +80,12 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 	// Check if we need to consolidate summaries at level 1
 	if cc.shouldConsolidateLevel(1) {
 		if err := cc.consolidateLevel(ctx, 1); err != nil {
-			log.Printf("Failed to consolidate level 1 summaries: %v", err)
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":  line,
+				"error": err,
+			}).Warn("Failed to consolidate level 1 summaries")
 		}
 	}
 
@@ -217,16 +141,28 @@ func (cc *ConversationContext) removeMessagesById(ids []int) {
 
 // shouldConsolidateLevel checks if we have exactly X summaries at a specific level
 func (cc *ConversationContext) shouldConsolidateLevel(level int) bool {
-	conf := config.GetConfig()
-	levelCount := CountSummariesAtLevel(cc.Summaries, level)
+	usrCfg, err := GetUserConfig(cc.UserID)
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Failed to get user config")
+		return false
+	}
+	levelCount := countSummariesAtLevel(cc.Summaries, level)
 
 	// We only consolidate when we have exactly X summaries at this level
-	return levelCount == conf.Summarization.SummariesBeforeConsolidation
+	return levelCount == usrCfg.Summarization.SummariesBeforeConsolidation
 }
 
 // consolidateLevel creates a summary of summaries at a specific level
 func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) error {
-	conf := config.GetConfig()
+	usrCfg, err := GetUserConfig(cc.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to get user config: %w", err)
+	}
 
 	// Get summaries for this level
 	var summariesToConsolidate []models.Summary
@@ -241,11 +177,17 @@ func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) 
 	}
 
 	// We only consolidate when we have EXACTLY X summaries
-	if len(summariesToConsolidate) != conf.Summarization.SummariesBeforeConsolidation {
+	if len(summariesToConsolidate) != usrCfg.Summarization.SummariesBeforeConsolidation {
 		return nil // Not exactly the right number of summaries to consolidate
 	}
 
-	log.Printf("Consolidating %d summaries at level %d", len(summariesToConsolidate), level)
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":  line,
+		"count": len(summariesToConsolidate),
+		"level": level,
+	}).Info("Consolidating summaries")
 
 	// Convert summaries to messages for the summary generator
 	var messagesToSummarize []models.Message
@@ -257,6 +199,8 @@ func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) 
 		})
 	}
 
+	var profile *models.ModelProfile
+
 	// Generate the next level summary
 	nextLevel := level + 1
 
@@ -265,40 +209,18 @@ func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) 
 
 	// For higher-level summaries (level 2+), focus more on key points and structure
 	if level >= 2 {
-		promptType = "keypoints"
-	}
-
-	// Check if the summaries are mostly code-related
-	codeRelatedCount := 0
-	codeIndicators := []string{"function", "class", "method", "variable", "import", "```"}
-	for _, summary := range summariesToConsolidate {
-		for _, indicator := range codeIndicators {
-			if strings.Contains(strings.ToLower(summary.Content), indicator) {
-				codeRelatedCount++
-				break
-			}
+		profile, err = storage.GetModelProfile(ctx, usrCfg.ModelProfiles.KeyPointsProfileID)
+		if err != nil {
+			return fmt.Errorf("failed to get master summary profile: %w", err)
+		}
+	} else {
+		profile, err = storage.GetModelProfile(ctx, usrCfg.ModelProfiles.SummarizationProfileID)
+		if err != nil {
+			return fmt.Errorf("failed to get summary profile: %w", err)
 		}
 	}
 
-	// If more than half seem code-related, use a code-focused prompt
-	if codeRelatedCount > len(summariesToConsolidate)/2 {
-		promptType = "code"
-	}
-
-	// Select the appropriate consolidation prompt
-	var consolidationPrompt string
-	switch promptType {
-	case "keypoints":
-		consolidationPrompt = fmt.Sprintf("Extract and organize the most important points from these level %d summaries. Focus on creating a structured, comprehensive view that preserves important details while eliminating redundancy.", level)
-	case "code":
-		consolidationPrompt = fmt.Sprintf("Create a technical summary consolidating these level %d code-related summaries. Preserve key technical concepts, programming patterns, and implementation details while maintaining a coherent narrative.", level)
-	default:
-		consolidationPrompt = fmt.Sprintf("Create a comprehensive summary of these level %d conversation summaries:", level)
-	}
-
-	log.Printf("Using %s prompt type for level %d consolidation", promptType, level)
-
-	summaryContent, err := cc.generateText(ctx, messagesToSummarize, consolidationPrompt, config.SummaryModel)
+	summaryContent, err := cc.generateText(ctx, messagesToSummarize, profile)
 	if err != nil {
 		return fmt.Errorf("failed to generate level %d summary: %w", nextLevel, err)
 	}
@@ -309,8 +231,16 @@ func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) 
 		return fmt.Errorf("failed to store level %d summary: %w", nextLevel, err)
 	}
 
-	log.Printf("Created level %d summary ID %d from %d level %d summaries using prompt type '%s'",
-		nextLevel, summaryID, len(summariesToConsolidate), level, promptType)
+	_, file, line, _ = runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":       filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":       line,
+		"nextLevel":  nextLevel,
+		"summaryId":  summaryID,
+		"count":      len(summariesToConsolidate),
+		"level":      level,
+		"promptType": promptType,
+	}).Info("Created new summary")
 
 	// Add the new summary to our context
 	newSummary := models.Summary{
@@ -324,28 +254,49 @@ func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) 
 	cc.removeSummariesByIdAndLevel(summaryIDs, level)
 
 	// Check if we need to create/update a master summary
-	maxSummaryLevel := conf.Summarization.MaxSummaryLevels
+	maxSummaryLevel := usrCfg.Summarization.MaxSummaryLevels
 	if nextLevel == maxSummaryLevel {
-		levelMaxCount := CountSummariesAtLevel(cc.Summaries, maxSummaryLevel)
+		levelMaxCount := countSummariesAtLevel(cc.Summaries, maxSummaryLevel)
 
 		// If we have exactly X summaries at max level, create/update master summary
-		if levelMaxCount == conf.Summarization.SummariesBeforeConsolidation {
-			log.Printf("We have %d summaries at level %d, creating/updating master summary",
-				levelMaxCount, maxSummaryLevel)
+		if levelMaxCount == usrCfg.Summarization.SummariesBeforeConsolidation {
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":  line,
+				"count": levelMaxCount,
+				"level": maxSummaryLevel,
+			}).Info("Creating/updating master summary")
 
 			if cc.MasterSummary == nil {
 				if err := cc.createMasterSummary(ctx); err != nil {
-					log.Printf("Failed to create master summary: %v", err)
+					_, file, line, _ := runtime.Caller(0)
+					logrus.WithFields(logrus.Fields{
+						"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+						"line":  line,
+						"error": err,
+					}).Warn("Failed to create master summary")
 				}
 			} else {
 				// Update the existing master summary
 				if err := cc.updateMasterSummary(ctx); err != nil {
-					log.Printf("Failed to update master summary: %v", err)
+					_, file, line, _ := runtime.Caller(0)
+					logrus.WithFields(logrus.Fields{
+						"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+						"line":  line,
+						"error": err,
+					}).Warn("Failed to update master summary")
 				}
 			}
 		} else {
-			log.Printf("We have %d/%d summaries at level %d, not creating master summary yet",
-				levelMaxCount, conf.Summarization.SummariesBeforeConsolidation, maxSummaryLevel)
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":         filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":         line,
+				"currentCount": levelMaxCount,
+				"targetCount":  usrCfg.Summarization.SummariesBeforeConsolidation,
+				"level":        maxSummaryLevel,
+			}).Info("Not enough summaries to create master summary yet")
 		}
 	}
 
@@ -372,14 +323,21 @@ func (cc *ConversationContext) removeSummariesByIdAndLevel(ids []int, level int)
 
 // createMasterSummary generates a weighted summary of all summaries
 func (cc *ConversationContext) createMasterSummary(ctx context.Context) error {
-	conf := config.GetConfig()
+	usrCfg, err := GetUserConfig(cc.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to get user config: %w", err)
+	}
 
+	masterSummaryProfile, err := storage.GetModelProfile(ctx, usrCfg.ModelProfiles.MasterSummaryProfileID)
+	if err != nil {
+		return fmt.Errorf("failed to get master summary profile: %w", err)
+	}
 	// Create messages for the master summary
 	// Add summaries from each level with appropriate weighting
-	messagesToSummarize := cc.prepareMasterSummaryMessages()
+	messagesToSummarize := cc.prepareMasterSummaryMessages(usrCfg, *masterSummaryProfile)
 
 	// Generate the master summary
-	masterSummaryContent, err := cc.generateText(ctx, messagesToSummarize, conf.Summarization.MasterSummaryPrompt, config.SummaryModel)
+	masterSummaryContent, err := cc.generateText(ctx, messagesToSummarize, masterSummaryProfile)
 	if err != nil {
 		return fmt.Errorf("failed to generate master summary: %w", err)
 	}
@@ -397,7 +355,13 @@ func (cc *ConversationContext) createMasterSummary(ctx context.Context) error {
 		return fmt.Errorf("failed to store master summary: %w", err)
 	}
 
-	log.Printf("Created master summary ID %d incorporating %d summaries", masterSummaryID, len(summaryIDs))
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":      line,
+		"summaryId": masterSummaryID,
+		"count":     len(summaryIDs),
+	}).Info("Created master summary")
 
 	// Store the master summary in our context
 	cc.MasterSummary = &models.Summary{
@@ -430,37 +394,28 @@ func (cc *ConversationContext) updateMasterSummary(ctx context.Context) error {
 
 	// Skip if no new summaries to integrate
 	if len(newSummaryMessages) == 0 {
-		log.Printf("No new summaries to integrate into master summary")
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line": line,
+		}).Info("No new summaries to integrate into master summary")
 		return nil
 	}
 
 	// Add new summaries to the messages list
 	messagesToSummarize = append(messagesToSummarize, newSummaryMessages...)
 
-	// Determine the appropriate prompt type for the master summary update
-	promptType := "standard"
-
-	// Check if the master summary is code-related
-	codeIndicators := []string{"function", "class", "method", "variable", "import", "```"}
-	for _, indicator := range codeIndicators {
-		if strings.Contains(strings.ToLower(cc.MasterSummary.Content), indicator) {
-			promptType = "code"
-			break
-		}
+	usrCfg, err := GetUserConfig(cc.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to get user config: %w", err)
 	}
 
-	// Select an appropriate prompt for the master summary update
-	var updatedMasterPrompt string
-	switch promptType {
-	case "code":
-		updatedMasterPrompt = "Update the technical master summary with new information. Integrate new code concepts and implementation details while maintaining the most important information from the previous summary. Create a cohesive technical overview that prioritizes accuracy and clarity."
-	default:
-		updatedMasterPrompt = "Update the master summary with new information, maintaining the most important points while integrating new context. Create a cohesive overview that flows naturally and captures the most significant developments."
+	masterSummaryProfile, err := storage.GetModelProfile(ctx, usrCfg.ModelProfiles.MasterSummaryProfileID)
+	if err != nil {
+		return fmt.Errorf("failed to get master summary profile: %w", err)
 	}
 
-	log.Printf("Using %s prompt type for master summary update", promptType)
-
-	masterSummaryContent, err := cc.generateText(ctx, messagesToSummarize, updatedMasterPrompt, config.SummaryModel)
+	masterSummaryContent, err := cc.generateText(ctx, messagesToSummarize, masterSummaryProfile)
 	if err != nil {
 		return fmt.Errorf("failed to update master summary: %w", err)
 	}
@@ -481,7 +436,13 @@ func (cc *ConversationContext) updateMasterSummary(ctx context.Context) error {
 		return fmt.Errorf("failed to store updated master summary: %w", err)
 	}
 
-	log.Printf("Updated master summary with ID %d using prompt type '%s'", masterSummaryID, promptType)
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":      line,
+		"summaryId": masterSummaryID,
+		"profile":   masterSummaryProfile.Name,
+	}).Info("Updated master summary")
 
 	// Update the master summary in our context
 	cc.MasterSummary = &models.Summary{
@@ -494,21 +455,20 @@ func (cc *ConversationContext) updateMasterSummary(ctx context.Context) error {
 }
 
 // prepareMasterSummaryMessages creates weighted messages for the master summary
-func (cc *ConversationContext) prepareMasterSummaryMessages() []models.Message {
-	conf := config.GetConfig()
+func (cc *ConversationContext) prepareMasterSummaryMessages(cfg *config.UserConfig, masterProfile models.ModelProfile) []models.Message {
 	var messagesToSummarize []models.Message
 
 	// Start with a system message describing the importance of weighting
 	messagesToSummarize = append(messagesToSummarize, models.Message{
 		Role:    "system",
-		Content: conf.Summarization.MasterSummaryPrompt,
+		Content: masterProfile.SystemPrompt,
 	})
 
 	// Group summaries by level
-	summariesByLevel := GroupSummariesByLevel(cc.Summaries)
+	summariesByLevel := groupSummariesByLevel(cc.Summaries)
 
 	// Find the max level
-	maxLevel := FindMaxLevel(cc.Summaries)
+	maxLevel := findMaxLevel(cc.Summaries)
 
 	// Add summaries from each level, with decreasing importance for higher levels
 	for level := 1; level <= maxLevel; level++ {
@@ -516,7 +476,7 @@ func (cc *ConversationContext) prepareMasterSummaryMessages() []models.Message {
 			// Calculate weight for this level
 			weight := 1.0
 			for i := 1; i < level; i++ {
-				weight *= conf.Summarization.SummaryWeightCoefficient
+				weight *= cfg.Summarization.SummaryWeightCoefficient
 			}
 
 			// Add summaries with level information and weight
@@ -538,7 +498,16 @@ func (cc *ConversationContext) prepareMasterSummaryMessages() []models.Message {
 
 // getNewSummariesForMasterUpdate returns messages for summaries that aren't in the master summary
 func (cc *ConversationContext) getNewSummariesForMasterUpdate(ctx context.Context) []models.Message {
-	conf := config.GetConfig()
+	usrCfg, err := GetUserConfig(cc.UserID)
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Failed to get user config")
+		return nil
+	}
 
 	// Get summary IDs already included in the master summary
 	masterSummaryIDs := make(map[int]bool)
@@ -573,7 +542,7 @@ func (cc *ConversationContext) getNewSummariesForMasterUpdate(ctx context.Contex
 			// Calculate weight for this level
 			weight := 1.0
 			for i := 1; i < level; i++ {
-				weight *= conf.Summarization.SummaryWeightCoefficient
+				weight *= usrCfg.Summarization.SummaryWeightCoefficient
 			}
 
 			// Add summaries with level information and weight
@@ -593,33 +562,33 @@ func (cc *ConversationContext) getNewSummariesForMasterUpdate(ctx context.Contex
 	return newSummaryMessages
 }
 
-// FindMaxLevel returns the highest summary level in a slice of summaries
-func FindMaxLevel(summaries []models.Summary) int {
-	maxLevel := 0
-	for _, summary := range summaries {
-		if summary.Level > maxLevel {
-			maxLevel = summary.Level
-		}
+// groupSummariesByLevel organizes summaries into a map keyed by level
+func groupSummariesByLevel(summaries []models.Summary) map[int][]models.Summary {
+	result := make(map[int][]models.Summary)
+	for _, s := range summaries {
+		result[s.Level] = append(result[s.Level], s)
 	}
-	return maxLevel
+	return result
 }
 
-// GroupSummariesByLevel organizes summaries into a map keyed by level
-func GroupSummariesByLevel(summaries []models.Summary) map[int][]models.Summary {
-	summariesByLevel := make(map[int][]models.Summary)
-	for _, summary := range summaries {
-		summariesByLevel[summary.Level] = append(summariesByLevel[summary.Level], summary)
-	}
-	return summariesByLevel
-}
-
-// CountSummariesAtLevel counts how many summaries exist at a specific level
-func CountSummariesAtLevel(summaries []models.Summary, level int) int {
+// countSummariesAtLevel counts how many summaries exist at a specific level
+func countSummariesAtLevel(summaries []models.Summary, level int) int {
 	count := 0
-	for _, summary := range summaries {
-		if summary.Level == level {
+	for _, s := range summaries {
+		if s.Level == level {
 			count++
 		}
 	}
 	return count
+}
+
+// findMaxLevel returns the highest summary level in a slice of summaries
+func findMaxLevel(summaries []models.Summary) int {
+	max := 0
+	for _, s := range summaries {
+		if s.Level > max {
+			max = s.Level
+		}
+	}
+	return max
 }

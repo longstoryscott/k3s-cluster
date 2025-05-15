@@ -3,13 +3,15 @@ import { Box, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Divide
 import { Link, useLocation } from 'react-router-dom';
 import ChatIcon from '@mui/icons-material/Chat';
 import SettingsIcon from '@mui/icons-material/Settings';
+import HandymanIcon  from '@mui/icons-material/Handyman';
 
 const Navigation: React.FC = () => {
   const location = useLocation();
   
   const navigationItems = [
     { text: 'Chat', icon: <ChatIcon />, path: '/' },
-    { text: 'Settings', icon: <SettingsIcon />, path: '/settings' }
+    { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
+    { text: 'Model Profiles', icon: <HandymanIcon />, path: '/model-profiles' }
   ];
 
   return (

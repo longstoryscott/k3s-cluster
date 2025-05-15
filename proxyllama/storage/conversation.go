@@ -15,43 +15,15 @@ type Conversation struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// SQL query templates for conversation operations
-const (
-	sqlCreateConversation = `
-		INSERT INTO conversations (user_id, model, title) 
-		VALUES ($1, $2, $3) 
-		RETURNING id
-	`
-	sqlGetConversation = `
-		SELECT id, user_id, title, model, created_at, updated_at 
-		FROM conversations 
-		WHERE id = $1
-	`
-	sqlGetUserConversations = `
-		SELECT id, user_id, title, model, created_at, updated_at 
-		FROM conversations 
-		WHERE user_id = $1 
-		ORDER BY updated_at DESC
-	`
-	sqlUpdateConversationTitle = `
-		UPDATE conversations 
-		SET title = $1, updated_at = NOW() 
-		WHERE id = $2
-	`
-	sqlDeleteConversation = `
-		DELETE FROM conversations WHERE id = $1
-	`
-)
-
 // CreateConversation starts a new conversation for a user
-func CreateConversation(ctx context.Context, userID, model string, title string) (int, error) {
+func CreateConversation(ctx context.Context, userID string, title string) (int, error) {
 	// Ensure the user exists
 	if err := EnsureUser(ctx, userID); err != nil {
 		return 0, err
 	}
 
 	var conversationID int
-	err := Pool.QueryRow(ctx, sqlCreateConversation, userID, model, title).Scan(&conversationID)
+	err := Pool.QueryRow(ctx, GetQuery("conversation.create_conversation"), userID, title).Scan(&conversationID)
 	if err != nil {
 		return 0, err
 	}
@@ -61,7 +33,6 @@ func CreateConversation(ctx context.Context, userID, model string, title string)
 		ID:        conversationID,
 		UserID:    userID,
 		Title:     title,
-		Model:     model,
 		CreatedAt: time.Now(), // Approximate time until we fetch from DB
 		UpdatedAt: time.Now(),
 	}
@@ -84,8 +55,8 @@ func GetUserConversations(ctx context.Context, userID string) ([]Conversation, e
 		return conversations, nil
 	}
 
-	// Not in cache, get from database
-	rows, err := Pool.Query(ctx, sqlGetUserConversations, userID)
+	// Not in cache, get from database using the query from our loader
+	rows, err := Pool.Query(ctx, GetQuery("conversation.list_user_conversations"), userID)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +65,7 @@ func GetUserConversations(ctx context.Context, userID string) ([]Conversation, e
 	var conversations []Conversation
 	for rows.Next() {
 		var conv Conversation
-		if err := rows.Scan(&conv.ID, &conv.UserID, &conv.Title, &conv.Model, &conv.CreatedAt, &conv.UpdatedAt); err != nil {
+		if err := rows.Scan(&conv.ID, &conv.UserID, &conv.Title, &conv.CreatedAt, &conv.UpdatedAt); err != nil {
 			return nil, err
 		}
 		conversations = append(conversations, conv)
@@ -122,8 +93,8 @@ func GetConversation(ctx context.Context, conversationID int) (*Conversation, er
 
 	// Not in cache, get from database
 	var conv Conversation
-	err := Pool.QueryRow(ctx, sqlGetConversation, conversationID).Scan(
-		&conv.ID, &conv.UserID, &conv.Title, &conv.Model, &conv.CreatedAt, &conv.UpdatedAt,
+	err := Pool.QueryRow(ctx, GetQuery("conversation.get_conversation"), conversationID).Scan(
+		&conv.ID, &conv.UserID, &conv.Title, &conv.CreatedAt, &conv.UpdatedAt,
 	)
 
 	if err != nil {
@@ -140,7 +111,7 @@ func GetConversation(ctx context.Context, conversationID int) (*Conversation, er
 
 // UpdateConversationTitle updates the title of a conversation
 func UpdateConversationTitle(ctx context.Context, conversationID int, title string) error {
-	_, err := Pool.Exec(ctx, sqlUpdateConversationTitle, title, conversationID)
+	_, err := Pool.Exec(ctx, GetQuery("conversation.update_title"), title, conversationID)
 	if err != nil {
 		return err
 	}
@@ -179,7 +150,7 @@ func DeleteConversation(ctx context.Context, conversationID int) error {
 	defer tx.Rollback(ctx)
 
 	// Delete the conversation (triggers will handle dependent records)
-	_, err = tx.Exec(ctx, sqlDeleteConversation, conversationID)
+	_, err = tx.Exec(ctx, GetQuery("conversation.delete_conversation"), conversationID)
 	if err != nil {
 		return fmt.Errorf("failed to delete conversation: %w", err)
 	}

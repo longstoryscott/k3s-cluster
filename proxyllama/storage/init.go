@@ -4,13 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
-	"os"
-	"strconv"
+	"path/filepath"
+	"proxyllama/config"
+	"proxyllama/models"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/sirupsen/logrus"
 )
 
 type User struct {
@@ -24,58 +26,78 @@ var (
 	connString string    // Store connection string for reconnection logic
 )
 
-// InitDB initializes the database connection with dynamic pool settings
+// InitDB initializes the database connection
 func InitDB(connStr string) error {
 	var err error
-	connString = connStr // Store for potential reconnection
+	var config *pgxpool.Config
+	connString = connStr
 
 	initOnce.Do(func() {
-		// Create a connection pool config with optimized settings
-		config, e := pgxpool.ParseConfig(connString)
-		if e != nil {
-			err = fmt.Errorf("unable to parse database config: %w", e)
+		_, file, line, _ := runtime.Caller(0)
+		LoadQueries()
+		logrus.WithFields(logrus.Fields{
+			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line": line,
+		}).Info("Initializing PostgreSQL database connection...")
+
+		config, err = pgxpool.ParseConfig(connStr)
+		if err != nil {
+			err = fmt.Errorf("unable to parse postgres connection string: %w", err)
 			return
 		}
 
-		// Get connection pool settings from environment or use defaults
-		maxConns := 10
-		minConns := 2
-		if envMaxConns := os.Getenv("DB_MAX_CONNECTIONS"); envMaxConns != "" {
-			if val, e := strconv.Atoi(envMaxConns); e == nil && val > 0 {
-				maxConns = val
-			}
-		}
-
-		if envMinConns := os.Getenv("DB_MIN_CONNECTIONS"); envMinConns != "" {
-			if val, e := strconv.Atoi(envMinConns); e == nil && val > 0 {
-				minConns = val
-			}
-		}
-
-		// Configure connection pool with best practices
-		config.MaxConns = int32(maxConns)
-		config.MinConns = int32(minConns)
-		config.MaxConnLifetime = 1 * time.Hour     // Prevent stale connections
-		config.MaxConnIdleTime = 30 * time.Minute  // Release idle connections
-		config.HealthCheckPeriod = 1 * time.Minute // Regular health checks
-
-		// Create the connection pool
-		Pool, e = pgxpool.NewWithConfig(context.Background(), config)
-		if e != nil {
-			err = fmt.Errorf("unable to connect to database: %w", e)
+		// Build the connection pool
+		Pool, err = pgxpool.NewWithConfig(context.Background(), config)
+		if err != nil {
+			err = fmt.Errorf("failed to create connection pool: %w", err)
 			return
 		}
 
-		// Verify connection works
-		if e := Pool.Ping(context.Background()); e != nil {
-			err = fmt.Errorf("unable to ping database: %w", e)
+		// Ping the database to verify the connection
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err = Pool.Ping(ctx); err != nil {
+			err = fmt.Errorf("failed to ping database: %w", err)
 			return
 		}
 
-		log.Println("Successfully connected to database with connection pool")
+		// Initialize all the tables
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
-		// Schedule periodic health checks
-		go startBackgroundHealthChecks()
+		err = InitializeTables(ctx)
+		if err != nil {
+			err = fmt.Errorf("failed to initialize tables: %w", err)
+			return
+		}
+		logrus.WithFields(logrus.Fields{
+			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line": line,
+		}).Info("Successfully initialized tables")
+
+		// Ensure research tables are created
+		err = EnsureResearchTables(ctx)
+		if err != nil {
+			err = fmt.Errorf("failed to ensure research tables: %w", err)
+			return
+		}
+		logrus.WithFields(logrus.Fields{
+			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line": line,
+		}).Info("Successfully ensured research tables")
+
+		// Create default model profiles
+		err = CreateDefaultProfiles(ctx)
+		if err != nil {
+			err = fmt.Errorf("failed to create default model profiles: %w", err)
+			return
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line": line,
+		}).Info("Successfully connected to PostgreSQL")
 	})
 	return err
 }
@@ -83,438 +105,371 @@ func InitDB(connStr string) error {
 // EnsureDBConnection checks the database connection and attempts to reconnect if necessary
 func EnsureDBConnection(ctx context.Context) error {
 	if Pool == nil {
-		return errors.New("database connection not initialized")
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line": line,
+		}).Info("Connection pool is nil, initializing database")
+
+		if connString == "" {
+			return errors.New("connection string is empty, cannot reconnect")
+		}
+		return InitDB(connString)
 	}
 
-	err := Pool.Ping(ctx)
-	if err != nil {
-		log.Printf("Database ping failed: %v, attempting reconnection", err)
+	// Check if the connection is still valid
+	if err := Pool.Ping(ctx); err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Database connection lost, attempting to reconnect")
 
-		// Try to close existing connections
-		if Pool != nil {
-			Pool.Close()
+		// Close the old pool
+		Pool.Close()
+
+		// Reinitialize
+		if connString == "" {
+			return errors.New("connection string is empty, cannot reconnect")
 		}
-
-		// Clear init flag to allow reconnection
-		initOnce = sync.Once{}
-
-		// Reinitialize connection
 		return InitDB(connString)
 	}
 
 	return nil
 }
 
-// startBackgroundHealthChecks periodically checks database connection health
-func startBackgroundHealthChecks() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := EnsureDBConnection(ctx); err != nil {
-			log.Printf("Background health check failed: %v", err)
-		}
-		cancel()
-
-		// Run maintenance tasks occasionally (once a day)
-		go func() {
-			// Use time-based condition to run maintenance once a day
-			hour := time.Now().Hour()
-			if hour == 3 { // 3 AM, typically low traffic
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-				defer cancel()
-				if err := PerformDatabaseMaintenance(ctx); err != nil {
-					log.Printf("Database maintenance failed: %v", err)
-				}
-			}
-		}()
-	}
-}
-
-// InitSchema creates the database schema if it doesn't exist
-func InitSchema(ctx context.Context) {
-	// Ensure TimescaleDB extension is available
-	_, err := Pool.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;`)
+// InitializeTables creates all necessary database tables
+func InitializeTables(ctx context.Context) error {
+	// Create extensions
+	_, err := Pool.Exec(ctx, GetQuery("schema.create_extensions"))
 	if err != nil {
-		log.Printf("Warning: TimescaleDB extension could not be enabled: %v", err)
-		log.Printf("Continuing without TimescaleDB hypertable support")
-	}
-
-	// Add pgvector extension for vector embeddings
-	_, err = Pool.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS vector;`)
-	if err != nil {
-		log.Printf("Warning: pgvector extension could not be enabled: %v. Semantic search will not be available.", err)
-	} else {
-		log.Printf("pgvector extension enabled successfully.")
+		return fmt.Errorf("failed to create extensions: %w", err)
 	}
 
 	// Create users table
-	_, err = Pool.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS users (
-			id TEXT PRIMARY KEY,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_users_table"))
+	if err != nil {
+		return fmt.Errorf("failed to create users table: %w", err)
+	}
+
+	// Create conversations table
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_conversations_table"))
+	if err != nil {
+		return fmt.Errorf("failed to create conversations table: %w", err)
+	}
+
+	// Create messages table
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_messages_table"))
+	if err != nil {
+		return fmt.Errorf("failed to create messages table: %w", err)
+	}
+
+	// Create messages indexes
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_messages_indexes"))
+	if err != nil {
+		return fmt.Errorf("failed to create message indexes: %w", err)
+	}
+
+	// Create message embeddings table
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_message_embeddings_table"))
+	if err != nil {
+		return fmt.Errorf("failed to create message embeddings table: %w", err)
+	}
+
+	// Create hypertable for message_embeddings
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_message_embeddings_hypertable"))
+	if err != nil {
+		return fmt.Errorf("failed to create message embeddings hypertable: %w", err)
+	}
+
+	// Enable compression for message_embeddings
+	_, err = Pool.Exec(ctx, GetQuery("schema.enable_message_embeddings_compression"))
+	if err != nil {
+		return fmt.Errorf("failed to enable message embeddings compression: %w", err)
+	}
+
+	// Add compression policy for message_embeddings
+	_, err = Pool.Exec(ctx, GetQuery("schema.message_embeddings_compression_policy"))
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Warning: Failed to add message embeddings compression policy")
+	}
+
+	// Add retention policy for message_embeddings
+	_, err = Pool.Exec(ctx, GetQuery("schema.message_embeddings_retention_policy"))
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Warning: Failed to add message embeddings retention policy")
+	}
+
+	// Create summaries table
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_summaries_table"))
+	if err != nil {
+		return fmt.Errorf("failed to create summaries table: %w", err)
+	}
+
+	// Create model profiles table
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_model_profiles_table"))
+	if err != nil {
+		return fmt.Errorf("failed to create model profiles table: %w", err)
+	}
+
+	// Create model profiles index
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_model_profiles_index"))
+	if err != nil {
+		return fmt.Errorf("failed to create model profiles index: %w", err)
+	}
+
+	// Create hypertable for conversations
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_conversations_hypertable"))
+	if err != nil {
+		return fmt.Errorf("failed to create conversations hypertable: %w", err)
+	}
+
+	// Create conversations indexes
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_conversations_indexes"))
+	if err != nil {
+		return fmt.Errorf("failed to create conversations indexes: %w", err)
+	}
+
+	// Create hypertable for messages
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_messages_hypertable"))
+	if err != nil {
+		return fmt.Errorf("failed to create messages hypertable: %w", err)
+	}
+
+	// Create additional message indexes
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_additional_messages_indexes"))
+	if err != nil {
+		return fmt.Errorf("failed to create additional message indexes: %w", err)
+	}
+
+	// Create hypertable for summaries
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_summaries_hypertable"))
+	if err != nil {
+		return fmt.Errorf("failed to create summaries hypertable: %w", err)
+	}
+
+	// Create summaries indexes
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_summaries_indexes"))
+	if err != nil {
+		return fmt.Errorf("failed to create summaries indexes: %w", err)
+	}
+
+	// Create user check trigger
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_user_check_trigger"))
+	if err != nil {
+		return fmt.Errorf("failed to create user check trigger: %w", err)
+	}
+
+	// Create conversation update trigger
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_conversation_update_trigger"))
+	if err != nil {
+		return fmt.Errorf("failed to create conversation update trigger: %w", err)
+	}
+
+	// Create conversation check triggers
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_conversation_check_triggers"))
+	if err != nil {
+		return fmt.Errorf("failed to create conversation check triggers: %w", err)
+	}
+
+	// Create cascade delete trigger
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_cascade_delete_trigger"))
+	if err != nil {
+		return fmt.Errorf("failed to create cascade delete trigger: %w", err)
+	}
+
+	// Enable compression on messages
+	_, err = Pool.Exec(ctx, GetQuery("schema.enable_messages_compression"))
+	if err != nil {
+		return fmt.Errorf("failed to enable messages compression: %w", err)
+	}
+
+	// Enable compression on conversations
+	_, err = Pool.Exec(ctx, GetQuery("schema.enable_conversations_compression"))
+	if err != nil {
+		return fmt.Errorf("failed to enable conversations compression: %w", err)
+	}
+
+	// Enable compression on summaries
+	_, err = Pool.Exec(ctx, GetQuery("schema.enable_summaries_compression"))
+	if err != nil {
+		return fmt.Errorf("failed to enable summaries compression: %w", err)
+	}
+
+	// Add compression policy for messages
+	_, err = Pool.Exec(ctx, GetQuery("schema.messages_compression_policy"))
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Warning: Failed to add messages compression policy")
+	}
+
+	// Add compression policy for conversations
+	_, err = Pool.Exec(ctx, GetQuery("schema.conversations_compression_policy"))
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Warning: Failed to add conversations compression policy")
+	}
+
+	// Add compression policy for summaries
+	_, err = Pool.Exec(ctx, GetQuery("schema.summaries_compression_policy"))
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Warning: Failed to add summaries compression policy")
+	}
+
+	// Add retention policy for conversations
+	_, err = Pool.Exec(ctx, GetQuery("schema.conversations_retention_policy"))
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Warning: Failed to add conversations retention policy")
+	}
+
+	// Add retention policy for messages
+	_, err = Pool.Exec(ctx, GetQuery("schema.messages_retention_policy"))
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Warning: Failed to add messages retention policy")
+	}
+
+	// Add retention policy for summaries
+	_, err = Pool.Exec(ctx, GetQuery("schema.summaries_retention_policy"))
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Warning: Failed to add summaries retention policy")
+	}
+
+	// Initialize memory schema
+	InitMemorySchema(ctx)
+
+	return nil
+}
+
+// EnsureResearchTables ensures that the research tables are created
+func EnsureResearchTables(ctx context.Context) error {
+	// Create research_tasks table
+	_, err := Pool.Exec(ctx, GetQuery("schema.create_research_tasks_table"))
+	if err != nil {
+		return fmt.Errorf("failed to create research_tasks table: %w", err)
+	}
+
+	// Create research_subtasks table
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_research_subtasks_table"))
+	if err != nil {
+		return fmt.Errorf("failed to create research_subtasks table: %w", err)
+	}
+
+	return nil
+}
+
+// CreateDefaultProfiles creates the default model profiles in the database
+func CreateDefaultProfiles(ctx context.Context) error {
+	// Otherwise, insert the default profiles
+	defaultProfiles := []models.ModelProfile{
+		config.DefaultPrimaryProfile,
+		config.DefaultSummarizationProfile,
+		config.DefaultMasterSummaryProfile,
+		config.DefaultBriefSummaryProfile,
+		config.DefaultKeyPointsProfile,
+		config.DefaultSelfCritiqueProfile,
+		config.DefaultImprovementProfile,
+		config.DefaultMemoryRetrievalProfile,
+		config.DefaultAnalysisProfile,
+		config.DefaultResearchTaskProfile,
+		config.DefaultResearchPlanProfile,
+		config.DefaultResearchConsolidationProfile,
+		config.DefaultResearchAnalysisProfile,
+		config.DefaultEmbeddingProfile,
+	}
+
+	tx, err := Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Insert each default profile
+	systemUserID := "0"
+	for _, profile := range defaultProfiles {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":        filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":        line,
+			"profileName": profile.Name,
+			"profileId":   profile.ID,
+		}).Info("Inserting default profile")
+
+		_, err = tx.Exec(ctx,
+			GetQuery("modelprofile.create_default_profile"),
+			profile.ID.String(),
+			systemUserID,
+			profile.Name,
+			profile.Description,
+			profile.ModelName,
+			profile.Parameters,
+			profile.SystemPrompt,
+			profile.ModelVersion,
+			profile.Type,
 		)
-	`)
-	if err != nil {
-		log.Printf("Error creating users table: %v", err)
-	}
-
-	// Create conversations table with TimescaleDB compatible schema
-	_, err = Pool.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS conversations (
-			id SERIAL,
-			user_id TEXT NOT NULL,
-			title TEXT DEFAULT 'New conversation',
-			model TEXT NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			PRIMARY KEY (id, created_at)
-		)
-	`)
-	if err != nil {
-		log.Printf("Error creating conversations table: %v", err)
-	}
-
-	// Create messages table with TimescaleDB compatible schema
-	_, err = Pool.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS messages (
-			id SERIAL,
-			conversation_id INTEGER NOT NULL,
-			role TEXT NOT NULL,
-			content TEXT NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			PRIMARY KEY (id, created_at)
-		)
-	`)
-	if err != nil {
-		log.Printf("Error creating messages table: %v", err)
-	}
-
-	// Create full-text search index on messages content
-	_, err = Pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_messages_content_fts ON messages USING GIN (to_tsvector('english', content))
-	`)
-	if err != nil {
-		log.Printf("Warning: Could not create full-text search index on messages: %v", err)
-	} else {
-		log.Printf("Full-text search index on messages created successfully")
-	}
-
-	// Create message_embeddings table for vector embeddings
-	_, err = Pool.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS message_embeddings (
-			message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-			embedding VECTOR(768), -- Dimension based on embedding model
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)
-	`)
-	if err != nil {
-		log.Printf("Error creating message_embeddings table: %v", err)
-	}
-
-	// Create hypertable for message_embeddings with optimal chunk interval
-	_, err = Pool.Exec(ctx, `
-		SELECT create_hypertable('message_embeddings', 'created_at', 
-							   if_not_exists => TRUE, 
-							   migrate_data => TRUE,
-							   chunk_time_interval => INTERVAL '7 days')
-	`)
-	if err != nil {
-		log.Printf("Note: Could not create hypertable for message_embeddings: %v", err)
-	} else {
-		log.Printf("Message_embeddings hypertable created or already exists")
-
-		// Create vector similarity search index
-		_, err = Pool.Exec(ctx, `
-			CREATE INDEX IF NOT EXISTS idx_message_embeddings_embedding ON message_embeddings 
-			USING HNSW (embedding vector_cosine_ops)
-		`)
 		if err != nil {
-			log.Printf("Warning: Could not create vector index on message_embeddings: %v", err)
-		} else {
-			log.Printf("Vector index on message_embeddings created successfully")
+			return err
 		}
 	}
 
-	// Create summaries table with TimescaleDB compatible schema
-	_, err = Pool.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS summaries (
-			id SERIAL,
-			conversation_id INTEGER NOT NULL,
-			content TEXT NOT NULL,
-			level INTEGER NOT NULL,
-			source_ids JSONB NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			PRIMARY KEY (id, created_at)
-		)
-	`)
-	if err != nil {
-		log.Printf("Error creating summaries table: %v", err)
-	}
-
-	// Create hypertable for conversations with optimal chunk interval
-	_, err = Pool.Exec(ctx, `
-		SELECT create_hypertable('conversations', 'created_at', 
-							   if_not_exists => TRUE, 
-							   migrate_data => TRUE,
-							   chunk_time_interval => INTERVAL '7 days')
-	`)
-	if err != nil {
-		log.Printf("Note: Could not create hypertable for conversations: %v", err)
-	} else {
-		log.Printf("Conversations hypertable created or already exists")
-
-		// Create additional indexes for conversations
-		_, err = Pool.Exec(ctx, `
-			CREATE INDEX IF NOT EXISTS idx_conversations_user_time ON conversations (user_id, created_at DESC);
-		`)
-		if err != nil {
-			log.Printf("Warning: Could not create additional indexes for conversations: %v", err)
-		}
-	}
-
-	// Create hypertable for messages with optimal chunk interval
-	_, err = Pool.Exec(ctx, `
-		SELECT create_hypertable('messages', 'created_at', 
-							   if_not_exists => TRUE, 
-							   migrate_data => TRUE,
-							   chunk_time_interval => INTERVAL '3 days')
-	`)
-	if err != nil {
-		log.Printf("Note: Could not create hypertable for messages: %v", err)
-	} else {
-		log.Printf("Messages hypertable created or already exists")
-
-		// Create additional indexes for messages
-		_, err = Pool.Exec(ctx, `
-			CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id);
-			CREATE INDEX IF NOT EXISTS idx_messages_conversation_time ON messages (conversation_id, created_at DESC);
-		`)
-		if err != nil {
-			log.Printf("Warning: Could not create additional indexes for messages: %v", err)
-		}
-	}
-
-	// Create hypertable for summaries with optimal chunk interval
-	_, err = Pool.Exec(ctx, `
-		SELECT create_hypertable('summaries', 'created_at', 
-							   if_not_exists => TRUE, 
-							   migrate_data => TRUE,
-							   chunk_time_interval => INTERVAL '7 days')
-	`)
-	if err != nil {
-		log.Printf("Note: Could not create hypertable for summaries: %v", err)
-	} else {
-		log.Printf("Summaries hypertable created or already exists")
-
-		// Create additional indexes for summaries
-		_, err = Pool.Exec(ctx, `
-			CREATE INDEX IF NOT EXISTS idx_summaries_conversation_id ON summaries (conversation_id);
-			CREATE INDEX IF NOT EXISTS idx_summaries_conversation_level ON summaries (conversation_id, level);
-			CREATE INDEX IF NOT EXISTS idx_summaries_conversation_time ON summaries (conversation_id, created_at DESC);
-		`)
-		if err != nil {
-			log.Printf("Warning: Could not create additional indexes for summaries: %v", err)
-		}
-	}
-
-	// Instead of foreign keys, create a trigger to check for valid user_id
-	_, err = Pool.Exec(ctx, `
-		CREATE OR REPLACE FUNCTION check_user_exists()
-		RETURNS TRIGGER AS $$
-		BEGIN
-			IF NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.user_id) THEN
-				RAISE EXCEPTION 'Referenced user does not exist';
-			END IF;
-			RETURN NEW;
-		END;
-		$$ LANGUAGE plpgsql;
-
-		DROP TRIGGER IF EXISTS ensure_user_exists_trigger ON conversations;
-		CREATE TRIGGER ensure_user_exists_trigger
-		BEFORE INSERT OR UPDATE ON conversations
-		FOR EACH ROW
-		EXECUTE FUNCTION check_user_exists();
-	`)
-	if err != nil {
-		log.Printf("Warning: Could not create user existence check trigger: %v", err)
-	}
-
-	// Update conversation updated_at when a message is added
-	_, err = Pool.Exec(ctx, `
-		CREATE OR REPLACE FUNCTION update_conversation_updated_at()
-		RETURNS TRIGGER AS $$
-		BEGIN
-			UPDATE conversations
-			SET updated_at = NOW()
-			WHERE id = NEW.conversation_id;
-			RETURN NEW;
-		END;
-		$$ LANGUAGE plpgsql;
-
-		DROP TRIGGER IF EXISTS update_conversation_updated_at_trigger ON messages;
-		CREATE TRIGGER update_conversation_updated_at_trigger
-		AFTER INSERT ON messages
-		FOR EACH ROW
-		EXECUTE FUNCTION update_conversation_updated_at();
-	`)
-	if err != nil {
-		log.Printf("Error creating update_conversation_updated_at function and trigger: %v", err)
-	}
-
-	// Add triggers to maintain referential integrity between conversations and messages
-	_, err = Pool.Exec(ctx, `
-		CREATE OR REPLACE FUNCTION check_conversation_exists()
-		RETURNS TRIGGER AS $$
-		BEGIN
-			IF NOT EXISTS (SELECT 1 FROM conversations WHERE id = NEW.conversation_id) THEN
-				RAISE EXCEPTION 'Referenced conversation does not exist';
-			END IF;
-			RETURN NEW;
-		END;
-		$$ LANGUAGE plpgsql;
-
-		DROP TRIGGER IF EXISTS ensure_conversation_exists_messages_trigger ON messages;
-		CREATE TRIGGER ensure_conversation_exists_messages_trigger
-		BEFORE INSERT OR UPDATE ON messages
-		FOR EACH ROW
-		EXECUTE FUNCTION check_conversation_exists();
-
-		DROP TRIGGER IF EXISTS ensure_conversation_exists_summaries_trigger ON summaries;
-		CREATE TRIGGER ensure_conversation_exists_summaries_trigger
-		BEFORE INSERT OR UPDATE ON summaries
-		FOR EACH ROW
-		EXECUTE FUNCTION check_conversation_exists();
-	`)
-	if err != nil {
-		log.Printf("Warning: Could not create conversation existence check triggers: %v", err)
-	}
-
-	// Add ON DELETE CASCADE functionality via triggers
-	_, err = Pool.Exec(ctx, `
-		CREATE OR REPLACE FUNCTION delete_related_messages_and_summaries()
-		RETURNS TRIGGER AS $$
-		BEGIN
-			DELETE FROM messages WHERE conversation_id = OLD.id;
-			DELETE FROM summaries WHERE conversation_id = OLD.id;
-			RETURN OLD;
-		END;
-		$$ LANGUAGE plpgsql;
-
-		DROP TRIGGER IF EXISTS cascade_delete_trigger ON conversations;
-		CREATE TRIGGER cascade_delete_trigger
-		BEFORE DELETE ON conversations
-		FOR EACH ROW
-		EXECUTE FUNCTION delete_related_messages_and_summaries();
-	`)
-	if err != nil {
-		log.Printf("Warning: Could not create cascade delete trigger: %v", err)
-	}
-
-	// Enable compression on hypertables before adding compression policies
-	_, err = Pool.Exec(ctx, `
-	ALTER TABLE messages SET (timescaledb.compress, timescaledb.compress_segmentby = 'conversation_id');
-`)
-	if err != nil {
-		log.Printf("Warning: Could not enable compression for messages: %v", err)
-	} else {
-		log.Printf("Compression enabled for messages")
-	}
-
-	_, err = Pool.Exec(ctx, `
-	ALTER TABLE conversations SET (timescaledb.compress, timescaledb.compress_segmentby = 'user_id');
-`)
-	if err != nil {
-		log.Printf("Warning: Could not enable compression for conversations: %v", err)
-	} else {
-		log.Printf("Compression enabled for conversations")
-	}
-
-	_, err = Pool.Exec(ctx, `
-	ALTER TABLE summaries SET (timescaledb.compress, timescaledb.compress_segmentby = 'conversation_id');
-`)
-	if err != nil {
-		log.Printf("Warning: Could not enable compression for summaries: %v", err)
-	} else {
-		log.Printf("Compression enabled for summaries")
-	}
-
-	// Add data compression policies for hypertables
-	_, err = Pool.Exec(ctx, `
-		SELECT add_compression_policy('messages', INTERVAL '7 days', 
-								   if_not_exists => TRUE);
-	`)
-	if err != nil {
-		log.Printf("Warning: Could not create compression policy for messages: %v", err)
-	} else {
-		log.Printf("Compression policy for messages created successfully")
-	}
-
-	_, err = Pool.Exec(ctx, `
-		SELECT add_compression_policy('conversations', INTERVAL '30 days', 
-								   if_not_exists => TRUE);
-	`)
-	if err != nil {
-		log.Printf("Warning: Could not create compression policy for conversations: %v", err)
-	} else {
-		log.Printf("Compression policy for conversations created successfully")
-	}
-
-	_, err = Pool.Exec(ctx, `
-		SELECT add_compression_policy('summaries', INTERVAL '14 days', 
-								   if_not_exists => TRUE);
-	`)
-	if err != nil {
-		log.Printf("Warning: Could not create compression policy for summaries: %v", err)
-	} else {
-		log.Printf("Compression policy for summaries created successfully")
-	}
-
-	// Add retention policies for hypertables
-	_, err = Pool.Exec(ctx, `
-		SELECT add_retention_policy('messages', INTERVAL '90 days', 
-								 if_not_exists => TRUE);
-	`)
-	if err != nil {
-		log.Printf("Warning: Could not create retention policy for messages: %v", err)
-	} else {
-		log.Printf("Retention policy for messages created successfully")
-	}
-
-	_, err = Pool.Exec(ctx, `
-		SELECT add_retention_policy('conversations', INTERVAL '365 days', 
-								 if_not_exists => TRUE);
-	`)
-	if err != nil {
-		log.Printf("Warning: Could not create retention policy for conversations: %v", err)
-	} else {
-		log.Printf("Retention policy for conversations created successfully")
-	}
-
-	_, err = Pool.Exec(ctx, `
-		SELECT add_retention_policy('summaries', INTERVAL '180 days', 
-								 if_not_exists => TRUE);
-	`)
-	if err != nil {
-		log.Printf("Warning: Could not create retention policy for summaries: %v", err)
-	} else {
-		log.Printf("Retention policy for summaries created successfully")
-	}
-
-	log.Printf("Database schema initialized with TimescaleDB optimizations")
+	return tx.Commit(ctx)
 }
 
 // PerformDatabaseMaintenance runs optimization and maintenance tasks for the database
 func PerformDatabaseMaintenance(ctx context.Context) error {
-	log.Printf("Starting database maintenance tasks...")
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line": line,
+	}).Info("Starting database maintenance tasks...")
 
 	// Vacuum analyze for better query planning
 	_, err := Pool.Exec(ctx, `VACUUM ANALYZE`)
 	if err != nil {
 		return fmt.Errorf("failed to vacuum analyze: %w", err)
 	}
-	log.Printf("VACUUM ANALYZE completed")
+	logrus.WithFields(logrus.Fields{
+		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line": line,
+	}).Info("VACUUM ANALYZE completed")
 
 	// Reindex tables to optimize indexes
 	for _, table := range []string{"messages", "conversations", "summaries"} {
@@ -522,27 +477,37 @@ func PerformDatabaseMaintenance(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to reindex %s: %w", table, err)
 		}
-		log.Printf("REINDEX of %s completed", table)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"table": table,
+		}).Info("REINDEX completed")
 	}
 
 	// Run TimescaleDB-specific maintenance
 	_, err = Pool.Exec(ctx, `SELECT run_job(j.id) FROM timescaledb_information.jobs j WHERE j.proc_name = 'policy_refresh'`)
 	if err != nil {
-		log.Printf("Note: TimescaleDB policy refresh failed (may be normal if no jobs): %v", err)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Info("Note: TimescaleDB policy refresh failed (may be normal if no jobs)")
 	} else {
-		log.Printf("TimescaleDB policy refresh completed")
+		logrus.WithFields(logrus.Fields{
+			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line": line,
+		}).Info("TimescaleDB policy refresh completed")
 	}
 
-	log.Printf("Database maintenance tasks completed successfully")
+	logrus.WithFields(logrus.Fields{
+		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line": line,
+	}).Info("Database maintenance tasks completed successfully")
 	return nil
 }
 
 // EnsureUser creates a user if they don't exist
 func EnsureUser(ctx context.Context, userID string) error {
-	_, err := Pool.Exec(ctx, `
-		INSERT INTO users (id)
-		VALUES ($1)
-		ON CONFLICT (id) DO NOTHING
-	`, userID)
+	_, err := Pool.Exec(ctx, GetQuery("user.ensure_user"), userID)
 	return err
 }

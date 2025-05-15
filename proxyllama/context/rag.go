@@ -3,12 +3,14 @@ package context
 import (
 	"context"
 	"fmt"
-	"log"
-	"proxyllama/config"
+	"path/filepath"
 	"proxyllama/models"
 	"proxyllama/proxy"
 	"proxyllama/storage"
+	"runtime"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // RetrievedMemory represents a message that was retrieved based on vector similarity
@@ -18,11 +20,14 @@ type RetrievedMemory struct {
 }
 
 // GetRelevantMemories retrieves semantically similar messages based on a query
-func GetRelevantMemories(ctx context.Context, query string, limit int) ([]models.OllamaMessage, error) {
-	conf := config.GetConfig()
+func (cc *ConversationContext) GetRelevantMemories(ctx context.Context, query string, limit int) ([]models.OllamaMessage, error) {
+	usrCfg, err := GetUserConfig(cc.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user config: %w", err)
+	}
 
 	// Skip if RAG is not enabled
-	if !conf.Summarization.EnableRAG {
+	if !*usrCfg.Summarization.EnableRAG {
 		return nil, nil
 	}
 
@@ -31,14 +36,18 @@ func GetRelevantMemories(ctx context.Context, query string, limit int) ([]models
 		limit = 5 // Default to 5 most relevant memories
 	}
 
-	// Get embedding for the query
-	embeddingModel := conf.Summarization.EmbeddingModel
-	if embeddingModel == "" {
-		return nil, fmt.Errorf("embedding model not configured")
+	profile, err := storage.GetModelProfile(ctx, usrCfg.ModelProfiles.EmbeddingProfileID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get model profile: %w", err)
 	}
 
-	log.Printf("Generating embedding for query to find relevant memories")
-	queryEmbedding, err := proxy.GetEmbedding(ctx, query, embeddingModel)
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line": line,
+	}).Info("Generating embedding for query to find relevant memories")
+
+	queryEmbedding, err := proxy.GetEmbedding(ctx, query, profile.ModelName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
 	}
@@ -53,11 +62,20 @@ func GetRelevantMemories(ctx context.Context, query string, limit int) ([]models
 	}
 
 	if len(similarMessages) == 0 {
-		log.Printf("No relevant memories found for query")
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line": line,
+		}).Info("No relevant memories found for query")
 		return nil, nil
 	}
 
-	log.Printf("Found %d relevant memories for query", len(similarMessages))
+	_, file, line, _ = runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":  line,
+		"count": len(similarMessages),
+	}).Info("Found relevant memories for query")
 
 	// Convert to OllamaMessages for context
 	var ollamaMessages []models.OllamaMessage
@@ -72,7 +90,7 @@ func GetRelevantMemories(ctx context.Context, query string, limit int) ([]models
 }
 
 // EnhanceRequestWithRAG adds relevant memories to the request based on the latest user query
-func EnhanceRequestWithRAG(ctx context.Context, req *models.OllamaReq) error {
+func (cc *ConversationContext) EnhanceRequestWithRAG(ctx context.Context, req *models.OllamaReq) error {
 	// Find the latest user message to use as query
 	var latestUserMessage string
 	for i := len(req.Messages) - 1; i >= 0; i-- {
@@ -91,9 +109,14 @@ func EnhanceRequestWithRAG(ctx context.Context, req *models.OllamaReq) error {
 	defer cancel()
 
 	// Get relevant memories
-	relevantMemories, err := GetRelevantMemories(timeoutCtx, latestUserMessage, 5)
+	relevantMemories, err := cc.GetRelevantMemories(timeoutCtx, latestUserMessage, 5)
 	if err != nil {
-		log.Printf("Warning: Failed to get relevant memories: %v", err)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Failed to get relevant memories")
 		return nil // Continue without RAG enhancement
 	}
 
@@ -138,6 +161,11 @@ func EnhanceRequestWithRAG(ctx context.Context, req *models.OllamaReq) error {
 	// Replace messages in the request
 	req.Messages = enhancedMessages
 
-	log.Printf("Enhanced request with %d relevant memories", len(relevantMemories))
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":  line,
+		"count": len(relevantMemories),
+	}).Info("Enhanced request with relevant memories")
 	return nil
 }

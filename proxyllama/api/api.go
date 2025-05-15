@@ -3,22 +3,29 @@ package api
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+	"path/filepath"
 	"proxyllama/auth"
 	"proxyllama/config"
 	"proxyllama/context"
 	"proxyllama/storage"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/sirupsen/logrus"
 )
 
 // handleError is a helper function that logs the error and returns a fiber error
 // to standardize error handling across API endpoints
 func handleError(err error, status int, message string) error {
-	log.Printf("%s: %v", message, err)
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":  line,
+		"error": err,
+	}).Error(message)
 	return fiber.NewError(status, message)
 }
 
@@ -163,12 +170,12 @@ func CreateConversation(c *fiber.Ctx) error {
 		return handleError(err, fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	conversationID, err := storage.CreateConversation(c.Context(), userID, req.Model, req.Title)
+	cc, err := context.GetOrCreateConversation(c.Context(), userID, nil)
 	if err != nil {
-		return handleError(err, fiber.StatusInternalServerError, "Failed to create conversation")
+		return handleError(err, fiber.StatusInternalServerError, "Failed to create conversation context")
 	}
 
-	return c.JSON(fiber.Map{"conversation_id": conversationID})
+	return c.JSON(fiber.Map{"conversation_id": cc.ConversationID})
 }
 
 // GetModels returns the available models
@@ -212,7 +219,12 @@ func GetModels(c *fiber.Ctx) error {
 
 	// If Ollama returns an error, pass it through
 	if resp.StatusCode >= 400 {
-		log.Printf("Ollama error response: %s", string(body))
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":       filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":       line,
+			"statusCode": resp.StatusCode,
+		}).Error("Ollama error response: " + string(body))
 		return c.Status(resp.StatusCode).Send(body)
 	}
 
@@ -221,7 +233,7 @@ func GetModels(c *fiber.Ctx) error {
 	return c.Status(resp.StatusCode).Send(body)
 }
 
-// summarizeMessages summarizes the messages with the specified ids
+// SummarizeMessages summarizes the messages with the specified ids
 func SummarizeMessages(c *fiber.Ctx) error {
 	userID := c.UserContext().Value(auth.UserIDKey).(string)
 	conversationID, err := c.ParamsInt("id")
@@ -229,7 +241,7 @@ func SummarizeMessages(c *fiber.Ctx) error {
 		return handleError(err, fiber.StatusBadRequest, "Invalid conversation ID")
 	}
 
-	convCtx, err := context.GetCachedConversation(userID, "", conversationID)
+	convCtx, err := context.GetCachedConversation(userID, conversationID)
 	if err != nil {
 		return handleError(err, fiber.StatusNotFound, "Conversation not found")
 	}

@@ -1,11 +1,52 @@
-import React from 'react';
-import { Grid, Typography, useTheme } from '@mui/material';
-import ApiSettings from '../components/Settings/ApiSettings';
+import React, { useState } from 'react';
+import { Grid, Typography, useTheme, Tabs, Tab, Box, Paper, Alert, CircularProgress, Button } from '@mui/material';
 import ProfileSettings from '../components/Settings/ProfileSettings';
 import ModelSettings from '../components/Settings/ModelSettings';
+import SummarizationSettings from '../components/Settings/SummarizationSettings';
+import RetrievalSettings from '../components/Settings/RetrievalSettings';
+import { useConfig } from '../hooks/useConfig';
+
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+function TabPanel(props: TabPanelProps) {
+  const { children, value, index, ...other } = props;
+
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`settings-tabpanel-${index}`}
+      aria-labelledby={`settings-tab-${index}`}
+      {...other}
+    >
+      {value === index && (
+        <Box sx={{ p: 0 }}>
+          {children}
+        </Box>
+      )}
+    </div>
+  );
+}
+
+function a11yProps(index: number) {
+  return {
+    id: `settings-tab-${index}`,
+    'aria-controls': `settings-tabpanel-${index}`
+  };
+}
 
 const SettingsPage = () => {
   const theme = useTheme();
+  const [tabValue, setTabValue] = useState(0);
+  const { isLoading, error, fetchConfig } = useConfig();
+
+  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
+    setTabValue(newValue);
+  };
   
   return (
     <Grid container spacing={3} sx={{ padding: theme.spacing(2.5) }}>
@@ -14,14 +55,62 @@ const SettingsPage = () => {
           Settings
         </Typography>
       </Grid>
+      
+      {error && (
+        <Grid size={12}>
+          <Alert 
+            severity="error" 
+            action={
+              <Button color="inherit" size="small" onClick={fetchConfig}>
+                Retry
+              </Button>
+            }
+          >
+            Error loading configuration: {error.message}
+          </Alert>
+        </Grid>
+      )}
+      
       <Grid size={12}>
-        <ModelSettings />
-      </Grid>
-      <Grid size={12}>
-        <ApiSettings />
-      </Grid>
-      <Grid size={12}>
-        <ProfileSettings />
+        {isLoading ? (
+          <Paper sx={{ padding: 3, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <CircularProgress />
+            <Typography sx={{ ml: 2 }}>Loading settings...</Typography>
+          </Paper>
+        ) : (
+          <Paper sx={{ width: '100%' }}>
+            <Tabs
+              value={tabValue}
+              onChange={handleTabChange}
+              indicatorColor="primary"
+              textColor="primary"
+              variant="scrollable"
+              scrollButtons="auto"
+              aria-label="settings tabs"
+            >
+              <Tab label="User Profile" {...a11yProps(0)} />
+              <Tab label="Models" {...a11yProps(1)} />
+              <Tab label="Summarization" {...a11yProps(2)} />
+              <Tab label="Memory Retrieval" {...a11yProps(3)} />
+              <Tab label="API Integration" {...a11yProps(4)} />
+            </Tabs>
+            
+            <Box sx={{ p: 2 }}>
+              <TabPanel value={tabValue} index={0}>
+                <ProfileSettings />
+              </TabPanel>
+              <TabPanel value={tabValue} index={1}>
+                <ModelSettings />
+              </TabPanel>
+              <TabPanel value={tabValue} index={2}>
+                <SummarizationSettings />
+              </TabPanel>
+              <TabPanel value={tabValue} index={3}>
+                <RetrievalSettings />
+              </TabPanel>
+            </Box>
+          </Paper>
+        )}
       </Grid>
     </Grid>
   );

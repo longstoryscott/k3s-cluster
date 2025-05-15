@@ -1,0 +1,406 @@
+package storage
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"proxyllama/config"
+	"proxyllama/models"
+	"runtime"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/sirupsen/logrus"
+)
+
+const modelProfileKeyPrefix = "proxyllama:modelprofile:"
+const modelProfilesListKeyPrefix = "proxyllama:modelprofiles:"
+
+func getModelProfileCacheKey(profileID uuid.UUID) string {
+	return cacheKey(modelProfileKeyPrefix, profileID)
+}
+
+func getModelProfilesListCacheKey(userID string) string {
+	return cacheKey(modelProfilesListKeyPrefix, userID)
+}
+
+// GetModelProfileFromCache tries to get a single model profile from Redis
+func GetModelProfileFromCache(ctx context.Context, profileID uuid.UUID) (*models.ModelProfile, bool) {
+	// Early return if cache is disabled
+	if !IsStorageCacheEnabled() {
+		return nil, false
+	}
+
+	// Safety check for nil context
+	if ctx == nil {
+		logrus.Warn("nil context passed to GetModelProfileFromCache")
+		return nil, false
+	}
+
+	// Check for zero UUID
+	if profileID == uuid.Nil {
+		logrus.Warn("nil UUID passed to GetModelProfileFromCache")
+		return nil, false
+	}
+
+	key := getModelProfileCacheKey(profileID)
+
+	// Use a timeout for Redis operations to prevent hanging
+	redisCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	// Add error handling around Redis operations
+	result := redisClient.Get(redisCtx, key)
+	if result.Err() != nil {
+		// Don't log regular cache misses as they're expected
+		if result.Err().Error() != "redis: nil" {
+			logrus.WithFields(logrus.Fields{
+				"profileID": profileID,
+				"error":     result.Err(),
+			}).Error("Redis error in GetModelProfileFromCache")
+		}
+		return nil, false
+	}
+
+	data, err := result.Bytes()
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"profileID": profileID,
+			"error":     err,
+		}).Error("Error getting bytes from Redis for profile")
+		return nil, false
+	}
+
+	var profile models.ModelProfile
+	if err := json.Unmarshal(data, &profile); err != nil {
+		logrus.WithFields(logrus.Fields{
+			"profileID": profileID,
+			"error":     err,
+		}).Error("Error unmarshaling profile data")
+		return nil, false
+	}
+
+	return &profile, true
+}
+
+// CacheModelProfile stores a single model profile in Redis
+func CacheModelProfile(ctx context.Context, profile *models.ModelProfile) error {
+	if !IsStorageCacheEnabled() || profile == nil {
+		return nil
+	}
+	conf := config.GetConfig()
+	data, err := json.Marshal(profile)
+	if err != nil {
+		return err
+	}
+	key := getModelProfileCacheKey(profile.ID)
+	ttl := parseTTL(conf.Redis.MessageTTL, 24*time.Hour)
+	return redisClient.Set(ctx, key, data, ttl).Err()
+}
+
+// InvalidateModelProfileCache removes a single model profile from Redis
+func InvalidateModelProfileCache(ctx context.Context, profileID uuid.UUID) {
+	if !IsStorageCacheEnabled() {
+		return
+	}
+	key := getModelProfileCacheKey(profileID)
+	redisClient.Del(ctx, key)
+}
+
+// GetModelProfilesListFromCache tries to get all model profiles for a user from Redis
+func GetModelProfilesListFromCache(ctx context.Context, userID string) ([]*models.ModelProfile, bool) {
+	if !IsStorageCacheEnabled() {
+		return nil, false
+	}
+	key := getModelProfilesListCacheKey(userID)
+	data, err := redisClient.Get(ctx, key).Bytes()
+	if err != nil {
+		return nil, false
+	}
+	var profiles []*models.ModelProfile
+	if err := json.Unmarshal(data, &profiles); err != nil {
+		return nil, false
+	}
+	return profiles, true
+}
+
+// CacheModelProfilesList stores all model profiles for a user in Redis
+func CacheModelProfilesList(ctx context.Context, userID string, profiles []*models.ModelProfile) error {
+	if !IsStorageCacheEnabled() || profiles == nil {
+		return nil
+	}
+	conf := config.GetConfig()
+	data, err := json.Marshal(profiles)
+	if err != nil {
+		return err
+	}
+	key := getModelProfilesListCacheKey(userID)
+	ttl := parseTTL(conf.Redis.MessageTTL, 24*time.Hour)
+	return redisClient.Set(ctx, key, data, ttl).Err()
+}
+
+// InvalidateModelProfilesListCache removes the model profiles list for a user from Redis
+func InvalidateModelProfilesListCache(ctx context.Context, userID string) {
+	if !IsStorageCacheEnabled() {
+		return
+	}
+	key := getModelProfilesListCacheKey(userID)
+	redisClient.Del(ctx, key)
+}
+
+// CreateModelProfile creates a new model profile
+func CreateModelProfile(ctx context.Context, profile *models.ModelProfile) (uuid.UUID, error) {
+	userID := profile.UserID
+	name := profile.Name
+	description := profile.Description
+	modelName := profile.ModelName
+	parameters := profile.Parameters
+	systemPrompt := profile.SystemPrompt
+	modelVersion := profile.ModelVersion
+	profileType := profile.Type
+
+	// Convert parameters to JSON
+	parametersJSON, err := json.Marshal(parameters)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to marshal parameters: %w", err)
+	}
+
+	var profileID uuid.UUID
+	err = Pool.QueryRow(ctx, GetQuery("modelprofile.create_profile"),
+		userID, name, description, modelName, parametersJSON,
+		systemPrompt, modelVersion, profileType).Scan(&profileID)
+
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to create model profile: %w", err)
+	}
+
+	// Invalidate the model profiles cache for this user
+	InvalidateModelProfilesListCache(ctx, userID)
+
+	return profileID, nil
+}
+
+// GetModelProfile retrieves a model profile by ID
+func GetModelProfile(ctx context.Context, profileID uuid.UUID) (*models.ModelProfile, error) {
+	// Special case for nil UUID - look for a default profile based on type
+	if profileID == uuid.Nil {
+		logrus.Warn("nil UUID passed to GetModelProfile, attempting to find a suitable default")
+
+		// Check context for profile type hint, defaulting to embedding profile if none provided
+		profileType := ctx.Value("modelProfileType")
+
+		// Handle nil profile ID by providing appropriate default
+		if profileType == models.ModelProfileTypeEmbedding || profileType == nil {
+			// Default to embedding profile
+			logrus.WithFields(logrus.Fields{
+				"profileID": config.DefaultEmbeddingProfile.ID,
+			}).Info("Using default embedding profile")
+			return &config.DefaultEmbeddingProfile, nil
+		}
+
+		// Handle other profile types as needed
+		switch profileType {
+		case models.ModelProfileTypePrimary:
+			return &config.DefaultPrimaryProfile, nil
+		case models.ModelProfileTypeSelfCritique:
+			return &config.DefaultSelfCritiqueProfile, nil
+		// Add other cases as needed
+		default:
+			logrus.WithFields(logrus.Fields{
+				"profileType": profileType,
+			}).Info("No default profile found for type, using primary profile")
+			return &config.DefaultPrimaryProfile, nil
+		}
+	}
+
+	// Try to get from cache first
+	if profile, found := GetModelProfileFromCache(ctx, profileID); found {
+		return profile, nil
+	}
+
+	var mp models.ModelProfile
+	var parametersJSON []byte
+
+	logrus.WithFields(logrus.Fields{
+		"profileID": profileID,
+	}).Info("Fetching model profile from database")
+	err := Pool.QueryRow(ctx, GetQuery("modelprofile.get_profile_by_id"), profileID).Scan(
+		&mp.ID, &mp.UserID, &mp.Name, &mp.Description, &mp.ModelName,
+		&parametersJSON, &mp.SystemPrompt, &mp.ModelVersion, &mp.Type,
+		&mp.CreatedAt, &mp.UpdatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			// For some important profile types, provide defaults instead of returning error
+			if profileID.String() == "00000000-0000-0000-0000-000000000014" {
+				logrus.WithFields(logrus.Fields{
+					"profileID": profileID,
+				}).Info("Profile not found in DB but matches embedding profile ID, using default")
+				return &config.DefaultEmbeddingProfile, nil
+			}
+		}
+		return nil, fmt.Errorf("failed to get model profile: %w", err)
+	}
+
+	// Parse parameters JSON
+	if err := json.Unmarshal(parametersJSON, &mp.Parameters); err != nil {
+		// If JSON parsing fails, initialize an empty map
+		mp.Parameters = models.ModelParameters{}
+		logrus.WithFields(logrus.Fields{
+			"error": err,
+		}).Warn("Failed to parse parameters JSON")
+	}
+
+	// Cache for future use
+	if err := CacheModelProfile(ctx, &mp); err != nil {
+		// Just log, don't fail on cache error
+		logrus.WithFields(logrus.Fields{
+			"profileID": mp.ID,
+			"error":     err,
+		}).Warn("Failed to cache model profile")
+	}
+
+	return &mp, nil
+}
+
+// UpdateModelProfile updates an existing model profile
+func UpdateModelProfile(ctx context.Context, profile *models.ModelProfile) error {
+	profileID := profile.ID
+	name := profile.Name
+	description := profile.Description
+	modelName := profile.ModelName
+	parameters := profile.Parameters
+	systemPrompt := profile.SystemPrompt
+	modelVersion := profile.ModelVersion
+	profileType := profile.Type
+
+	// Convert parameters to JSON
+	parametersJSON, err := json.Marshal(parameters)
+	if err != nil {
+		return fmt.Errorf("failed to marshal parameters: %w", err)
+	}
+
+	var updateTime time.Time
+	err = Pool.QueryRow(ctx, GetQuery("modelprofile.update_profile"),
+		profileID, name, description, modelName, parametersJSON,
+		systemPrompt, modelVersion, profileType).Scan(&updateTime)
+	if err != nil {
+		return fmt.Errorf("failed to update model profile: %w", err)
+	}
+
+	// Get user ID to invalidate their cache
+	var userID string
+	err = Pool.QueryRow(ctx, GetQuery("modelprofile.get_user_id"), profileID).Scan(&userID)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"profileID": profileID,
+			"error":     err,
+		}).Warn("Could not fetch user_id for profile")
+	} else {
+		// Invalidate the model profiles cache for this user
+		InvalidateModelProfilesListCache(ctx, userID)
+	}
+
+	// Invalidate the individual profile cache
+	InvalidateModelProfileCache(ctx, profileID)
+
+	return nil
+}
+
+// DeleteModelProfile deletes a model profile
+func DeleteModelProfile(ctx context.Context, profileID uuid.UUID) error {
+	// Get user ID to invalidate their cache
+	var userID string
+	err := Pool.QueryRow(ctx, GetQuery("modelprofile.get_user_id"), profileID).Scan(&userID)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"profileID": profileID,
+			"error":     err,
+		}).Warn("Could not fetch user_id for profile")
+		// Continue with deletion anyway
+	}
+
+	_, err = Pool.Exec(ctx, GetQuery("modelprofile.delete_profile"), profileID)
+	if err != nil {
+		return fmt.Errorf("failed to delete model profile: %w", err)
+	}
+
+	// Invalidate caches
+	if userID != "" {
+		InvalidateModelProfilesListCache(ctx, userID)
+	}
+	InvalidateModelProfileCache(ctx, profileID)
+
+	return nil
+}
+
+// ListModelProfilesByUser gets all model profiles for a specific user
+func ListModelProfilesByUser(ctx context.Context, userID string) ([]*models.ModelProfile, error) {
+	// Try to get from cache first
+	if profiles, found := GetModelProfilesListFromCache(ctx, userID); found {
+		return profiles, nil
+	}
+
+	// Not in cache, get from database
+	rows, err := Pool.Query(ctx, GetQuery("modelprofile.list_by_user"), userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query model profiles: %w", err)
+	}
+	defer rows.Close()
+
+	profiles := make([]*models.ModelProfile, 0)
+	for rows.Next() {
+		var mp models.ModelProfile
+		var parametersJSON []byte
+
+		// Scan values from the database row
+		if err := rows.Scan(
+			&mp.ID,
+			&mp.UserID,
+			&mp.Name,
+			&mp.Description,
+			&mp.ModelName,
+			&parametersJSON,
+			&mp.SystemPrompt,
+			&mp.ModelVersion,
+			&mp.Type,
+			&mp.CreatedAt,
+			&mp.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan model profile row: %w", err)
+		}
+
+		// Parse parameters JSON
+		if err := json.Unmarshal(parametersJSON, &mp.Parameters); err != nil {
+			// If JSON parsing fails, initialize an empty map
+			mp.Parameters = models.ModelParameters{}
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":  line,
+				"error": err,
+			}).Warn("Failed to parse parameters JSON")
+		}
+
+		profiles = append(profiles, &mp)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating model profile rows: %w", err)
+	}
+
+	// Cache for future use
+	if err := CacheModelProfilesList(ctx, userID, profiles); err != nil {
+		// Just log, don't fail on cache error
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":   line,
+			"userId": userID,
+			"error":  err,
+		}).Warn("Failed to cache model profiles for user")
+	}
+
+	return profiles, nil
+}

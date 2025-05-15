@@ -53,7 +53,18 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
 
     try {
       const fetchedMessages = await getMessages(getToken(), conversationId);
-      actions.setMessages(fetchedMessages || []);
+      // Merge optimistic (client-only) messages with status 'sending' or 'error' that are not in fetchedMessages
+      const optimisticMessages = state.messages.filter(
+        (msg) =>
+          (msg.status === 'sending' || msg.status === 'error') &&
+          // Only keep if not already in fetchedMessages (by _clientId or content/role)
+          !fetchedMessages.some(
+            (f) =>
+              (msg._clientId && f._clientId === msg._clientId) ||
+              (f.content === msg.content && f.role === msg.role)
+          )
+      );
+      actions.setMessages([...fetchedMessages, ...optimisticMessages]);
 
       // Find and set the current conversation
       const conversation = state.conversations.find(c => c.id === conversationId);

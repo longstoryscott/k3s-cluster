@@ -2,10 +2,13 @@ package storage
 
 import (
 	"context"
-	"log"
+	"path/filepath"
 	"proxyllama/config"
 	"proxyllama/proxy"
+	"runtime"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type Message struct {
@@ -16,28 +19,8 @@ type Message struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-// SQL query templates for message operations
-const (
-	sqlAddMessage = `
-        INSERT INTO messages (conversation_id, role, content) 
-        VALUES ($1, $2, $3) 
-        RETURNING id
-    `
-	sqlGetMessage = `
-		SELECT id, conversation_id, role, content, created_at
-		FROM messages
-		WHERE id = $1
-	`
-	sqlGetConversationHistory = `
-		SELECT id, conversation_id, role, content, created_at
-		FROM messages
-		WHERE conversation_id = $1
-		ORDER BY created_at ASC
-	`
-)
-
 // AddMessage adds a message to a conversation
-func AddMessage(ctx context.Context, conversationID int, role, content string) (int, error) {
+func AddMessage(ctx context.Context, conversationID int, role, content string, usrCfg *config.UserConfig) (int, error) {
 	// Start a transaction for atomicity
 	tx, err := Pool.Begin(ctx)
 	if err != nil {
@@ -51,8 +34,8 @@ func AddMessage(ctx context.Context, conversationID int, role, content string) (
 	}()
 
 	var messageID int
-	// Use the SQL query directly instead of a prepared statement
-	err = tx.QueryRow(ctx, sqlAddMessage, conversationID, role, content).Scan(&messageID)
+	// Use the SQL query from our loader
+	err = tx.QueryRow(ctx, GetQuery("message.add_message"), conversationID, role, content).Scan(&messageID)
 	if err != nil {
 		return 0, err
 	}
@@ -84,59 +67,103 @@ func AddMessage(ctx context.Context, conversationID int, role, content string) (
 	// Cache the new message
 	if err := CacheMessage(ctx, message); err != nil {
 		// Log but don't fail on cache error
-		log.Printf("Warning: Failed to cache message %d: %v", messageID, err)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":      line,
+			"messageId": messageID,
+			"error":     err,
+		}).Warn("Warning: Failed to cache message")
 		// We'll just have a cache miss next time
 	}
 
 	// Invalidate the conversation message list cache
 	InvalidateConversationMessagesCache(ctx, conversationID)
 
+	profile, err := GetModelProfile(ctx, usrCfg.ModelProfiles.EmbeddingProfileID)
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Warning: Failed to get model profile for embedding")
+		return messageID, nil // Proceed without embedding if profile retrieval fails
+	}
+
 	// After successful commit and getting messageID, generate and store embedding in the background
-	conf := config.GetConfig()
-	if conf.Summarization.EnableRAG {
-		go func(mID int, mContent string) {
+	if *usrCfg.Summarization.EnableRAG {
+		go func(mID int, mContent, modelName string) {
 			// Use a background context for the goroutine
 			bgCtx := context.Background()
 			ctx, cancel := context.WithTimeout(bgCtx, 30*time.Second)
 			defer cancel()
 
-			// Choose embedding model from config
-			embeddingModel := conf.Summarization.EmbeddingModel
-			if embeddingModel == "" {
-				log.Println("Embedding model not configured, skipping embedding generation.")
-				return
-			}
-
 			// Check if this message already has an embedding
 			hasEmbedding, err := HasEmbedding(ctx, mID)
 			if err != nil {
-				log.Printf("Error checking embedding for message %d: %v", mID, err)
+				_, file, line, _ := runtime.Caller(0)
+				logrus.WithFields(logrus.Fields{
+					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+					"line":      line,
+					"messageId": mID,
+					"error":     err,
+				}).Error("Error checking embedding for message")
 				return
 			}
 
 			// Skip if embedding already exists
 			if hasEmbedding {
-				log.Printf("Message %d already has an embedding, skipping generation", mID)
+				_, file, line, _ := runtime.Caller(0)
+				logrus.WithFields(logrus.Fields{
+					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+					"line":      line,
+					"messageId": mID,
+				}).Info("Message already has an embedding, skipping generation")
 				return
 			}
 
-			log.Printf("Generating embedding for message %d", mID)
-			embedding, err := proxy.GetEmbedding(ctx, mContent, embeddingModel)
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":      line,
+				"messageId": mID,
+			}).Info("Generating embedding for message")
+			embedding, err := proxy.GetEmbedding(ctx, mContent, modelName)
 			if err != nil {
-				log.Printf("Error generating embedding for message %d: %v", mID, err)
+				logrus.WithFields(logrus.Fields{
+					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+					"line":      line,
+					"messageId": mID,
+					"error":     err,
+				}).Error("Error generating embedding for message")
 				return
 			}
 
 			if len(embedding) == 0 {
-				log.Printf("Warning: Got empty embedding for message %d", mID)
+				logrus.WithFields(logrus.Fields{
+					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+					"line":      line,
+					"messageId": mID,
+				}).Warn("Warning: Got empty embedding for message")
 				return
 			}
 
-			log.Printf("Storing embedding for message %d (vector size: %d)", mID, len(embedding))
+			logrus.WithFields(logrus.Fields{
+				"file":       filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":       line,
+				"messageId":  mID,
+				"vectorSize": len(embedding),
+			}).Info("Storing embedding for message")
 			if err := StoreMessageEmbedding(ctx, mID, embedding); err != nil {
-				log.Printf("Error storing embedding for message %d: %v", mID, err)
+				logrus.WithFields(logrus.Fields{
+					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+					"line":      line,
+					"messageId": mID,
+					"error":     err,
+				}).Error("Error storing embedding for message")
 			}
-		}(messageID, content)
+		}(messageID, content, profile.ModelName)
 	}
 
 	return messageID, nil
@@ -149,9 +176,9 @@ func GetMessage(ctx context.Context, messageID int) (*Message, error) {
 		return msg, nil
 	}
 
-	// Not in cache, get from database
+	// Not in cache, get from database using the query from our loader
 	var msg Message
-	err := Pool.QueryRow(ctx, sqlGetMessage, messageID).Scan(
+	err := Pool.QueryRow(ctx, GetQuery("message.get_message"), messageID).Scan(
 		&msg.ID, &msg.ConversationID, &msg.Role, &msg.Content, &msg.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -160,7 +187,13 @@ func GetMessage(ctx context.Context, messageID int) (*Message, error) {
 	// Cache for future use
 	if err := CacheMessage(ctx, &msg); err != nil {
 		// Just log, don't fail on cache error
-		log.Printf("Warning: Failed to cache message %d: %v", msg.ID, err)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":      line,
+			"messageId": msg.ID,
+			"error":     err,
+		}).Warn("Warning: Failed to cache message")
 	}
 
 	return &msg, nil
@@ -173,8 +206,8 @@ func GetConversationHistory(ctx context.Context, conversationID int) ([]Message,
 		return messages, nil
 	}
 
-	// Not in cache, get from database
-	rows, err := Pool.Query(ctx, sqlGetConversationHistory, conversationID)
+	// Not in cache, get from database using the query from our loader
+	rows, err := Pool.Query(ctx, GetQuery("message.get_conversation_history"), conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +230,13 @@ func GetConversationHistory(ctx context.Context, conversationID int) ([]Message,
 	// Cache the message list
 	if err := CacheMessagesByConversationID(ctx, conversationID, messages); err != nil {
 		// Just log, don't fail on cache error
-		log.Printf("Warning: Failed to cache messages for conversation %d: %v", conversationID, err)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":           filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":           line,
+			"conversationId": conversationID,
+			"error":          err,
+		}).Warn("Failed to cache messages for conversation")
 	}
 
 	return messages, nil

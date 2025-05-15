@@ -4,93 +4,44 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"runtime"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
-// Summary represents a consolidated summary of messages or other summaries
 type Summary struct {
 	ID             int       `json:"id"`
 	ConversationID int       `json:"conversation_id"`
 	Content        string    `json:"content"`
-	Level          int       `json:"level"`
-	SourceIDs      []int     `json:"source_ids"` // IDs of messages or summaries used to create this summary
+	Level          int       `json:"level"` // 1 = first level, 2 = summary of summaries, etc.
+	SourceIDs      []int     `json:"source_ids"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-// SQL query templates for summary operations
-const (
-	sqlCreateSummary = `
-		INSERT INTO summaries (conversation_id, content, level, source_ids, created_at)
-		VALUES ($1, $2, $3, $4, NOW())
-		RETURNING id
-	`
-	sqlGetSummariesForConversation = `
-		SELECT id, conversation_id, content, level, source_ids, created_at
-		FROM summaries
-		WHERE conversation_id = $1
-		ORDER BY created_at ASC
-	`
-	sqlGetRecentSummaries = `
-		SELECT id, conversation_id, content, level, source_ids, created_at
-		FROM summaries
-		WHERE conversation_id = $1 AND level = $2
-		ORDER BY created_at DESC
-		LIMIT $3
-	`
-	sqlDeleteSummariesForConversation = `
-		DELETE FROM summaries
-		WHERE conversation_id = $1
-	`
-)
-
-// CreateSummary creates a new summary in the database using a transaction
+// CreateSummary adds a new summary for a conversation
 func CreateSummary(ctx context.Context, conversationID int, content string, level int, sourceIDs []int) (int, error) {
-	// Start a transaction for atomicity
-	tx, err := Pool.Begin(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx) // Will be a no-op if transaction is committed
-
+	// Convert source IDs to JSON
 	sourceIDsJSON, err := json.Marshal(sourceIDs)
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal source IDs: %w", err)
 	}
 
 	var summaryID int
-	err = tx.QueryRow(ctx, sqlCreateSummary,
+	err = Pool.QueryRow(ctx, GetQuery("summary.create_summary"),
 		conversationID, content, level, sourceIDsJSON).Scan(&summaryID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create summary: %w", err)
 	}
 
-	// Commit the transaction
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	// Create a summary object for caching
-	summary := &Summary{
-		ID:             summaryID,
-		ConversationID: conversationID,
-		Content:        content,
-		Level:          level,
-		SourceIDs:      sourceIDs,
-		CreatedAt:      time.Now(), // Approximate time until we fetch from DB
-	}
-
-	// Cache the new summary
-	if err := CacheSummary(ctx, summary); err != nil {
-		// Log but don't fail on cache error
-	}
-
-	// Invalidate the conversation summaries cache since we added a new one
+	// Invalidate the conversation summaries cache
 	InvalidateConversationSummariesCache(ctx, conversationID)
 
 	return summaryID, nil
 }
 
-// GetSummariesForConversation retrieves all summaries for a conversation with efficient error handling
+// GetSummariesForConversation gets all summaries for a conversation
 func GetSummariesForConversation(ctx context.Context, conversationID int) ([]Summary, error) {
 	// Try to get from cache first
 	if summaries, found := GetSummariesByConversationIDFromCache(ctx, conversationID); found {
@@ -98,7 +49,7 @@ func GetSummariesForConversation(ctx context.Context, conversationID int) ([]Sum
 	}
 
 	// Not in cache, get from database
-	rows, err := Pool.Query(ctx, sqlGetSummariesForConversation, conversationID)
+	rows, err := Pool.Query(ctx, GetQuery("summary.get_summaries_for_conversation"), conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query summaries: %w", err)
 	}
@@ -106,38 +57,52 @@ func GetSummariesForConversation(ctx context.Context, conversationID int) ([]Sum
 
 	var summaries []Summary
 	for rows.Next() {
-		var summary Summary
+		var s Summary
 		var sourceIDsJSON []byte
 
-		if err := rows.Scan(&summary.ID, &summary.ConversationID, &summary.Content, &summary.Level, &sourceIDsJSON, &summary.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.ConversationID, &s.Content, &s.Level, &sourceIDsJSON, &s.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan summary row: %w", err)
 		}
 
-		// Parse source IDs from JSON directly into the struct field
-		if err := json.Unmarshal(sourceIDsJSON, &summary.SourceIDs); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal source IDs: %w", err)
+		// Parse source IDs JSON
+		if err := json.Unmarshal(sourceIDsJSON, &s.SourceIDs); err != nil {
+			// If JSON parsing fails, initialize an empty slice
+			s.SourceIDs = make([]int, 0)
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":  line,
+				"error": err,
+			}).Warn("Failed to parse source IDs JSON")
 		}
 
-		summaries = append(summaries, summary)
+		summaries = append(summaries, s)
 	}
 
-	// Check for any errors that occurred during iteration
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating summary rows: %w", err)
 	}
 
-	// Cache the summaries for this conversation
+	// Cache the results
 	if err := CacheSummariesByConversationID(ctx, conversationID, summaries); err != nil {
 		// Just log, don't fail on cache error
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":           filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":           line,
+			"error":          err,
+			"conversationId": conversationID,
+		}).Warn("Failed to cache summaries for conversation")
 	}
 
 	return summaries, nil
 }
 
-// GetRecentSummaries gets summaries for a specific level, ordered by most recent
-// with improved error handling
-func GetRecentSummaries(ctx context.Context, conversationID, level, limit int) ([]Summary, error) {
-	rows, err := Pool.Query(ctx, sqlGetRecentSummaries, conversationID, level, limit)
+// GetRecentSummaries gets recent summaries for a conversation at a specific level
+func GetRecentSummaries(ctx context.Context, conversationID int, level int, limit int) ([]Summary, error) {
+	// This one doesn't use cache because it's more dynamic with limit parameter
+
+	rows, err := Pool.Query(ctx, GetQuery("summary.get_recent_summaries"), conversationID, level, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query recent summaries: %w", err)
 	}
@@ -145,26 +110,28 @@ func GetRecentSummaries(ctx context.Context, conversationID, level, limit int) (
 
 	var summaries []Summary
 	for rows.Next() {
-		var summary Summary
+		var s Summary
 		var sourceIDsJSON []byte
 
-		if err := rows.Scan(&summary.ID, &summary.ConversationID, &summary.Content, &summary.Level, &sourceIDsJSON, &summary.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.ConversationID, &s.Content, &s.Level, &sourceIDsJSON, &s.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan recent summary row: %w", err)
 		}
 
-		if err := json.Unmarshal(sourceIDsJSON, &summary.SourceIDs); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal source IDs for recent summary: %w", err)
+		// Parse source IDs JSON
+		if err := json.Unmarshal(sourceIDsJSON, &s.SourceIDs); err != nil {
+			// If JSON parsing fails, initialize an empty map
+			s.SourceIDs = make([]int, 0)
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":  line,
+				"error": err,
+			}).Warn("Failed to parse source IDs JSON")
 		}
 
-		summaries = append(summaries, summary)
-
-		// Cache each summary individually
-		if err := CacheSummary(ctx, &summary); err != nil {
-			// Just log, don't fail on cache error
-		}
+		summaries = append(summaries, s)
 	}
 
-	// Check for any errors during iteration
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating recent summary rows: %w", err)
 	}
@@ -173,66 +140,40 @@ func GetRecentSummaries(ctx context.Context, conversationID, level, limit int) (
 }
 
 // DeleteSummariesForConversation deletes all summaries for a conversation
-// using a transaction for consistency
 func DeleteSummariesForConversation(ctx context.Context, conversationID int) error {
-	// Start a transaction
-	tx, err := Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	_, err = tx.Exec(ctx, sqlDeleteSummariesForConversation, conversationID)
+	_, err := Pool.Exec(ctx, GetQuery("summary.delete_summaries"), conversationID)
 	if err != nil {
 		return fmt.Errorf("failed to delete summaries: %w", err)
 	}
 
-	// Commit the transaction
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	// Remove from cache
+	// Invalidate the conversation summaries cache
 	InvalidateConversationSummariesCache(ctx, conversationID)
 
 	return nil
 }
 
-// GetSummary retrieves a single summary by its ID
+// GetSummary gets a single summary by ID
 func GetSummary(ctx context.Context, summaryID int) (*Summary, error) {
-	// Try to get from cache first
-	if summary, found := GetSummaryFromCache(ctx, summaryID); found {
-		return summary, nil
-	}
-
-	// Not in cache, get from database
-	const sqlGetSummary = `
-		SELECT id, conversation_id, content, level, source_ids, created_at
-		FROM summaries
-		WHERE id = $1
-	`
-
-	var summary Summary
+	var s Summary
 	var sourceIDsJSON []byte
 
-	err := Pool.QueryRow(ctx, sqlGetSummary, summaryID).Scan(
-		&summary.ID, &summary.ConversationID, &summary.Content, &summary.Level,
-		&sourceIDsJSON, &summary.CreatedAt,
-	)
-
+	err := Pool.QueryRow(ctx, GetQuery("summary.get_summary"), summaryID).Scan(
+		&s.ID, &s.ConversationID, &s.Content, &s.Level, &sourceIDsJSON, &s.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get summary: %w", err)
 	}
 
-	// Parse source IDs from JSON
-	if err := json.Unmarshal(sourceIDsJSON, &summary.SourceIDs); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal source IDs: %w", err)
+	// Parse source IDs JSON
+	if err := json.Unmarshal(sourceIDsJSON, &s.SourceIDs); err != nil {
+		// If JSON parsing fails, initialize an empty map
+		s.SourceIDs = make([]int, 0)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Failed to parse source IDs JSON")
 	}
 
-	// Cache for future use
-	if err := CacheSummary(ctx, &summary); err != nil {
-		// Just log, don't fail on cache error
-	}
-
-	return &summary, nil
+	return &s, nil
 }

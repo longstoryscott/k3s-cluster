@@ -4,16 +4,18 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
+	"path/filepath"
 	"proxyllama/auth"
 	"proxyllama/config"
 	pxcx "proxyllama/context"
 	"proxyllama/models"
 	"proxyllama/proxy"
+	"runtime"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/sirupsen/logrus"
 )
 
 // RegisterOllamaRoutes adds Ollama-related endpoints to the app
@@ -34,10 +36,14 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 
 	uid := c.UserContext().Value(auth.UserIDKey).(string)
 	// Get or create conversation context
-	ctx := c.Context()
-	convCtx, err := pxcx.GetOrCreateConversation(ctx, uid, chatReq.Model, chatReq.ConversationId)
+	cc, err := pxcx.GetCachedConversation(uid, *chatReq.ConversationId)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to process conversation")
+	}
+
+	usrCfg, err := pxcx.GetUserConfig(cc.UserID)
+	if err != nil {
+		return handleError(err, fiber.StatusInternalServerError, "Failed to get user config")
 	}
 
 	// Get the user message from the request (last message from user)
@@ -51,16 +57,26 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 
 	// Add the user message to context
 	contextError := false
-	if err := convCtx.AddUserMessage(c.Context(), userMessage); err != nil {
-		log.Printf("Error adding user message: %v", err)
+	if err := cc.AddUserMessage(c.Context(), userMessage); err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Error("Error adding user message")
 		contextError = true
 	}
 
 	// Retrieve memories if there was no error adding the user message
 	if !contextError {
 		// Attempt to retrieve and inject relevant memories for the user's query
-		if err := convCtx.RetrieveAndInjectMemories(c.Context(), userMessage); err != nil {
-			log.Printf("Error retrieving memories: %v", err)
+		if err := cc.RetrieveAndInjectMemories(c.Context(), userMessage); err != nil {
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":  line,
+				"error": err,
+			}).Warn("Error retrieving memories")
 			// Non-critical error, we can continue without memories
 		}
 	}
@@ -71,18 +87,27 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 	// Only use context if there was no error adding the user message
 	if !contextError {
 		// Convert conversation context to Ollama format (includes summaries)
-		ollamaReqBody, jsonErr = convCtx.ToJSON()
+		ollamaReqBody, jsonErr = cc.ToJSON()
 		if jsonErr != nil {
-			log.Printf("Error converting context to JSON: %v", jsonErr)
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":  line,
+				"error": jsonErr,
+			}).Error("Error converting context to JSON")
 			contextError = true
 		}
 	}
 
 	// Fall back to the original request if we had any context errors
 	if contextError {
-		log.Printf("Falling back to original request without context")
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line": line,
+		}).Warn("Falling back to original request without context")
 		// Use the original request but ensure the model is set correctly and stream is true
-		fallbackReq := map[string]interface{}{
+		fallbackReq := map[string]any{
 			"model":    chatReq.Model,
 			"messages": chatReq.Messages,
 			"stream":   true, // Always force streaming
@@ -110,67 +135,141 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 	c.Status(statusCode)
 	var res string
 
+	// Create a copy of important variables for use in the goroutine
+	// This ensures we don't have references to request-scoped objects after the request ends
+	conversationID := cc.ConversationID
+	finalUserMsg := userMessage
+	ccUserID := cc.UserID
+	enableResponseCritique := *usrCfg.Summarization.EnableResponseCritique
+	enableResponseFiltering := *usrCfg.Summarization.EnableResponseFiltering
+
 	c.Response().SetBodyStreamWriter(func(w *bufio.Writer) {
 		res, err = handler(w)
 		if err != nil {
-			log.Printf("Error during handler execution: %v", err)
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":  line,
+				"error": err,
+			}).Error("Error during handler execution")
 			return
 		}
 
 		// Only store the assistant response if there was no context error
-		if res != "" && !contextError {
-			// Apply refinement steps to the response
-			refinedRes := res // Start with the original response
-			conf := config.GetConfig()
-
-			// Step 1: Apply basic filtering if enabled
-			if conf.Summarization.EnableResponseFiltering {
-				refinedRes = pxcx.FilterResponseText(refinedRes)
-			}
-
-			// Step 2: Apply self-critique if enabled
-			if conf.Summarization.EnableResponseCritique {
-				critique, err := pxcx.GetCritiqueForResponse(c.Context(), refinedRes, convCtx.Model)
-				if err == nil && critique != "" {
-					log.Printf("Got critique for response: length %d characters", len(critique))
-					improvedRes, err := pxcx.ImproveResponseWithCritique(c.Context(), userMessage, refinedRes, critique, convCtx.Model)
-					if err != nil {
-						log.Printf("Failed to improve response with critique: %v", err)
-					} else if improvedRes != "" {
-						log.Printf("Applied critique improvements to response")
-						refinedRes = improvedRes
-					}
-				} else if err != nil {
-					log.Printf("Failed to get critique: %v", err)
-				}
-			}
-
-			// Store the refined response
-			var finalRes string
-			if refinedRes != res {
-				log.Printf("Response was refined/improved before storing")
-				finalRes = refinedRes
-			} else {
-				finalRes = res
-			}
-
-			log.Printf("Storing assistant response (length: %d)", len(finalRes))
-			go func(finalResponse string) {
-				dbCtx := context.Background()
-				ctx, cancel := context.WithTimeout(dbCtx, time.Minute*10)
+		if res != "" {
+			// Apply refinement steps to the response in a separate goroutine
+			// to avoid keeping the client connection open longer than necessary
+			go func(response string) {
+				// Create a new background context for this goroutine
+				// This is crucial to avoid using the request context which may be canceled
+				bgCtx := context.Background()
+				ctx, cancel := context.WithTimeout(bgCtx, time.Minute*10)
 				defer cancel()
 
-				if err := convCtx.AddAssistantMessage(ctx, finalResponse); err != nil {
-					log.Printf("Error storing assistant response: %v", err)
-				} else {
-					log.Printf("Successfully stored assistant message in conversation %d", convCtx.ConversationID)
+				// Get a fresh conversation context reference to avoid stale data
+				freshCC, err := pxcx.GetCachedConversation(ccUserID, conversationID)
+				if err != nil {
+					_, file, line, _ := runtime.Caller(0)
+					logrus.WithFields(logrus.Fields{
+						"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+						"line":  line,
+						"error": err,
+					}).Error("Error getting fresh conversation context")
+					return
 				}
-			}(finalRes)
+
+				refinedRes := response // Start with the original response
+
+				// Step 1: Apply basic filtering if enabled
+				if enableResponseFiltering {
+					refinedRes = pxcx.FilterResponseText(refinedRes)
+				}
+
+				// Step 2: Apply self-critique if enabled
+				if enableResponseCritique {
+					// Use the fresh background context and conversation context
+					critique, err := freshCC.GetCritiqueForResponse(ctx, refinedRes)
+					if err == nil && critique != "" {
+						_, file, line, _ := runtime.Caller(0)
+						logrus.WithFields(logrus.Fields{
+							"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+							"line":   line,
+							"length": len(critique),
+						}).Info("Got critique for response")
+						improvedRes, err := freshCC.ImproveResponseWithCritique(ctx, finalUserMsg, refinedRes, critique)
+						if err != nil {
+							_, file, line, _ := runtime.Caller(0)
+							logrus.WithFields(logrus.Fields{
+								"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+								"line":  line,
+								"error": err,
+							}).Error("Failed to improve response with critique")
+						} else if improvedRes != "" {
+							_, file, line, _ := runtime.Caller(0)
+							logrus.WithFields(logrus.Fields{
+								"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+								"line": line,
+							}).Info("Applied critique improvements to response")
+							refinedRes = improvedRes
+						}
+					} else if err != nil {
+						_, file, line, _ := runtime.Caller(0)
+						logrus.WithFields(logrus.Fields{
+							"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+							"line":  line,
+							"error": err,
+						}).Error("Failed to get critique")
+					}
+				}
+
+				// Store the refined response
+				var finalRes string
+				if refinedRes != response {
+					_, file, line, _ := runtime.Caller(0)
+					logrus.WithFields(logrus.Fields{
+						"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+						"line": line,
+					}).Info("Response was refined/improved before storing")
+					finalRes = refinedRes
+				} else {
+					finalRes = response
+				}
+
+				_, file, line, _ := runtime.Caller(0)
+				logrus.WithFields(logrus.Fields{
+					"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+					"line":   line,
+					"length": len(finalRes),
+				}).Info("Storing assistant response")
+				if err := freshCC.AddAssistantMessage(ctx, finalRes); err != nil {
+					_, file, line, _ := runtime.Caller(0)
+					logrus.WithFields(logrus.Fields{
+						"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+						"line":  line,
+						"error": err,
+					}).Error("Error storing assistant response")
+				} else {
+					_, file, line, _ := runtime.Caller(0)
+					logrus.WithFields(logrus.Fields{
+						"file":           filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+						"line":           line,
+						"conversationId": freshCC.ConversationID,
+					}).Info("Successfully stored assistant message in conversation")
+				}
+			}(res)
 		} else if res == "" {
-			log.Printf("Empty assistant response, not storing")
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line": line,
+			}).Warn("Empty assistant response, not storing")
 		}
 
-		log.Printf("Chat streaming complete")
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line": line,
+		}).Info("Chat streaming complete")
 	})
 
 	return nil

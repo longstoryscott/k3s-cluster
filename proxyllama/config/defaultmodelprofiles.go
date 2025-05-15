@@ -1,0 +1,326 @@
+package config
+
+import (
+	"proxyllama/models"
+
+	"github.com/google/uuid"
+)
+
+var DefaultPrimaryProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000001"),
+	Name:        "Primary (Default)",
+	Type:        models.ModelProfileTypePrimary,
+	Description: "Primary model profile for general chat and reasoning.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.7,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "You are a helpful AI assistant.",
+}
+
+var DefaultSummarizationProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000002"),
+	Name:        "Summarization (Default)",
+	Type:        models.ModelProfileTypePrimarySummary,
+	Description: "Default profile for conversation summarization.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.3,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "Summarize the conversation so far in a concise paragraph. Include key points and conclusions, but omit redundant details.",
+}
+
+var DefaultMasterSummaryProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000003"),
+	Name:        "Master Summary (Default)",
+	Type:        models.ModelProfileTypeMasterSummary,
+	Description: "Profile for generating master summaries.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.3,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "Create a comprehensive summary of the conversation, giving most weight to the most recent points and less to older information.",
+}
+
+var DefaultBriefSummaryProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000004"),
+	Name:        "Brief Summary (Default)",
+	Type:        models.ModelProfileTypeBriefSummary,
+	Description: "Profile for generating brief summaries.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.2,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "Create a very concise summary of these short messages. Focus only on essential information and be extremely brief.",
+}
+
+var DefaultKeyPointsProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000005"),
+	Name:        "Key Points (Default)",
+	Type:        models.ModelProfileTypeKeyPoints,
+	Description: "Profile for extracting key points from messages.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.2,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "Extract and list the key points from these detailed messages. Identify the main ideas and important details, organizing them in a clear structure.",
+}
+
+var DefaultSelfCritiqueProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000006"),
+	Name:        "Self Critique (Default)",
+	Type:        models.ModelProfileTypeSelfCritique,
+	Description: "Profile for self-critique and response evaluation.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.4,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "You are an expert critique assistant. Your task is to analyze the following AI response and identify:" +
+		"\n1. Factual inaccuracies or potential errors" +
+		"\n2. Areas where clarity could be improved" +
+		"\n3. Opportunities to make the response more helpful or comprehensive" +
+		"\n4. Any redundancies or unnecessary content" +
+		"\nBe concise and focus on actionable feedback that can improve the response.",
+}
+
+var DefaultImprovementProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000007"),
+	Name:        "Improvement (Default)",
+	Type:        models.ModelProfileTypeImprovement,
+	Description: "Profile for improving and refining responses.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.4,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "Your task is to improve the original AI response based on the critique provided. " +
+		"Maintain the overall structure and intent of the original response, but address the issues identified in the critique. " +
+		"The improved response should be clear, accurate, concise, and directly answer the user's original query.",
+}
+
+var DefaultMemoryRetrievalProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000008"),
+	Name:        "Memory Retrieval (Default)",
+	Type:        models.ModelProfileTypeMemoryRetrieval,
+	Description: "Profile for retrieving and summarizing memory/context.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.2,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "Retrieve relevant information from memory and present it concisely.",
+}
+
+var DefaultAnalysisProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000009"),
+	Name:        "Analysis (Default)",
+	Type:        models.ModelProfileTypeAnalysis,
+	Description: "Profile for analyzing and synthesizing information.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.2,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "Review the provided information and analyze it for key insights. " +
+		"Identify trends, patterns, and significant details that can inform future actions or decisions. " +
+		"Present your analysis in a clear and structured format." +
+		"Ensure to highlight any critical insights that may impact decision-making.",
+}
+
+var DefaultResearchTaskProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000010"),
+	Name:        "Research Task (Default)",
+	Type:        models.ModelProfileTypeResearchTask,
+	Description: "Profile for conducting research tasks.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.7,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "You are a research report writer. You have been provided with findings for sub-topics of a larger research request. " +
+		"Combine these findings into a coherent, well-structured report that directly addresses the original user request. " +
+		"Start with a brief executive summary, then elaborate on the findings for each sub-question. " +
+		"If some sub-questions had errors or insufficient info, acknowledge that in your report. " +
+		"Format the report with proper sections, highlighting key points. " +
+		"Do not invent information not present in the input.",
+}
+
+var DefaultResearchPlanProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000011"),
+	Name:        "Research Plan (Default)",
+	Type:        models.ModelProfileTypeResearchPlan,
+	Description: "Profile for creating research plans.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.7,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "You are a research planning assistant. Analyze the following user request. " +
+		"1. Clarify the core intent and scope. " +
+		"2. Break down the request into 3-5 key research questions or sub-topics. " +
+		"3. For each sub-topic, suggest 1-3 initial search engine query keywords. ",
+}
+
+var DefaultResearchConsolidationProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000012"),
+	Name:        "Research Consolidation (Default)",
+	Type:        models.ModelProfileTypeResearchConsolidation,
+	Description: "Profile for consolidating research findings.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.7,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "You are a research report writer. You have been provided with findings for sub-topics of a larger research request. " +
+		"Combine these findings into a coherent, well-structured report that directly addresses the original user request. " +
+		"Start with a brief executive summary, then elaborate on the findings for each sub-question. " +
+		"If some sub-questions had errors or insufficient info, acknowledge that in your report. " +
+		"Format the report with proper sections, highlighting key points. " +
+		"Do not invent information not present in the input.",
+}
+
+var DefaultResearchAnalysisProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000013"),
+	Name:        "Research Analysis (Default)",
+	Type:        models.ModelProfileTypeResearchAnalysis,
+	Description: "Profile for analyzing research findings.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.7,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "You are a research analyst. Based ONLY on the provided text snippets, answer the following research question concisely. " +
+		"Synthesize the information and extract key findings. If the text doesn't answer the question, say so explicitly. " +
+		"Include references to the sources in your answer when appropriate. ",
+}
+
+var DefaultEmbeddingProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000014"),
+	Name:        "Embedding (Default)",
+	Type:        models.ModelProfileTypeEmbedding,
+	Description: "Profile for generating embeddings.",
+	ModelName:   "llama3.2:latest",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.0,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "Generate a vector embedding for the provided text. The embedding should be a fixed-size vector of 768 dimensions.",
+}

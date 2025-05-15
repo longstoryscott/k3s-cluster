@@ -26,18 +26,22 @@ const ChatPage = () => {
     if (conversationId) {
       const numericId = parseInt(conversationId, 10);
       if (!isNaN(numericId)) {
-        selectConversation(numericId);
+        // Only call selectConversation if the conversationId is different from the currentConversation.id
+        if (!currentConversation || currentConversation.id !== numericId) {
+          selectConversation(numericId);
+        }
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId]);
+  }, [conversationId, currentConversation]);
 
   // Update URL when currentConversation changes
   useEffect(() => {
     if (currentConversation?.id && (!conversationId || parseInt(conversationId, 10) !== currentConversation.id)) {
       navigate(`/chat/${currentConversation.id}`, { replace: true });
     }
-  }, [currentConversation, navigate, conversationId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentConversation?.id]);
 
   const handleSummarize = async () => {
     if (!currentConversation?.id || isSummarizing) {

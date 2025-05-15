@@ -2,37 +2,22 @@ package context
 
 import (
 	"context"
-	"log"
-	"proxyllama/config"
+	"path/filepath"
 	"proxyllama/models"
 	"proxyllama/proxy"
+	"runtime"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // generateText creates a summary using Ollama
-func (cc *ConversationContext) generateText(ctx context.Context, messages []models.Message, systemPrompt, summaryModel string) (string, error) {
-	// If summaryModel is empty, use the global SummaryModel variable
-	if summaryModel == "" {
-		summaryModel = config.SummaryModel
-	}
-
-	// As a fallback, check the configuration
-	if summaryModel == "" {
-		conf := config.GetConfig()
-		if conf.Summarization.SummaryModel != "" {
-			summaryModel = conf.Summarization.SummaryModel
-		} else {
-			// Default to qwen3:0.6b if no model is specified
-			summaryModel = "qwen3:0.6b"
-			log.Printf("No summary model specified, using default: %s", summaryModel)
-		}
-	}
-
+func (cc *ConversationContext) generateText(ctx context.Context, messages []models.Message, summaryModel *models.ModelProfile) (string, error) {
 	// Build Ollama messages
 	ollamaMessages := []models.OllamaMessage{
 		{
 			Role:    "system",
-			Content: systemPrompt,
+			Content: summaryModel.SystemPrompt,
 		},
 	}
 
@@ -46,14 +31,23 @@ func (cc *ConversationContext) generateText(ctx context.Context, messages []mode
 
 	// debug log the content of each message in the request
 	for _, msg := range ollamaMessages {
-		log.Printf("Message: %s", msg.Content)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line": line,
+		}).Debugf("Message: %s", msg.Content)
 	}
 
-	log.Printf("Using model %s for text generation", summaryModel)
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":  line,
+		"model": summaryModel.ModelName,
+	}).Info("Using model for text generation")
 
 	// Create a long-lived context for generation
 	longCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	return proxy.SendOllamaRequest(longCtx, summaryModel, ollamaMessages, "/api/chat")
+	return proxy.SendOllamaRequest(longCtx, summaryModel.ModelName, ollamaMessages, "/api/chat")
 }

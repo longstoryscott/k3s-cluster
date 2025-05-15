@@ -94,10 +94,48 @@ spec:
         - path:
             type: PathPrefix
             value: /
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.nginx.org
+            kind: SnippetsFilter
+            name: ollama-timeout-snippet
       backendRefs:
         - name: ollama
           namespace: ollama
           port: 11434
+---
+apiVersion: gateway.nginx.org/v1alpha1
+kind: ClientSettingsPolicy
+metadata:
+  name: ollama-timeout-policy
+  namespace: nginx-gateway
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: ollama-route
+  body:
+    timeout: "0s"
+  keepAlive:
+    time: 9999s
+    timeout:
+      server: 9099s
+      header: 9999s
+---
+apiVersion: gateway.nginx.org/v1alpha1
+kind: SnippetsFilter
+metadata:
+  name: ollama-timeout-snippet
+  namespace: nginx-gateway
+spec:
+  snippets:
+    - context: http
+      value: |
+        proxy_read_timeout 1800;
+        proxy_connect_timeout 1800;
+        proxy_send_timeout 1800;
+        send_timeout 1800;
 --- # dex
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

@@ -6,19 +6,26 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
+	"path/filepath"
 	"proxyllama/models"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/sirupsen/logrus"
 )
 
 // Stream handles streaming responses from Ollama and collects the full assistant response
 // It properly streams to the client while also returning the accumulated content
 func Stream(ctx context.Context, reqBody []byte, url, method string) (func(w *bufio.Writer) (string, error), int, error) {
-	log.Printf("Proxying request to: %s", url)
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line": line,
+		"url":  url,
+	}).Info("Proxying request")
 
 	// Create a response content builder
 	var responseContent strings.Builder
@@ -47,7 +54,12 @@ func Stream(ctx context.Context, reqBody []byte, url, method string) (func(w *bu
 	// Handle error responses from Ollama
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
-		log.Printf("Ollama error response: %s", string(body))
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":       filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":       line,
+			"statusCode": resp.StatusCode,
+		}).Error("Ollama error response: ", string(body))
 		return nil, resp.StatusCode, fiber.NewError(resp.StatusCode, string(body))
 	}
 
@@ -61,7 +73,12 @@ func responseHandler(w *bufio.Writer, resp *http.Response, responseContent *stri
 	defer resp.Body.Close() // Ensure connection is closed when done
 	buffer := make([]byte, 1024)
 	lastFlushTime := time.Now()
-	log.Printf("Starting to stream chat response")
+
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line": line,
+	}).Info("Starting to stream chat response")
 
 	// Read the stream chunk by chunk
 	for {
@@ -69,7 +86,12 @@ func responseHandler(w *bufio.Writer, resp *http.Response, responseContent *stri
 		n, err := resp.Body.Read(buffer)
 		if err != nil {
 			if err != io.EOF {
-				log.Printf("Error reading from Ollama: %v", err)
+				_, file, line, _ := runtime.Caller(0)
+				logrus.WithFields(logrus.Fields{
+					"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+					"line":  line,
+					"error": err,
+				}).Error("Error reading from Ollama")
 			}
 			break
 		}
@@ -83,7 +105,12 @@ func responseHandler(w *bufio.Writer, resp *http.Response, responseContent *stri
 
 			// Write to response
 			if _, writeErr := w.Write(data); writeErr != nil {
-				log.Printf("Error writing to response: %v", writeErr)
+				_, file, line, _ := runtime.Caller(0)
+				logrus.WithFields(logrus.Fields{
+					"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+					"line":  line,
+					"error": writeErr,
+				}).Error("Error writing to response")
 				break
 			}
 
@@ -91,12 +118,22 @@ func responseHandler(w *bufio.Writer, resp *http.Response, responseContent *stri
 			// Always flush at least every 10 seconds even if no data
 			if time.Since(lastFlushTime) > 10*time.Second {
 				if flushErr := w.Flush(); flushErr != nil {
-					log.Printf("Error flushing response: %v", flushErr)
+					_, file, line, _ := runtime.Caller(0)
+					logrus.WithFields(logrus.Fields{
+						"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+						"line":  line,
+						"error": flushErr,
+					}).Error("Error flushing response")
 					break
 				}
 				lastFlushTime = time.Now()
 			} else if flushErr := w.Flush(); flushErr != nil {
-				log.Printf("Error flushing response: %v", flushErr)
+				_, file, line, _ := runtime.Caller(0)
+				logrus.WithFields(logrus.Fields{
+					"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+					"line":  line,
+					"error": flushErr,
+				}).Error("Error flushing response")
 				break
 			}
 
@@ -106,7 +143,6 @@ func responseHandler(w *bufio.Writer, resp *http.Response, responseContent *stri
 			}
 		}
 	}
-	w.Flush()
 	return responseContent.String(), nil
 }
 

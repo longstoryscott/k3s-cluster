@@ -5,14 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/sirupsen/logrus"
 
 	"proxyllama/config"
 	pxcx "proxyllama/context"
@@ -40,21 +42,44 @@ var format map[string]any = map[string]any{
 }
 
 // PerformDeepResearch is the main orchestrator for research tasks
-func PerformDeepResearch(ctx context.Context, taskID, userID, originalQuery, modelName string, conversationID *int) {
-	log.Printf("[ResearchTask %s] Starting for query: %s", taskID, originalQuery)
+func PerformDeepResearch(ctx context.Context, taskID, userID, originalQuery string, conversationID *int) {
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":   line,
+		"taskID": taskID,
+		"query":  originalQuery,
+	}).Info("Starting research task")
 	updateTaskStatus(ctx, taskID, models.ResearchTaskStatusPlanning, nil)
 
 	// 1. Decompose & Plan
-	log.Printf("[ResearchTask %s] Planning phase - Decomposing query...", taskID)
-	plan, err := planResearchTask(ctx, taskID, originalQuery, modelName)
+	_, file, line, _ = runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":   line,
+		"taskID": taskID,
+	}).Info("Planning phase - Decomposing query")
+	plan, err := planResearchTask(ctx, userID, taskID, originalQuery)
 	if err != nil {
-		log.Printf("[ResearchTask %s] Error in planning phase: %v", taskID, err)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":   line,
+			"taskID": taskID,
+			"error":  err,
+		}).Warn("Error in planning phase")
 		errorMsg := fmt.Sprintf("Planning failed: %v", err)
 		updateTaskStatus(ctx, taskID, models.ResearchTaskStatusFailed, &errorMsg)
 		return
 	}
 
-	log.Printf("[ResearchTask %s] Plan created with %d sub-questions", taskID, len(plan.SubQuestions))
+	_, file, line, _ = runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":         filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":         line,
+		"taskID":       taskID,
+		"subQuestions": len(plan.SubQuestions),
+	}).Info("Plan created with sub-questions")
 	updateTaskStatus(ctx, taskID, models.ResearchTaskStatusGathering, nil)
 
 	// Channel for collecting synthesized sub-answers
@@ -66,7 +91,7 @@ func PerformDeepResearch(ctx context.Context, taskID, userID, originalQuery, mod
 		wg.Add(1)
 		go func(subQ models.ResearchQuestion) {
 			defer wg.Done()
-			processSubQuestion(ctx, taskID, modelName, subQ, subResultsChan)
+			processSubQuestion(ctx, userID, taskID, subQ, subResultsChan)
 		}(sq)
 	}
 
@@ -82,85 +107,137 @@ func PerformDeepResearch(ctx context.Context, taskID, userID, originalQuery, mod
 		// Store individual sub-answers in the database
 		if res.Error != nil {
 			errorMsg := res.Error.Error()
-			_ = storage.UpdateSubtaskStatus(ctx, taskID, res.ID, string(models.ResearchTaskStatusFailed), &errorMsg)
+			_, _, _ = storage.UpdateSubtaskStatus(ctx, taskID, res.ID, string(models.ResearchTaskStatusFailed), &errorMsg)
 		} else {
-			_ = storage.StoreSubtaskResult(ctx, taskID, res.ID, res.SynthesizedAnswer)
-			_ = storage.UpdateSubtaskStatus(ctx, taskID, res.ID, string(models.ResearchTaskStatusCompleted), nil)
+			_, _ = storage.StoreSynthesizedAnswer(ctx, taskID, res.ID, res.SynthesizedAnswer)
+			_, _, _ = storage.UpdateSubtaskStatus(ctx, taskID, res.ID, string(models.ResearchTaskStatusCompleted), nil)
 		}
 	}
 
 	// 3. Consolidate & Final Report
 	updateTaskStatus(ctx, taskID, models.ResearchTaskStatusSynthesizing, nil)
-	finalReport, err := consolidateResearchResults(ctx, taskID, originalQuery, plan, finalSubAnswers, modelName)
+	finalReport, err := consolidateResearchResults(ctx, userID, taskID, originalQuery, plan, finalSubAnswers)
 	if err != nil {
-		log.Printf("[ResearchTask %s] Error generating final report: %v", taskID, err)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":   line,
+			"taskID": taskID,
+			"error":  err,
+		}).Warn("Error generating final report")
 		errorMsg := fmt.Sprintf("Final report generation failed: %v", err)
 		updateTaskStatus(ctx, taskID, models.ResearchTaskStatusFailed, &errorMsg)
 		return
 	}
 
 	// Store final result in database
-	err = storage.StoreFinalResearchResult(ctx, taskID, finalReport)
+	_, err = storage.StoreFinalResult(ctx, taskID, finalReport)
 	if err != nil {
-		log.Printf("[ResearchTask %s] Error storing final result: %v", taskID, err)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":   line,
+			"taskID": taskID,
+			"error":  err,
+		}).Warn("Error storing final result")
 	}
 
 	updateTaskStatus(ctx, taskID, models.ResearchTaskStatusCompleted, nil)
-	log.Printf("[ResearchTask %s] Deep research completed successfully", taskID)
+	_, file, line, _ = runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":   line,
+		"taskID": taskID,
+	}).Info("Deep research completed successfully")
 
 	// Optional: If conversationID is provided, add the final report as an assistant message
 	if conversationID != nil {
 		// Add the final result to the conversation as an assistant message
-		err := addResearchResultToConversation(ctx, userID, modelName, finalReport, conversationID)
+		err := addResearchResultToConversation(ctx, userID, finalReport, conversationID)
 		if err != nil {
-			log.Printf("[ResearchTask %s] Failed to add result to conversation: %v", taskID, err)
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":   line,
+				"taskID": taskID,
+				"error":  err,
+			}).Warn("Failed to add result to conversation")
 		}
 	}
 }
 
 // planResearchTask uses the LLM to decompose a query into sub-questions
-func planResearchTask(ctx context.Context, taskID, query, modelName string) (*models.ResearchPlan, error) {
-	planningPrompt := fmt.Sprintf(
-		"You are a research planning assistant. Analyze the following user request. "+
-			"1. Clarify the core intent and scope. "+
-			"2. Break down the request into 3-5 key research questions or sub-topics. "+
-			"3. For each sub-topic, suggest 1-3 initial search engine query keywords. "+
-			"User Query: %s", query)
-
+func planResearchTask(ctx context.Context, userID, taskID, query string) (*models.ResearchPlan, error) {
 	// Call the model for the planning step
-	plan, err := CallLLMForResearchPlan(ctx, modelName, planningPrompt, nil)
+	plan, err := CallLLMForResearchPlan(ctx, userID, query)
 	if err != nil {
 		return nil, fmt.Errorf("planning failed: %w", err)
 	}
 
 	if err != nil {
-		log.Printf("[ResearchTask %s] Error parsing plan JSON: %v", taskID, err)
-		log.Printf("[ResearchTask %s] Raw plan JSON: %s", taskID, plan.RawPlan)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":   line,
+			"taskID": taskID,
+			"error":  err,
+		}).Warn("Error parsing plan JSON")
+		_, file, line, _ = runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":    filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":    line,
+			"taskID":  taskID,
+			"rawPlan": plan.RawPlan,
+		}).Warn("Raw plan JSON")
 		return nil, fmt.Errorf("plan parsing failed: %w", err)
 	}
 
-	// Store plan in database
-	err = storage.StoreResearchPlan(ctx, taskID, plan)
-	if err != nil {
-		log.Printf("[ResearchTask %s] Error storing plan: %v", taskID, err)
-		// Non-fatal error, continue with the process
-	}
-
+	var subTaskIds []int
 	// Create subtasks in database
 	for _, sq := range plan.SubQuestions {
-		_, err := storage.CreateResearchSubtask(ctx, taskID, sq.ID, sq.Question)
+		id, err := storage.SaveSubtask(ctx, &models.ResearchSubtask{
+			TaskID:     taskID,
+			QuestionID: sq.ID,
+			Status:     models.ResearchTaskStatusPending,
+		})
 		if err != nil {
-			log.Printf("[ResearchTask %s] Error creating subtask for question %d: %v", taskID, sq.ID, err)
-			// Non-fatal error, continue with other subtasks
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":   line,
+				"taskID": taskID,
+				"error":  err,
+			}).Warn("Error saving subtask")
+			continue
 		}
+
+		subTaskIds = append(subTaskIds, id)
+	}
+
+	_, err = storage.StoreResearchPlan(ctx, taskID, plan)
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":   line,
+			"taskID": taskID,
+			"error":  err,
+		}).Warn("Error storing subtasks")
 	}
 
 	return plan, nil
 }
 
 // processSubQuestion handles the information gathering and synthesis for a single sub-question
-func processSubQuestion(ctx context.Context, taskID, modelName string, subQ models.ResearchQuestion, resultChan chan<- models.ResearchQuestionResult) {
-	log.Printf("[ResearchTask %s - SubQ %d] Starting: %s", taskID, subQ.ID, subQ.Question)
+func processSubQuestion(ctx context.Context, userID, taskID string, subQ models.ResearchQuestion, resultChan chan<- models.ResearchQuestionResult) {
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":     filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":     line,
+		"taskID":   taskID,
+		"subQID":   subQ.ID,
+		"question": subQ.Question,
+	}).Info("Starting sub-question")
 	updateSubtaskStatus(ctx, taskID, subQ.ID, models.ResearchTaskStatusGathering, nil)
 
 	var allExtractedTexts []string
@@ -171,7 +248,15 @@ func processSubQuestion(ctx context.Context, taskID, modelName string, subQ mode
 		// Use ExternalSearch interface that can be implemented with real search providers
 		searchResults, err := performWebSearch(ctx, keyword, 3)
 		if err != nil {
-			log.Printf("[ResearchTask %s - SubQ %d] Error searching for '%s': %v", taskID, subQ.ID, keyword, err)
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":    filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":    line,
+				"taskID":  taskID,
+				"subQID":  subQ.ID,
+				"keyword": keyword,
+				"error":   err,
+			}).Warn("Error searching for keyword")
 			continue
 		}
 
@@ -179,7 +264,15 @@ func processSubQuestion(ctx context.Context, taskID, modelName string, subQ mode
 			// Extract content from URLs
 			textContent, err := extractTextFromURL(ctx, resultURL)
 			if err != nil {
-				log.Printf("[ResearchTask %s - SubQ %d] Error extracting from '%s': %v", taskID, subQ.ID, resultURL, err)
+				_, file, line, _ := runtime.Caller(0)
+				logrus.WithFields(logrus.Fields{
+					"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+					"line":   line,
+					"taskID": taskID,
+					"subQID": subQ.ID,
+					"url":    resultURL,
+					"error":  err,
+				}).Warn("Error extracting from URL")
 				continue
 			}
 
@@ -187,8 +280,15 @@ func processSubQuestion(ctx context.Context, taskID, modelName string, subQ mode
 			if len(textContent) > 0 {
 				allExtractedTexts = append(allExtractedTexts, textContent)
 				allSources = append(allSources, resultURL)
-				log.Printf("[ResearchTask %s - SubQ %d] Added content from %s (length: %d)",
-					taskID, subQ.ID, resultURL, len(textContent))
+				_, file, line, _ := runtime.Caller(0)
+				logrus.WithFields(logrus.Fields{
+					"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+					"line":   line,
+					"taskID": taskID,
+					"subQID": subQ.ID,
+					"url":    resultURL,
+					"length": len(textContent),
+				}).Info("Added content from URL")
 
 				// Limit the number of sources per question
 				if len(allExtractedTexts) >= 5 {
@@ -204,14 +304,27 @@ func processSubQuestion(ctx context.Context, taskID, modelName string, subQ mode
 	}
 
 	// Store gathered information
-	err := storage.StoreSubtaskGatheredInfo(ctx, taskID, subQ.ID, allExtractedTexts, allSources)
+	_, err := storage.StoreGatheredInfo(ctx, taskID, subQ.ID, allExtractedTexts, allSources)
 	if err != nil {
-		log.Printf("[ResearchTask %s - SubQ %d] Error storing gathered info: %v", taskID, subQ.ID, err)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":   line,
+			"taskID": taskID,
+			"subQID": subQ.ID,
+			"error":  err,
+		}).Warn("Error storing gathered info")
 	}
 
 	// Check if we gathered any useful information
 	if len(allExtractedTexts) == 0 {
-		log.Printf("[ResearchTask %s - SubQ %d] No text gathered", taskID, subQ.ID)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":   line,
+			"taskID": taskID,
+			"subQID": subQ.ID,
+		}).Warn("No text gathered")
 		errorMsg := "No information found for this sub-question"
 		updateSubtaskStatus(ctx, taskID, subQ.ID, models.ResearchTaskStatusFailed, &errorMsg)
 		resultChan <- models.ResearchQuestionResult{
@@ -239,17 +352,25 @@ func processSubQuestion(ctx context.Context, taskID, modelName string, subQ mode
 		}
 	}
 
-	synthesisPrompt := fmt.Sprintf(
-		"You are a research analyst. Based ONLY on the provided text snippets, answer the following research question concisely. "+
-			"Synthesize the information and extract key findings. If the text doesn't answer the question, say so explicitly. "+
-			"Include references to the sources in your answer when appropriate. "+
-			"Research Question: %s\n\nProvided Text:\n%s", subQ.Question, combinedText.String())
-
-	log.Printf("[ResearchTask %s - SubQ %d] Synthesizing information from %d sources", taskID, subQ.ID, len(allExtractedTexts))
-	result, err := CallLLMForResult(ctx, modelName, synthesisPrompt, nil)
+	_, file, line, _ = runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":    filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":    line,
+		"taskID":  taskID,
+		"subQID":  subQ.ID,
+		"sources": len(allExtractedTexts),
+	}).Info("Synthesizing information from sources")
+	result, err := CallLLMForSubResult(ctx, userID, combinedText.String(), nil)
 	if err != nil {
 		errorMsg := fmt.Sprintf("Error synthesizing: %v", err)
-		log.Printf("[ResearchTask %s - SubQ %d] %s", taskID, subQ.ID, errorMsg)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":   line,
+			"taskID": taskID,
+			"subQID": subQ.ID,
+			"error":  errorMsg,
+		}).Warn("Error synthesizing")
 		updateSubtaskStatus(ctx, taskID, subQ.ID, models.ResearchTaskStatusFailed, &errorMsg)
 		result.Error = err
 		result.ErrorMessage = errorMsg
@@ -257,7 +378,14 @@ func processSubQuestion(ctx context.Context, taskID, modelName string, subQ mode
 		return
 	}
 
-	log.Printf("[ResearchTask %s - SubQ %d] Synthesis complete (%d characters)", taskID, subQ.ID, len(result.SynthesizedAnswer))
+	_, file, line, _ = runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":   line,
+		"taskID": taskID,
+		"subQID": subQ.ID,
+		"length": len(result.SynthesizedAnswer),
+	}).Info("Synthesis complete")
 	resultChan <- models.ResearchQuestionResult{
 		ID:                subQ.ID,
 		Question:          subQ.Question,
@@ -266,8 +394,14 @@ func processSubQuestion(ctx context.Context, taskID, modelName string, subQ mode
 }
 
 // consolidateResearchResults creates a final coherent report from all sub-question results
-func consolidateResearchResults(ctx context.Context, taskID, originalQuery string, plan *models.ResearchPlan, subResults []models.ResearchQuestionResult, modelName string) (string, error) {
-	log.Printf("[ResearchTask %s] Consolidating results from %d sub-questions", taskID, len(subResults))
+func consolidateResearchResults(ctx context.Context, userID, taskID, originalQuery string, plan *models.ResearchPlan, subResults []models.ResearchQuestionResult) (*models.ResearchQuestionResult, error) {
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":         filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":         line,
+		"taskID":       taskID,
+		"subQuestions": len(subResults),
+	}).Info("Consolidating results from sub-questions")
 
 	var consolidationInput strings.Builder
 	consolidationInput.WriteString(fmt.Sprintf("Original User Research Request: %s\n\n", originalQuery))
@@ -284,101 +418,91 @@ func consolidateResearchResults(ctx context.Context, taskID, originalQuery strin
 		}
 	}
 
-	reportPrompt := fmt.Sprintf(
-		"You are a research report writer. You have been provided with findings for sub-topics of a larger research request. "+
-			"Combine these findings into a coherent, well-structured report that directly addresses the original user request. "+
-			"Start with a brief executive summary, then elaborate on the findings for each sub-question. "+
-			"If some sub-questions had errors or insufficient info, acknowledge that in your report. "+
-			"Format the report with proper sections, highlighting key points. "+
-			"Do not invent information not present in the input. \n\n%s", consolidationInput.String())
-
-	finalReport, err := CallLLMForResult(ctx, modelName, reportPrompt, nil)
+	finalReport, err := CallLLMForResult(ctx, userID, consolidationInput.String(), nil)
 	if err != nil {
-		return "", fmt.Errorf("final report generation failed: %w", err)
+		return nil, fmt.Errorf("final report generation failed: %w", err)
 	}
 
-	return finalReport.SynthesizedAnswer, nil
+	return finalReport, nil
 }
 
 // CallLLMForResult calls the LLM with the given prompt for research steps
-func CallLLMForResult(ctx context.Context, modelName, systemPrompt string, userMessages []models.OllamaMessage) (*models.ResearchQuestionResult, error) {
+func CallLLMForResult(ctx context.Context, userID, consolidatedInput string, userMessages []models.OllamaMessage) (*models.ResearchQuestionResult, error) {
 	var ollamaMessages []models.OllamaMessage
 
-	// Add system prompt if provided
-	if systemPrompt != "" {
-		ollamaMessages = append(ollamaMessages, models.OllamaMessage{
-			Role:    "system",
-			Content: systemPrompt,
-		})
+	cfg, err := pxcx.GetUserConfig(userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user config: %w", err)
 	}
+
+	profile, err := storage.GetModelProfile(ctx, cfg.ModelProfiles.ResearchConsolidationProfileID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get model profile: %w", err)
+	}
+	ollamaMessages = append(ollamaMessages, models.OllamaMessage{
+		Role:    "system",
+		Content: fmt.Sprintf("%s \n\n%s", profile.SystemPrompt, consolidatedInput),
+	})
 
 	// Add any additional user messages
 	ollamaMessages = append(ollamaMessages, userMessages...)
 
-	// Create a non-streaming request to get the full response at once
-	ollamaReq := models.OllamaReq{
-		Model:    modelName,
-		Messages: ollamaMessages,
-		Format:   format,
-		Stream:   false, // We want the complete response at once
-	}
+	// Return the assistant's message content
+	return doResearch[models.ResearchQuestionResult](ctx, profile, ollamaMessages)
+}
 
-	// Convert to JSON
-	reqBody, err := json.Marshal(ollamaReq)
+// CallLLMForResult calls the LLM with the given prompt for research steps
+func CallLLMForSubResult(ctx context.Context, userID, consolidatedInput string, userMessages []models.OllamaMessage) (*models.ResearchQuestionResult, error) {
+	var ollamaMessages []models.OllamaMessage
+
+	cfg, err := pxcx.GetUserConfig(userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to get user config: %w", err)
 	}
 
-	// Get Ollama URL from config
-	conf := config.GetConfig()
-	url := conf.Ollama.BaseURL + "/api/chat"
-
-	// Send request to Ollama
-	resp, err := http.Post(url, "application/json", strings.NewReader(string(reqBody)))
+	profile, err := storage.GetModelProfile(ctx, cfg.ModelProfiles.ResearchAnalysisProfileID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request to Ollama: %w", err)
+		return nil, fmt.Errorf("failed to get model profile: %w", err)
 	}
-	defer resp.Body.Close()
+	ollamaMessages = append(ollamaMessages, models.OllamaMessage{
+		Role:    "system",
+		Content: fmt.Sprintf("%s \n\n%s", profile.SystemPrompt, consolidatedInput),
+	})
 
-	// Read response
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// Parse response
-	var ollamaResp models.OllamaResp
-	if err := json.Unmarshal(respBody, &ollamaResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	var result models.ResearchQuestionResult
-	if err := json.Unmarshal([]byte(ollamaResp.Message.Content), &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal research format: %w", err)
-	}
+	// Add any additional user messages
+	ollamaMessages = append(ollamaMessages, userMessages...)
 
 	// Return the assistant's message content
-	return &result, nil
+	return doResearch[models.ResearchQuestionResult](ctx, profile, ollamaMessages)
 }
 
 // CallLLMForResearchPlan calls the LLM with the given prompt for research steps
-func CallLLMForResearchPlan(ctx context.Context, modelName, systemPrompt string, userMessages []models.OllamaMessage) (*models.ResearchPlan, error) {
+func CallLLMForResearchPlan(ctx context.Context, userID, query string) (*models.ResearchPlan, error) {
 	var ollamaMessages []models.OllamaMessage
 
-	// Add system prompt if provided
-	if systemPrompt != "" {
-		ollamaMessages = append(ollamaMessages, models.OllamaMessage{
-			Role:    "system",
-			Content: systemPrompt,
-		})
+	cfg, err := pxcx.GetUserConfig(userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user config: %w", err)
 	}
 
-	// Add any additional user messages
-	ollamaMessages = append(ollamaMessages, userMessages...)
+	systemPrompt := fmt.Sprintf("%s User Query: %s", cfg.ModelProfiles.ResearchPlanProfileID, query)
+	ollamaMessages = append(ollamaMessages, models.OllamaMessage{
+		Role:    "system",
+		Content: systemPrompt,
+	})
 
+	profile, err := storage.GetModelProfile(ctx, cfg.ModelProfiles.ResearchPlanProfileID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get model profile: %w", err)
+	}
+
+	return doResearch[models.ResearchPlan](ctx, profile, ollamaMessages)
+}
+
+func doResearch[T any](ctx context.Context, profile *models.ModelProfile, ollamaMessages []models.OllamaMessage) (*T, error) {
 	// Create a non-streaming request to get the full response at once
 	ollamaReq := models.OllamaReq{
-		Model:    modelName,
+		Model:    profile.ModelName,
 		Messages: ollamaMessages,
 		Format:   format,
 		Stream:   false, // We want the complete response at once
@@ -413,7 +537,7 @@ func CallLLMForResearchPlan(ctx context.Context, modelName, systemPrompt string,
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	var result models.ResearchPlan
+	var result T
 	if err := json.Unmarshal([]byte(ollamaResp.Message.Content), &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal research format: %w", err)
 	}
@@ -426,17 +550,30 @@ func CallLLMForResearchPlan(ctx context.Context, modelName, systemPrompt string,
 
 // updateTaskStatus updates the status of a research task in the database
 func updateTaskStatus(ctx context.Context, taskID string, status models.ResearchTaskStatus, errorMsg *string) {
-	err := storage.UpdateResearchTaskStatus(ctx, taskID, string(status), errorMsg)
+	_, err := storage.UpdateTaskStatus(ctx, taskID, string(status), errorMsg)
 	if err != nil {
-		log.Printf("[ResearchTask %s] Error updating task status: %v", taskID, err)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":   line,
+			"taskID": taskID,
+			"error":  err,
+		}).Warn("Error updating task status")
 	}
 }
 
 // updateSubtaskStatus updates the status of a research subtask in the database
 func updateSubtaskStatus(ctx context.Context, taskID string, questionID int, status models.ResearchTaskStatus, errorMsg *string) {
-	err := storage.UpdateSubtaskStatus(ctx, taskID, questionID, string(status), errorMsg)
+	_, _, err := storage.UpdateSubtaskStatus(ctx, taskID, questionID, string(status), errorMsg)
 	if err != nil {
-		log.Printf("[ResearchTask %s - SubQ %d] Error updating subtask status: %v", taskID, questionID, err)
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":   line,
+			"taskID": taskID,
+			"subQID": questionID,
+			"error":  err,
+		}).Warn("Error updating subtask status")
 	}
 }
 
@@ -454,19 +591,19 @@ func extractJSON(input string) string {
 }
 
 // addResearchResultToConversation adds the research result to a conversation as an assistant message
-func addResearchResultToConversation(ctx context.Context, userID, modelName, finalResult string, conversationID *int) error {
+func addResearchResultToConversation(ctx context.Context, userID string, finalResult *models.ResearchQuestionResult, conversationID *int) error {
 	if conversationID == nil {
 		return fmt.Errorf("no conversation ID provided")
 	}
 
 	// Get the conversation context
-	convCtx, err := pxcx.GetOrCreateConversation(ctx, userID, modelName, conversationID)
+	convCtx, err := pxcx.GetOrCreateConversation(ctx, userID, conversationID)
 	if err != nil {
 		return fmt.Errorf("failed to get conversation context: %w", err)
 	}
 
 	// Add the research result as an assistant message
-	message := "Research Results:\n\n" + finalResult
+	message := "Research Results:\n\n" + finalResult.SynthesizedAnswer
 	if err := convCtx.AddAssistantMessage(ctx, message); err != nil {
 		return fmt.Errorf("failed to add assistant message: %w", err)
 	}
@@ -476,7 +613,13 @@ func addResearchResultToConversation(ctx context.Context, userID, modelName, fin
 
 // performWebSearch performs a web search for the given query using DuckDuckGo API
 func performWebSearch(ctx context.Context, query string, numResults int) ([]string, error) {
-	log.Printf("Performing web search for: %s (limit: %d results)", query, numResults)
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":       filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":       line,
+		"query":      query,
+		"numResults": numResults,
+	}).Info("Performing web search")
 
 	// Create a DuckDuckGo API request URL
 	searchURL := fmt.Sprintf("https://api.duckduckgo.com/?q=%s&format=json&pretty=1&no_html=1&skip_disambig=1", url.QueryEscape(query))
@@ -572,7 +715,11 @@ func performWebSearch(ctx context.Context, query string, numResults int) ([]stri
 
 	// If we didn't get any results, fall back to Wikipedia and Britannica
 	if len(urls) == 0 {
-		log.Printf("No search results found, falling back to default sources")
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line": line,
+		}).Warn("No search results found, falling back to default sources")
 		urls = append(urls,
 			"https://en.wikipedia.org/wiki/"+strings.ReplaceAll(query, " ", "_"),
 			"https://www.britannica.com/search?query="+strings.ReplaceAll(query, " ", "+"))
@@ -583,13 +730,24 @@ func performWebSearch(ctx context.Context, query string, numResults int) ([]stri
 		urls = urls[:numResults]
 	}
 
-	log.Printf("Found %d search results for query: %s", len(urls), query)
+	_, file, line, _ = runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file":    filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line":    line,
+		"query":   query,
+		"results": len(urls),
+	}).Info("Found search results")
 	return urls, nil
 }
 
 // extractTextFromURL extracts text content from a URL
 func extractTextFromURL(ctx context.Context, urlString string) (string, error) {
-	log.Printf("Extracting text from: %s", urlString)
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line": line,
+		"url":  urlString,
+	}).Info("Extracting text from URL")
 
 	client := http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, "GET", urlString, nil)

@@ -15,6 +15,30 @@ const commonOptions: ThemeOptions = {
     fontFamily: 'Roboto, sans-serif',
     button: {
       textTransform: 'none'
+    },
+    h1: {
+      fontWeight: 'bold',
+      fontSize: '2.6rem'
+    },
+    h2: {
+      fontWeight: 'bold',
+      fontSize: '2rem'
+    },
+    h3: {
+      fontWeight: 'bold',
+      fontSize: '1.875rem'
+    },
+    h4: {
+      fontWeight: 'normal',
+      fontSize: '1.5rem'
+    },
+    h5: {
+      fontWeight: 'normal',
+      fontSize: '1.25rem'
+    },
+    h6: {
+      fontWeight: 'normal',
+      fontSize: '1rem'
     }
   }
 };
@@ -24,9 +48,15 @@ export const lightTheme = createTheme({
   palette: {
     ...commonOptions.palette,
     mode: 'light',
+    primary: {
+      main: '#00695c' // Primary color (eg. blue)
+    },
+    secondary: {
+      main: '#ff6347' // Secondary color (eg. red)
+    },
     background: {
-      default: '#f5f5f5',
-      paper: '#fff'
+      default: '#f5f5f9', // Default background color
+      paper: '#ffffff' // Paper color for cards, dialogs, etc.
     },
     text: {
       primary: '#1b1b1b'
@@ -39,9 +69,17 @@ export const darkTheme = createTheme({
   palette: {
     ...commonOptions.palette,
     mode: 'dark',
+    primary: {
+      main: '#00695c', // Primary color (eg. blue) with some brightness reduction
+      contrastText: '#ffffff'
+    },
+    secondary: {
+      main: '#ff6347', // Secondary color (eg. red) with some brightness reduction
+      contrastText: '#0288d1'
+    },
     background: {
-      default: '#121212',
-      paper: '#1d1d1d'
+      default: '#303030', // Dark background color
+      paper: '#282828' // Paper color for cards, dialogs, etc. in dark mode
     },
     text: {
       primary: '#ffffff'

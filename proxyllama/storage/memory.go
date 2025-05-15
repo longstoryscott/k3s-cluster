@@ -3,8 +3,11 @@ package storage
 import (
 	"context"
 	"fmt"
-	"log"
+	"path/filepath"
+	"runtime"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // Memory represents a stored memory for a user
@@ -16,52 +19,66 @@ type Memory struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Memory schema SQL statements
-const (
-	sqlCreateMemoriesTable = `
-		CREATE TABLE IF NOT EXISTS memories (
-			id TEXT PRIMARY KEY,
-			user_id TEXT NOT NULL,
-			content TEXT NOT NULL,
-			source TEXT NOT NULL,
-			embedding vector(1536),
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-		)
-	`
+// InitMemorySchema initializes the database schema for memory storage
+func InitMemorySchema(ctx context.Context) error {
+	_, file, line, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line": line,
+	}).Info("Initializing memory schema...")
 
-	sqlCreateMemoriesIndex = `
-		CREATE INDEX IF NOT EXISTS idx_memories_user_id ON memories(user_id);
-		CREATE INDEX IF NOT EXISTS idx_memories_vector ON memories USING hnsw (embedding vector_cosine_ops);
-	`
-)
-
-// InitMemorySchema initializes the memory database schema
-func InitMemorySchema(ctx context.Context) {
-	log.Println("Initializing memory database schema...")
-
-	// Create memories table
-	if _, err := Pool.Exec(ctx, sqlCreateMemoriesTable); err != nil {
-		log.Fatalf("Failed to create memories table: %v", err)
+	// Create memories table and hypertable
+	_, err := Pool.Exec(ctx, GetQuery("schema.init_memory_schema"))
+	if err != nil {
+		return fmt.Errorf("failed to create memories table: %w", err)
 	}
 
-	// Create memories indexes
-	if _, err := Pool.Exec(ctx, sqlCreateMemoriesIndex); err != nil {
-		log.Fatalf("Failed to create memories indexes: %v", err)
+	// Create indexes for memories
+	_, err = Pool.Exec(ctx, GetQuery("schema.create_memory_indexes"))
+	if err != nil {
+		return fmt.Errorf("failed to create memory indexes: %w", err)
 	}
 
-	log.Println("Memory database schema initialized successfully")
+	// Enable compression on memories
+	_, err = Pool.Exec(ctx, GetQuery("schema.enable_memories_compression"))
+	if err != nil {
+		return fmt.Errorf("failed to enable memories compression: %w", err)
+	}
+
+	// Add compression policy for memories
+	_, err = Pool.Exec(ctx, GetQuery("schema.memories_compression_policy"))
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Failed to add memories compression policy")
+	}
+
+	// Add retention policy for memories
+	_, err = Pool.Exec(ctx, GetQuery("schema.memories_retention_policy"))
+	if err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Warn("Failed to add memories retention policy")
+	}
+
+	_, file, line, _ = runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line": line,
+	}).Info("Memory schema initialized successfully")
+	return nil
 }
 
 // StoreMemory stores a memory with embedding for a user
 func StoreMemory(ctx context.Context, id, userID, content, source string, embedding []float32) error {
-	_, err := Pool.Exec(ctx, `
-		INSERT INTO memories (id, user_id, content, source, embedding, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (id) DO UPDATE SET
-			content = EXCLUDED.content,
-			embedding = EXCLUDED.embedding
-	`, id, userID, content, source, embedding, time.Now())
+	_, err := Pool.Exec(ctx, GetQuery("memory.store_memory"),
+		id, userID, content, source, embedding, time.Now())
 
 	if err != nil {
 		return fmt.Errorf("failed to store memory: %w", err)
@@ -78,13 +95,8 @@ func SearchMemories(ctx context.Context, userID, query string, limit int) ([]Mem
 		return nil, fmt.Errorf("failed to generate embedding for query: %w", err)
 	}
 
-	rows, err := Pool.Query(ctx, `
-		SELECT id, user_id, content, source, created_at
-		FROM memories
-		WHERE user_id = $1
-		ORDER BY embedding <=> $2
-		LIMIT $3
-	`, userID, embedding, limit)
+	rows, err := Pool.Query(ctx, GetQuery("memory.search_memories"),
+		userID, embedding, limit)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to search memories: %w", err)
@@ -105,10 +117,7 @@ func SearchMemories(ctx context.Context, userID, query string, limit int) ([]Mem
 
 // DeleteMemory deletes a memory by ID
 func DeleteMemory(ctx context.Context, id, userID string) error {
-	_, err := Pool.Exec(ctx, `
-		DELETE FROM memories
-		WHERE id = $1 AND user_id = $2
-	`, id, userID)
+	_, err := Pool.Exec(ctx, GetQuery("memory.delete_memory"), id, userID)
 
 	if err != nil {
 		return fmt.Errorf("failed to delete memory: %w", err)
@@ -119,10 +128,7 @@ func DeleteMemory(ctx context.Context, id, userID string) error {
 
 // DeleteAllUserMemories deletes all memories for a user
 func DeleteAllUserMemories(ctx context.Context, userID string) error {
-	_, err := Pool.Exec(ctx, `
-		DELETE FROM memories
-		WHERE user_id = $1
-	`, userID)
+	_, err := Pool.Exec(ctx, GetQuery("memory.delete_all_user_memories"), userID)
 
 	if err != nil {
 		return fmt.Errorf("failed to delete all user memories: %w", err)

@@ -1,8 +1,7 @@
 import {
   useEffect,
   useState,
-  ReactNode,
-  useCallback
+  ReactNode
 } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import config from '../config';
@@ -11,6 +10,7 @@ import { AuthContext } from './useAuth';
 export interface AuthContextType {
     user: User;
     isAuthenticated: boolean;
+    evaluating: boolean;
     login: (username: string, password: string) => Promise<void>;
     logout: () => void;
 }
@@ -37,6 +37,7 @@ let refreshTimer: ReturnType<typeof setTimeout>;
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User>(defaultUser);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [evaluating, setEvaluating] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -100,7 +101,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const login = useCallback(async (username: string, password: string) => {
+  const login = async (username: string, password: string) => {
+    setEvaluating(true);
     const formData = new URLSearchParams();
     formData.append('grant_type', 'password');
     formData.append('username', username);
@@ -129,16 +131,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const expiresIn = tokens.expires_in || 300;
     scheduleRefresh(expiresIn, tokens.refresh_token);
-    
-    // Navigate to chat page after successful login
-    navigate('/');
-  }, [navigate]);
+    setEvaluating(false);
+  };
 
-  const logout = useCallback(() => {
+  const logout = () => {
     clearSession();
-  }, []);
+  };
 
   useEffect(() => {
+    setEvaluating(true);
     const tokensStr = sessionStorage.getItem(config.auth.tokenStorageKey);
     const userStr = sessionStorage.getItem(config.auth.userStorageKey);
 
@@ -159,10 +160,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // If not authenticated and not on login page, redirect to login
       navigate('/login');
     }
-  }, [location.pathname, navigate]);
+
+    setEvaluating(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, login, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, login, logout, evaluating }}>
       {children}
     </AuthContext.Provider>
   );

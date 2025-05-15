@@ -20,7 +20,6 @@ export type ChatConversation = {
   id?: number;
   userId: string;
   title?: string;
-  model?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }

@@ -1,16 +1,16 @@
 import React from 'react';
-import { Box, FormControl, InputLabel, Select, MenuItem, Typography } from '@mui/material';
-import { SelectChangeEvent } from '@mui/material/Select';
+import { Box, FormControl, InputLabel, Select, MenuItem, Typography, SelectChangeEvent } from '@mui/material';
 import { useChat } from '../../chat';
 import ControlLoader from '../Shared/ControlLoader';
 
-const ModelSelector: React.FC = () => {
-  const { selectedModel, setSelectedModel, models, isLoading } = useChat();
 
-  const handleModelChange = (event: SelectChangeEvent) => {
-    const modelId = event.target.value as string;
-    setSelectedModel(modelId);
-  };
+interface ModelCardProps {
+  onSelect: (event: SelectChangeEvent) => void;
+  name: string;
+}
+
+const ModelSelector: React.FC<ModelCardProps> = ({ onSelect, name }) => {
+  const { models, isLoading } = useChat();
 
   return (
     isLoading ? 
@@ -24,8 +24,8 @@ const ModelSelector: React.FC = () => {
           <Select
             labelId="model-select-label"
             id="model-select"
-            value={selectedModel}
-            onChange={handleModelChange}
+            value={name}
+            onChange={onSelect}
             label="Model"
           >
             {models && models?.map((model) => (

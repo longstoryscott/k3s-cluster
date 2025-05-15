@@ -10,6 +10,7 @@ OLLAMA = $(CURDIR)/ollama
 AUTH = $(CURDIR)/auth
 PROXYLLAMA = $(CURDIR)/proxyllama
 MONITORING = $(CURDIR)/monitoring
+NVIDIA = $(CURDIR)/nvidia
 
 export HELM_KUBECONTEXT=lsnet
 export NODES=(lsnode-0 lsnode-1 lsnode-2 lsnode-3)
@@ -80,6 +81,8 @@ proxyllama:
 monitoring: ex
 	$(MONITORING)/install.sh $(MONITORING)
 
+nvidia:
+	$(NVIDIA)/install.sh
 destroy:
 	$(SCRIPTS)/k8s-down.sh
 
@@ -89,4 +92,4 @@ sync:
 apply: sync
 	ssh -p 2222 lsm@lsnet.tplinkdns.com "cd k8s && make"
 
-.PHONY: router ex ollama psql mysql proxyllama nc monitoring fnf registry redis auth
+.PHONY: router ex ollama psql mysql proxyllama nc monitoring fnf registry redis auth nvidia

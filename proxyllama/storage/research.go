@@ -2,399 +2,219 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"log"
+	"proxyllama/models"
 	"time"
 
-	"proxyllama/models"
+	"github.com/jackc/pgx/v5"
 )
 
-// Schema SQL statements
+// Research task statuses
 const (
-	sqlCreateResearchTasksTable = `
-		CREATE TABLE IF NOT EXISTS research_tasks (
-			id TEXT PRIMARY KEY,
-			user_id TEXT NOT NULL,
-			query TEXT NOT NULL,
-			model TEXT NOT NULL,
-			conversation_id INTEGER,
-			status TEXT NOT NULL,
-			error_message TEXT,
-			plan JSONB,
-			results JSONB,
-			created_at TIMESTAMPTZ NOT NULL,
-			updated_at TIMESTAMPTZ NOT NULL,
-			completed_at TIMESTAMPTZ
-		)
-	`
-	sqlCreateSubtasksTable = `
-		CREATE TABLE IF NOT EXISTS research_subtasks (
-			id SERIAL PRIMARY KEY,
-			task_id TEXT NOT NULL REFERENCES research_tasks(id) ON DELETE CASCADE,
-			question_id INTEGER NOT NULL,
-			status TEXT NOT NULL,
-			gathered_info JSONB,
-			information_sources JSONB,
-			synthesized_answer TEXT,
-			error_message TEXT,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			UNIQUE(task_id, question_id)
-		)
-	`
+	TaskStatusPending     = "PENDING"
+	TaskStatusPlanning    = "PLANNING"
+	TaskStatusGathering   = "GATHERING"
+	TaskStatusAnalyzing   = "ANALYZING"
+	TaskStatusSummarizing = "SUMMARIZING"
+	TaskStatusCompleted   = "COMPLETED"
+	TaskStatusFailed      = "FAILED"
+	TaskStatusCanceled    = "CANCELED"
 )
 
-// SQL queries for research operations
+// Subtask statuses
 const (
-	sqlSaveResearchTask = `
-		INSERT INTO research_tasks 
-		(id, user_id, query, model, conversation_id, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`
-	sqlUpdateResearchTaskStatus = `
-		UPDATE research_tasks 
-		SET status = $2, error_message = $3, updated_at = NOW()
-		WHERE id = $1
-		RETURNING updated_at
-	`
-	sqlUpdateResearchTask = `
-		UPDATE research_tasks 
-		SET status = $2, error_message = $3, updated_at = NOW(),
-		    completed_at = CASE WHEN $2 IN ('COMPLETED', 'FAILED', 'CANCELED') THEN NOW() ELSE completed_at END
-		WHERE id = $1
-		RETURNING updated_at
-	`
-	sqlStoreResearchPlan = `
-		UPDATE research_tasks 
-		SET plan = $2, updated_at = NOW()
-		WHERE id = $1
-		RETURNING updated_at
-	`
-	sqlStoreFinalResearchResult = `
-		UPDATE research_tasks 
-		SET results = jsonb_build_array($2), updated_at = NOW()
-		WHERE id = $1
-		RETURNING updated_at
-	`
-	sqlCreateResearchSubtask = `
-		INSERT INTO research_subtasks 
-		(task_id, question_id, status)
-		VALUES ($1, $2, 'PENDING')
-		RETURNING id
-	`
-	sqlUpdateSubtaskStatus = `
-		UPDATE research_subtasks 
-		SET status = $3, error_message = $4, updated_at = NOW()
-		WHERE task_id = $1 AND question_id = $2
-		RETURNING updated_at
-	`
-	sqlStoreSubtaskGatheredInfo = `
-		UPDATE research_subtasks 
-		SET gathered_info = $3, information_sources = $4, updated_at = NOW()
-		WHERE task_id = $1 AND question_id = $2
-		RETURNING updated_at
-	`
-	sqlStoreSubtaskResult = `
-		UPDATE research_subtasks 
-		SET synthesized_answer = $3, status = 'COMPLETED', updated_at = NOW()
-		WHERE task_id = $1 AND question_id = $2
-		RETURNING updated_at
-	`
-	sqlGetResearchTask = `
-		SELECT id, user_id, query, model, conversation_id, status, error_message, 
-		       plan, results, created_at, updated_at, completed_at
-		FROM research_tasks
-		WHERE id = $1
-	`
-	sqlGetResearchTaskByUserID = `
-		SELECT id, user_id, query, model, conversation_id, status, error_message, 
-		       plan, results, created_at, updated_at, completed_at
-		FROM research_tasks
-		WHERE id = $1 AND user_id = $2
-	`
-	sqlGetUserResearchTasks = `
-		SELECT id, user_id, query, model, conversation_id, status, error_message, 
-		       plan, results, created_at, updated_at, completed_at
-		FROM research_tasks
-		WHERE user_id = $1
-		ORDER BY created_at DESC
-	`
+	SubtaskStatusPending   = "PENDING"
+	SubtaskStatusRunning   = "RUNNING"
+	SubtaskStatusGathering = "GATHERING"
+	SubtaskStatusAnalyzing = "ANALYZING"
+	SubtaskStatusCompleted = "COMPLETED"
+	SubtaskStatusFailed    = "FAILED"
 )
 
-// InitResearchSchema initializes the research database schema
-func InitResearchSchema(ctx context.Context) {
-	log.Println("Initializing research database schema...")
-
-	// Create research_tasks table
-	if _, err := Pool.Exec(ctx, sqlCreateResearchTasksTable); err != nil {
-		log.Fatalf("Failed to create research_tasks table: %v", err)
-	}
-
-	// Create research_subtasks table
-	if _, err := Pool.Exec(ctx, sqlCreateSubtasksTable); err != nil {
-		log.Fatalf("Failed to create research_subtasks table: %v", err)
-	}
-
-	// Create indexes
-	if _, err := Pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_research_tasks_user_id ON research_tasks(user_id);
-		CREATE INDEX IF NOT EXISTS idx_research_subtasks_task_id ON research_subtasks(task_id);
-	`); err != nil {
-		log.Printf("Warning: Error creating research indexes: %v", err)
-	}
-
-	log.Println("Research database schema initialized successfully")
-}
-
-// SaveResearchTask saves a new research task
-func SaveResearchTask(ctx context.Context, task *models.ResearchTask) error {
-	_, err := Pool.Exec(ctx, sqlSaveResearchTask,
+// SaveResearchTask inserts a new research task
+func SaveResearchTask(ctx context.Context, task models.ResearchTask) error {
+	_, err := Pool.Exec(ctx, GetQuery("research.save_research_task"),
 		task.ID, task.UserID, task.Query, task.Model, task.ConversationID,
 		task.Status, task.CreatedAt, task.UpdatedAt)
-
-	if err != nil {
-		return fmt.Errorf("failed to save research task: %w", err)
-	}
-	return nil
+	return err
 }
 
-// UpdateResearchTaskStatus updates the status of a research task
-func UpdateResearchTaskStatus(ctx context.Context, taskID string, status string, errorMsg *string) error {
+// UpdateTaskStatus updates the status of a research task
+func UpdateTaskStatus(ctx context.Context, taskID string, status string, errorMsg *string) (time.Time, error) {
 	var updatedAt time.Time
-	err := Pool.QueryRow(ctx, sqlUpdateResearchTaskStatus,
+	err := Pool.QueryRow(ctx, GetQuery("research.update_task_status"),
 		taskID, status, errorMsg).Scan(&updatedAt)
-
-	if err != nil {
-		return fmt.Errorf("failed to update research task status: %w", err)
-	}
-	return nil
+	return updatedAt, err
 }
 
-// UpdateResearchTask updates a research task
-func UpdateResearchTask(ctx context.Context, task *models.ResearchTask) error {
+// UpdateTask updates a task with completed_at when applicable
+func UpdateTask(ctx context.Context, taskID string, status string, errorMsg *string) (time.Time, error) {
 	var updatedAt time.Time
-	err := Pool.QueryRow(ctx, sqlUpdateResearchTask,
-		task.ID, task.Status, task.ErrorMessage).Scan(&updatedAt)
-
-	if err != nil {
-		return fmt.Errorf("failed to update research task: %w", err)
-	}
-
-	// Update the task's updated_at field with the value from the database
-	task.UpdatedAt = updatedAt
-	return nil
+	err := Pool.QueryRow(ctx, GetQuery("research.update_task"),
+		taskID, status, errorMsg).Scan(&updatedAt)
+	return updatedAt, err
 }
 
 // StoreResearchPlan stores the plan for a research task
-func StoreResearchPlan(ctx context.Context, taskID string, plan *models.ResearchPlan) error {
-	planJSON, err := json.Marshal(plan)
-	if err != nil {
-		return fmt.Errorf("failed to marshal research plan: %w", err)
-	}
-
+func StoreResearchPlan(ctx context.Context, taskID string, plan *models.ResearchPlan) (time.Time, error) {
 	var updatedAt time.Time
-	err = Pool.QueryRow(ctx, sqlStoreResearchPlan, taskID, planJSON).Scan(&updatedAt)
-	if err != nil {
-		return fmt.Errorf("failed to store research plan: %w", err)
-	}
-
-	return nil
+	err := Pool.QueryRow(ctx, GetQuery("research.store_plan"),
+		taskID, plan).Scan(&updatedAt)
+	return updatedAt, err
 }
 
-// StoreFinalResearchResult stores the final result of a research task
-func StoreFinalResearchResult(ctx context.Context, taskID string, result string) error {
+// StoreFinalResult stores the final research result
+func StoreFinalResult(ctx context.Context, taskID string, result *models.ResearchQuestionResult) (time.Time, error) {
 	var updatedAt time.Time
-	err := Pool.QueryRow(ctx, sqlStoreFinalResearchResult, taskID, result).Scan(&updatedAt)
-	if err != nil {
-		return fmt.Errorf("failed to store final research result: %w", err)
-	}
-
-	return nil
+	err := Pool.QueryRow(ctx, GetQuery("research.store_final_result"),
+		taskID, result).Scan(&updatedAt)
+	return updatedAt, err
 }
 
-// CreateResearchSubtask creates a subtask for a research task
-func CreateResearchSubtask(ctx context.Context, taskID string, questionID int, question string) (int, error) {
-	var subtaskID int
-	err := Pool.QueryRow(ctx, sqlCreateResearchSubtask, taskID, questionID).Scan(&subtaskID)
+// SaveSubtask saves a research subtask
+func SaveSubtask(ctx context.Context, subtask *models.ResearchSubtask) (int, error) {
+	tx, err := Pool.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("failed to create research subtask: %w", err)
+		return 0, err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		}
+	}()
+
+	var id int
+	err = tx.QueryRow(ctx, GetQuery("research.save_subtask"),
+		subtask.TaskID, subtask.QuestionID, subtask.Status,
+		subtask.CreatedAt, subtask.UpdatedAt).Scan(&id)
+
+	if err != nil {
+		return 0, err
 	}
 
-	return subtaskID, nil
+	err = tx.Commit(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	return id, nil
 }
 
 // UpdateSubtaskStatus updates the status of a research subtask
-func UpdateSubtaskStatus(ctx context.Context, taskID string, questionID int, status string, errorMsg *string) error {
-	var updatedAt time.Time
-	err := Pool.QueryRow(ctx, sqlUpdateSubtaskStatus, taskID, questionID, status, errorMsg).Scan(&updatedAt)
-	if err != nil {
-		return fmt.Errorf("failed to update subtask status: %w", err)
-	}
+func UpdateSubtaskStatus(ctx context.Context, taskID string, questionID int,
+	status string, errorMsg *string) (int, time.Time, error) {
 
-	return nil
+	var id int
+	var updatedAt time.Time
+
+	err := Pool.QueryRow(ctx, GetQuery("research.update_subtask_status"),
+		taskID, status, errorMsg, questionID).Scan(&id, &updatedAt)
+
+	return id, updatedAt, err
 }
 
-// StoreSubtaskGatheredInfo stores gathered information for a subtask
-func StoreSubtaskGatheredInfo(ctx context.Context, taskID string, questionID int, info []string, sources []string) error {
-	infoJSON, err := json.Marshal(info)
-	if err != nil {
-		return fmt.Errorf("failed to marshal gathered info: %w", err)
-	}
-
-	sourcesJSON, err := json.Marshal(sources)
-	if err != nil {
-		return fmt.Errorf("failed to marshal information sources: %w", err)
-	}
+// StoreGatheredInfo stores gathered information for a subtask
+func StoreGatheredInfo(ctx context.Context, taskID string, questionID int,
+	gatheredInfo []string, sources []string) (time.Time, error) {
 
 	var updatedAt time.Time
-	err = Pool.QueryRow(ctx, sqlStoreSubtaskGatheredInfo, taskID, questionID, infoJSON, sourcesJSON).Scan(&updatedAt)
-	if err != nil {
-		return fmt.Errorf("failed to store subtask gathered info: %w", err)
-	}
+	err := Pool.QueryRow(ctx, GetQuery("research.store_gathered_info"),
+		taskID, questionID, gatheredInfo, sources).Scan(&updatedAt)
 
-	return nil
+	return updatedAt, err
 }
 
-// StoreSubtaskResult stores the result of a subtask
-func StoreSubtaskResult(ctx context.Context, taskID string, questionID int, result string) error {
+// StoreSynthesizedAnswer stores the synthesized answer for a subtask
+func StoreSynthesizedAnswer(ctx context.Context, taskID string, questionID int,
+	answer string) (time.Time, error) {
+
 	var updatedAt time.Time
-	err := Pool.QueryRow(ctx, sqlStoreSubtaskResult, taskID, questionID, result).Scan(&updatedAt)
-	if err != nil {
-		return fmt.Errorf("failed to store subtask result: %w", err)
-	}
+	err := Pool.QueryRow(ctx, GetQuery("research.store_synthesized_answer"),
+		taskID, questionID, answer).Scan(&updatedAt)
 
-	return nil
+	return updatedAt, err
 }
 
-// GetResearchTask gets a research task by ID
-func GetResearchTask(ctx context.Context, taskID string) (*models.ResearchTask, error) {
-	task, err := scanResearchTask(Pool.QueryRow(ctx, sqlGetResearchTask, taskID))
+// GetTaskByID retrieves a research task by its ID
+func GetTaskByID(ctx context.Context, taskID string) (*models.ResearchTask, error) {
+	var task models.ResearchTask
+
+	err := Pool.QueryRow(ctx, GetQuery("research.get_task_by_id"), taskID).Scan(
+		&task.ID, &task.UserID, &task.Query, &task.Model, &task.ConversationID,
+		&task.Status, &task.ErrorMessage, &task.Plan, &task.Results,
+		&task.CreatedAt, &task.UpdatedAt, &task.CompletedAt)
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to get research task: %w", err)
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("research task not found: %s", taskID)
+		}
+		return nil, err
 	}
 
-	return task, nil
+	return &task, nil
 }
 
-// GetResearchTaskByUserID gets a research task by ID and user ID
-func GetResearchTaskByUserID(ctx context.Context, taskID, userID string) (*models.ResearchTask, error) {
-	task, err := scanResearchTask(Pool.QueryRow(ctx, sqlGetResearchTaskByUserID, taskID, userID))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get research task: %w", err)
+// ListTasksByUserID lists all research tasks for a user
+func ListTasksByUserID(ctx context.Context, userID string, limit, offset int) ([]models.ResearchTask, error) {
+	if limit <= 0 {
+		limit = 10
 	}
 
-	return task, nil
-}
+	rows, err := Pool.Query(ctx, GetQuery("research.list_tasks_by_user"),
+		userID, limit, offset)
 
-// GetUserResearchTasks gets all research tasks for a user
-func GetUserResearchTasks(ctx context.Context, userID string) ([]*models.ResearchTask, error) {
-	rows, err := Pool.Query(ctx, sqlGetUserResearchTasks, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query user research tasks: %w", err)
+		return nil, err
 	}
 	defer rows.Close()
 
-	var tasks []*models.ResearchTask
+	var tasks []models.ResearchTask
 	for rows.Next() {
-		task := &models.ResearchTask{}
-		var plan, results []byte
-		var conversationID *int
-		var completedAt *time.Time
-
+		var task models.ResearchTask
 		err := rows.Scan(
-			&task.ID, &task.UserID, &task.Query, &task.Model, &conversationID,
-			&task.Status, &task.ErrorMessage, &plan, &results,
-			&task.CreatedAt, &task.UpdatedAt, &completedAt,
-		)
+			&task.ID, &task.UserID, &task.Query, &task.Model, &task.ConversationID,
+			&task.Status, &task.ErrorMessage, &task.CreatedAt, &task.UpdatedAt,
+			&task.CompletedAt)
+
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan research task row: %w", err)
+			return nil, err
 		}
-
-		task.ConversationID = conversationID
-		task.CompletedAt = completedAt
-
-		// Parse plan if available
-		if len(plan) > 0 {
-			var researchPlan models.ResearchPlan
-			if err := json.Unmarshal(plan, &researchPlan); err != nil {
-				log.Printf("Warning: Failed to parse research plan for task %s: %v", task.ID, err)
-			} else {
-				task.Plan = &researchPlan
-			}
-		}
-
-		// Parse results if available
-		if len(results) > 0 {
-			var resultsList []string
-			if err := json.Unmarshal(results, &resultsList); err != nil {
-				log.Printf("Warning: Failed to parse research results for task %s: %v", task.ID, err)
-			} else {
-				task.Results = resultsList
-			}
-		}
-
 		tasks = append(tasks, task)
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating research task rows: %w", err)
+		return nil, err
 	}
 
 	return tasks, nil
 }
 
-// Helper function to scan a research task from a row
-func scanResearchTask(row interface{}) (*models.ResearchTask, error) {
-	var scanner interface {
-		Scan(dest ...interface{}) error
-	}
+// GetSubtasksForTask retrieves all subtasks for a research task
+func GetSubtasksForTask(ctx context.Context, taskID string) ([]models.ResearchSubtask, error) {
+	rows, err := Pool.Query(ctx, GetQuery("research.get_subtasks_for_task"), taskID)
 
-	switch r := row.(type) {
-	case interface {
-		Scan(dest ...interface{}) error
-	}:
-		scanner = r
-	default:
-		return nil, fmt.Errorf("unsupported row type: %T", row)
-	}
-
-	task := &models.ResearchTask{}
-	var plan, results []byte
-	var conversationID *int
-	var completedAt *time.Time
-
-	err := scanner.Scan(
-		&task.ID, &task.UserID, &task.Query, &task.Model, &conversationID,
-		&task.Status, &task.ErrorMessage, &plan, &results,
-		&task.CreatedAt, &task.UpdatedAt, &completedAt,
-	)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	task.ConversationID = conversationID
-	task.CompletedAt = completedAt
+	var subtasks []models.ResearchSubtask
+	for rows.Next() {
+		var subtask models.ResearchSubtask
+		err := rows.Scan(
+			&subtask.ID, &subtask.TaskID, &subtask.QuestionID, &subtask.Status,
+			&subtask.GatheredInfo, &subtask.InformationSources, &subtask.SynthesizedAnswer,
+			&subtask.ErrorMessage, &subtask.CreatedAt, &subtask.UpdatedAt)
 
-	// Parse plan if available
-	if len(plan) > 0 {
-		var researchPlan models.ResearchPlan
-		if err := json.Unmarshal(plan, &researchPlan); err != nil {
-			log.Printf("Warning: Failed to parse research plan: %v", err)
-		} else {
-			task.Plan = &researchPlan
+		if err != nil {
+			return nil, err
 		}
+		subtasks = append(subtasks, subtask)
 	}
 
-	// Parse results if available
-	if len(results) > 0 {
-		var resultsList []string
-		if err := json.Unmarshal(results, &resultsList); err != nil {
-			log.Printf("Warning: Failed to parse research results: %v", err)
-		} else {
-			task.Results = resultsList
-		}
+	if err = rows.Err(); err != nil {
+		return nil, err
 	}
 
-	return task, nil
+	return subtasks, nil
 }
