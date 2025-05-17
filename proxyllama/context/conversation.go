@@ -233,15 +233,19 @@ func (cc *ConversationContext) AddAssistantMessage(ctx context.Context, content 
 			"line":           line,
 			"conversationId": cc.ConversationID,
 		}).Info("Summarizing messages for conversation")
-		if _, err := cc.SummarizeMessages(ctx); err != nil {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
-				"error": err,
-			}).Error("Failed to summarize messages")
-			// Continue even if summarization fails
-		}
+		go func() {
+			bgrndCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			if _, err := cc.SummarizeMessages(bgrndCtx); err != nil {
+				_, file, line, _ := runtime.Caller(0)
+				logrus.WithFields(logrus.Fields{
+					"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+					"line":  line,
+					"error": err,
+				}).Error("Failed to summarize messages")
+				// Continue even if summarization fails
+			}
+		}()
 	}
 
 	// Update cache with modified conversation context

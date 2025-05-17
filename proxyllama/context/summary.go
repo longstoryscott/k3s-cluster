@@ -30,32 +30,24 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 	}
 
 	// Calculate how many messages to summarize (N/2)
-	messagesToSummarize := usrCfg.Summarization.MessagesBeforeSummary / 2
-	if messagesToSummarize < 1 {
-		messagesToSummarize = 1 // Always summarize at least 1 message
-	}
-
-	// Limit to actual number of available unsummarized messages
-	if messagesToSummarize > len(unsummarizedMessages) {
-		messagesToSummarize = len(unsummarizedMessages)
-	}
+	messagesToSummarize := min(max(usrCfg.Summarization.MessagesBeforeSummary/2, 1), len(unsummarizedMessages))
 
 	// Extract the oldest N/2 unsummarized messages to summarize
 	var messagesToSummarizeContent []models.Message
 	var messageIDsToSummarize []int
 
-	for i := 0; i < messagesToSummarize; i++ {
+	for i := range messagesToSummarize {
 		messagesToSummarizeContent = append(messagesToSummarizeContent, unsummarizedMessages[i])
 		messageIDsToSummarize = append(messageIDsToSummarize, messageIDs[i])
 	}
 
-	summaryProfile, err := storage.GetModelProfile(ctx, usrCfg.ModelProfiles.ImprovementProfileID)
+	summaryProfile, err := storage.GetModelProfile(ctx, usrCfg.ModelProfiles.SummarizationProfileID)
 	if err != nil {
-		return models.Summary{}, fmt.Errorf("failed to get self-critique profile: %w", err)
+		return models.Summary{}, fmt.Errorf("failed to get summarization profile: %w", err)
 	}
 
 	// Generate the summary using the selected prompt
-	summaryContent, err := cc.generateText(ctx, messagesToSummarizeContent, summaryProfile)
+	summaryContent, err := cc.generateSummarization(messagesToSummarizeContent, summaryProfile)
 	if err != nil {
 		return models.Summary{}, fmt.Errorf("failed to generate summary: %w", err)
 	}
@@ -220,7 +212,7 @@ func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) 
 		}
 	}
 
-	summaryContent, err := cc.generateText(ctx, messagesToSummarize, profile)
+	summaryContent, err := cc.generateSummarization(messagesToSummarize, profile)
 	if err != nil {
 		return fmt.Errorf("failed to generate level %d summary: %w", nextLevel, err)
 	}
@@ -337,7 +329,7 @@ func (cc *ConversationContext) createMasterSummary(ctx context.Context) error {
 	messagesToSummarize := cc.prepareMasterSummaryMessages(usrCfg, *masterSummaryProfile)
 
 	// Generate the master summary
-	masterSummaryContent, err := cc.generateText(ctx, messagesToSummarize, masterSummaryProfile)
+	masterSummaryContent, err := cc.generateSummarization(messagesToSummarize, masterSummaryProfile)
 	if err != nil {
 		return fmt.Errorf("failed to generate master summary: %w", err)
 	}
@@ -415,7 +407,7 @@ func (cc *ConversationContext) updateMasterSummary(ctx context.Context) error {
 		return fmt.Errorf("failed to get master summary profile: %w", err)
 	}
 
-	masterSummaryContent, err := cc.generateText(ctx, messagesToSummarize, masterSummaryProfile)
+	masterSummaryContent, err := cc.generateSummarization(messagesToSummarize, masterSummaryProfile)
 	if err != nil {
 		return fmt.Errorf("failed to update master summary: %w", err)
 	}

@@ -8,11 +8,13 @@ import (
 	"runtime"
 	"time"
 
+	"encoding/json"
+
 	"github.com/sirupsen/logrus"
 )
 
-// generateText creates a summary using Ollama
-func (cc *ConversationContext) generateText(ctx context.Context, messages []models.Message, summaryModel *models.ModelProfile) (string, error) {
+// generateSummarization creates a summary using Ollama
+func (cc *ConversationContext) generateSummarization(messages []models.Message, summaryModel *models.ModelProfile) (string, error) {
 	// Build Ollama messages
 	ollamaMessages := []models.OllamaMessage{
 		{
@@ -29,13 +31,26 @@ func (cc *ConversationContext) generateText(ctx context.Context, messages []mode
 		})
 	}
 
-	// debug log the content of each message in the request
-	for _, msg := range ollamaMessages {
+	// Ensure the last message is a user message with the summarization instruction
+	if len(ollamaMessages) == 0 || ollamaMessages[len(ollamaMessages)-1].Role != "user" {
+		ollamaMessages = append(ollamaMessages, models.OllamaMessage{
+			Role:    "user",
+			Content: summaryModel.SystemPrompt, // Use the system prompt as the summarization instruction
+		})
+	}
+
+	// Debug: log the full request payload as JSON
+	reqObj := models.OllamaReq{
+		Model:    summaryModel.ModelName,
+		Messages: ollamaMessages,
+		Stream:   true,
+	}
+	if reqJson, err := json.MarshalIndent(reqObj, "", "  "); err == nil {
 		_, file, line, _ := runtime.Caller(0)
 		logrus.WithFields(logrus.Fields{
 			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
 			"line": line,
-		}).Debugf("Message: %s", msg.Content)
+		}).Debugf("Ollama summary request payload: %s", string(reqJson))
 	}
 
 	_, file, line, _ := runtime.Caller(0)
@@ -46,8 +61,17 @@ func (cc *ConversationContext) generateText(ctx context.Context, messages []mode
 	}).Info("Using model for text generation")
 
 	// Create a long-lived context for generation
-	longCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	longCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	return proxy.SendOllamaRequest(longCtx, summaryModel.ModelName, ollamaMessages, "/api/chat")
+	resp, err := proxy.StreamOllamaRequest(longCtx, summaryModel.ModelName, ollamaMessages, "/api/chat")
+	// Debug: log the raw response from Ollama
+	_, file2, line2, _ := runtime.Caller(0)
+	logrus.WithFields(logrus.Fields{
+		"file": filepath.Join(filepath.Base(filepath.Dir(file2)), filepath.Base(file2)),
+		"line": line2,
+		"resp": resp,
+		"err":  err,
+	}).Debug("Ollama summary response")
+	return resp, err
 }

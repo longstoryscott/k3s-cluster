@@ -131,6 +131,7 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 			}).Info("Generating embedding for message")
 			embedding, err := proxy.GetEmbedding(ctx, mContent, modelName)
 			if err != nil {
+				_, file, line, _ := runtime.Caller(0)
 				logrus.WithFields(logrus.Fields{
 					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
 					"line":      line,
@@ -141,6 +142,7 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 			}
 
 			if len(embedding) == 0 {
+				_, file, line, _ := runtime.Caller(0)
 				logrus.WithFields(logrus.Fields{
 					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
 					"line":      line,
@@ -149,13 +151,15 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 				return
 			}
 
+			_, file, line, _ = runtime.Caller(0)
 			logrus.WithFields(logrus.Fields{
 				"file":       filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
 				"line":       line,
 				"messageId":  mID,
 				"vectorSize": len(embedding),
 			}).Info("Storing embedding for message")
-			if err := StoreMessageEmbedding(ctx, mID, embedding); err != nil {
+			if err := StoreEmbedding(ctx, mID, embedding); err != nil {
+				_, file, line, _ := runtime.Caller(0)
 				logrus.WithFields(logrus.Fields{
 					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
 					"line":      line,

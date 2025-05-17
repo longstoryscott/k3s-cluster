@@ -48,7 +48,7 @@ const ModelProfileSelector = ({ task, profiles }: { task: { key: keyof ModelProf
     }
   };
   return (
-    <Grid key={task.key}>
+    <Grid key={task.key} size={{ xs: 12, sm: 6, md: 4 }}>
       <FormControl fullWidth>
         <InputLabel>{task.label}</InputLabel>
         <Select

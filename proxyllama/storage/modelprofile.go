@@ -343,7 +343,7 @@ func ListModelProfilesByUser(ctx context.Context, userID string) ([]*models.Mode
 	}
 
 	// Not in cache, get from database
-	rows, err := Pool.Query(ctx, GetQuery("modelprofile.list_by_user"), userID)
+	rows, err := Pool.Query(ctx, GetQuery("modelprofile.list_profiles_by_user"), userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query model profiles: %w", err)
 	}

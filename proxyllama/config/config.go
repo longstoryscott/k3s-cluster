@@ -28,6 +28,7 @@ type Config struct {
 	Retrieval     RetrievalConfig     `json:"retrieval" mapstructure:"retrieval"`
 	Preferences   PreferencesConfig   `json:"preferences" mapstructure:"preferences"`
 	ModelProfiles ModelProfileConfig  `json:"modelProfiles,omitempty"`
+	LogLevel      string              `json:"logLevel" mapstructure:"log_level"`
 }
 
 // ServerConfig contains server configuration
@@ -242,6 +243,7 @@ func setViperDefaults(v *viper.Viper) {
 	v.SetDefault("preferences.font_size", 14)
 	v.SetDefault("preferences.notifications_on", true)
 	v.SetDefault("preferences.language", "en")
+	v.SetDefault("log_level", "info")
 }
 
 // LoadConfig loads the configuration from a file

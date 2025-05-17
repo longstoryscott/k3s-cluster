@@ -19,46 +19,11 @@ func HasEmbedding(ctx context.Context, messageID int) (bool, error) {
 	return exists, err
 }
 
-// StoreMessageEmbedding stores a vector embedding for a message
-func StoreMessageEmbedding(ctx context.Context, messageID int, embedding []float32) error {
-	// Use a transaction for atomicity
-	tx, err := Pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			tx.Rollback(ctx)
-		}
-	}()
-
-	// Convert []float32 to pgvector type
-	pgVector := pgvector.NewVector(embedding)
-	copy(pgVector.Slice(), embedding)
-
-	// Use the consolidated SQL query
-	_, err = tx.Exec(ctx, GetQuery("embedding.store_message_embedding"),
-		messageID, pgVector, "default") // Using 'default' as model name for now
-
-	if err != nil {
-		return err
-	}
-
-	if err = tx.Commit(ctx); err != nil {
-		return err
-	}
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":      line,
-		"messageID": messageID,
-	}).Info("Successfully stored embedding for message")
-	return nil
-}
-
 // GetSimilarMessages finds semantically similar messages based on vector similarity
 func GetSimilarMessages(ctx context.Context, queryEmbedding []float32, similarityThreshold float32, limit int) ([]Message, error) {
-	embeddingStr := formatEmbeddingForPgVector(queryEmbedding)
+	// Ensure the query embedding is 768 dimensions
+	processedEmbedding, _ := processEmbedding(queryEmbedding)
+	embeddingStr := formatEmbeddingForPgVector(processedEmbedding)
 
 	rows, err := Pool.Query(ctx, GetQuery("embedding.similar_messages"), embeddingStr, similarityThreshold, limit)
 	if err != nil {
@@ -153,10 +118,11 @@ func StoreEmbedding(ctx context.Context, messageID int, embedding []float32) err
 
 	// Process embedding to fit in the 768-dimension table
 	processedEmbedding, originalDimension := processEmbedding(embedding)
+	vector := pgvector.NewVector(processedEmbedding)
 
 	// Store embedding in the table
 	_, err := Pool.Exec(ctx, GetQuery("embedding.store_embedding"),
-		messageID, processedEmbedding, originalDimension)
+		messageID, vector, originalDimension)
 
 	if err != nil {
 		return fmt.Errorf("failed to store embedding: %w", err)
@@ -358,4 +324,12 @@ func normalizeVector(vec []float32) []float32 {
 	}
 
 	return result
+}
+
+// min returns the smaller of two ints
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

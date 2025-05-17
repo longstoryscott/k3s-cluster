@@ -20,7 +20,7 @@ import (
 // handleError is a helper function that logs the error and returns a fiber error
 // to standardize error handling across API endpoints
 func handleError(err error, status int, message string) error {
-	_, file, line, _ := runtime.Caller(0)
+	_, file, line, _ := runtime.Caller(1)
 	logrus.WithFields(logrus.Fields{
 		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
 		"line":  line,

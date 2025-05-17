@@ -17,6 +17,21 @@ import (
 
 func main() {
 	conf := config.GetConfig()
+
+	// Set logrus log level from config
+	switch conf.LogLevel {
+	case "debug":
+		logrus.SetLevel(logrus.DebugLevel)
+	case "info":
+		logrus.SetLevel(logrus.InfoLevel)
+	case "warn":
+		logrus.SetLevel(logrus.WarnLevel)
+	case "error":
+		logrus.SetLevel(logrus.ErrorLevel)
+	default:
+		logrus.SetLevel(logrus.InfoLevel)
+	}
+
 	psqlconn := fmt.Sprintf(
 		"postgresql://%s:%s@%s:%d/%s?sslmode=%s",
 		conf.Database.User,
