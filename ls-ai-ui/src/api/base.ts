@@ -29,25 +29,108 @@ export async function* gen(opts: RequestOptions): AsyncGenerator<ChatResponse> {
   }
 
   const decoder = new TextDecoder('utf-8');
+  let buffer = ''; // Add buffer to accumulate partial JSON chunks
   let done = false;
+
   while (!done) {
     const { done: doneReading, value } = await reader.read();
     done = doneReading;
-    const result: string = decoder.decode(value);
-    try {
-      const res = JSON.parse(result) as ChatResponse;
-      yield res;
-    } catch (e: unknown) {
-      if (e instanceof Error) {
-        if (e instanceof SyntaxError && result.trim() === '') {
+
+    if (value) {
+      buffer += decoder.decode(value, { stream: !doneReading });
+
+      // Process complete JSON objects from the buffer
+      let startIdx = 0;
+      let parseIndex;
+
+      // Try to parse as many complete JSON objects as possible from the buffer
+      while (startIdx < buffer.length) {
+        try {
+          parseIndex = findCompleteJsonEnd(buffer, startIdx);
+          if (parseIndex === -1) {
+            break; // No complete JSON found
+          }
+
+          const jsonStr = buffer.substring(startIdx, parseIndex + 1);
+          const res = JSON.parse(jsonStr) as ChatResponse;
+          yield res;
+
+          // Move start index past this JSON object
+          startIdx = parseIndex + 1;
+        } catch {
+          // If we can't parse a complete JSON object, break and wait for more data
           break;
         }
-        console.error("Error parsing JSON:", e);
-      } else {
-        console.error("Unknown error parsing JSON:", e);
+      }
+
+      // Remove processed JSON from buffer
+      if (startIdx > 0) {
+        buffer = buffer.substring(startIdx);
+      }
+    }
+
+    if (done && buffer.trim()) {
+      // Try to parse any remaining data in the buffer
+      try {
+        const res = JSON.parse(buffer) as ChatResponse;
+        yield res;
+      } catch (e: unknown) {
+        if (e instanceof Error) {
+          console.error("Error parsing final JSON chunk:", e);
+          // Try parsing individual lines as separate JSON objects
+          const lines = buffer.split('\n').filter(line => line.trim());
+          for (const line of lines) {
+            try {
+              const res = JSON.parse(line) as ChatResponse;
+              yield res;
+            } catch {
+              // Ignore parsing errors for individual lines
+            }
+          }
+        }
       }
     }
   }
+
+  // Clean up
+  reader.releaseLock();
+  reader.cancel();
+}
+
+// Helper function to find the end of a complete JSON object
+function findCompleteJsonEnd(str: string, startIndex: number): number {
+  let openBraces = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = startIndex; i < str.length; i++) {
+    const char = str[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else {
+      if (char === '"') {
+        inString = true;
+      } else if (char === '{') {
+        openBraces++;
+      } else if (char === '}') {
+        openBraces--;
+        if (openBraces === 0) {
+          // Found complete JSON object
+          return i;
+        }
+      }
+    }
+  }
+
+  // No complete JSON object found
+  return -1;
 }
 
 export async function req<T>(opts: RequestOptions): Promise<T> {

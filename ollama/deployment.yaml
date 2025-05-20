@@ -46,9 +46,12 @@ spec:
                     echo "Gettings models..."
                     ollama pull llama3.2
                     ollama pull mistral
-                    ollama pull opencoder
-                    ollama pull phi3.5
+                    ollama pull opencoder:latest
+                    ollama pull granite-embedding
                     ollama pull qwen3:0.6b
+                    ollama pull gemma3:12b
+                    ollama pull phi4-reasoning:plus
+                    ollama pull cogito:8b
                     # List available models
                     echo "Available models:"
                     ollama list
@@ -62,11 +65,11 @@ spec:
             requests:
               memory: "24Gi"
               cpu: "8"
-              nvidia.com/gpu: "1"
+              nvidia.com/gpu: "2"
             limits:
               memory: "30Gi"
               cpu: "10"
-              nvidia.com/gpu: "1"
+              nvidia.com/gpu: "2"
           volumeMounts:
             - name: ollama-models-volume
               mountPath: /root/.ollama

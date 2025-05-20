@@ -84,79 +84,76 @@ func GetProxyHandler(ctx context.Context, reqBody []byte, path, method string, s
 
 func streamHandler(w *bufio.Writer, resp *http.Response, responseContent *strings.Builder) (string, error) {
 	defer resp.Body.Close() // Ensure connection is closed when done
-	buffer := make([]byte, 1024)
-	// lastFlushTime := time.Now()
+	proxyToClient := true
 
 	_, file, line, _ := runtime.Caller(0)
 	logrus.WithFields(logrus.Fields{
 		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
 		"line": line,
-	}).Info("Starting to stream chat response")
+	}).Info("Starting to stream chat response (line-by-line)")
 
-	// Read the stream chunk by chunk
-	for {
-		// Read a chunk from the response - each JSON object is on a separate line
-		n, err := resp.Body.Read(buffer)
-		if err != nil {
-			if err != io.EOF {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":  line,
-					"error": err,
-				}).Error("Error reading from Ollama")
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		// Extract content from the JSON chunk
+		content := extractContent(line)
+		if content != "" {
+			responseContent.WriteString(content)
+		}
+
+		if !proxyToClient {
+			// If proxyToClient is false, we don't want to write to the client
+			// but we still want to accumulate the response content
+			if isDone(line) {
+				break
 			}
+			continue
+		}
+
+		// Write the complete JSON line to the client preserving the newline
+		res := append(line, "\n"...)
+		if _, writeErr := w.Write(res); writeErr != nil {
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":  line,
+				"error": writeErr,
+			}).Error("Error writing to response")
+			proxyToClient = false
+		}
+		if flushErr := w.Flush(); flushErr != nil {
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":  line,
+				"error": flushErr,
+			}).Error("Error flushing response")
+			proxyToClient = false
+		}
+
+		// Check if this is the last chunk (done=true)
+		if isDone(line) {
 			break
 		}
-		if n > 0 {
-			data := buffer[:n]
-			// Extract content from the JSON chunk
-			content := extractContent(data)
-			if content != "" {
-				responseContent.WriteString(content)
-			}
-
-			// Write to response
-			if _, writeErr := w.Write(data); writeErr != nil {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":  line,
-					"error": writeErr,
-				}).Error("Error writing to response")
-				break
-			}
-
-			// Flush frequently to avoid client timeouts
-			// Always flush at least every 10 seconds even if no data
-			// if time.Since(lastFlushTime) > 10*time.Second {
-			// 	if flushErr := w.Flush(); flushErr != nil {
-			// 		_, file, line, _ := runtime.Caller(0)
-			// 		logrus.WithFields(logrus.Fields{
-			// 			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			// 			"line":  line,
-			// 			"error": flushErr,
-			// 		}).Error("Error flushing response")
-			// 		break
-			// 	}
-			// 	lastFlushTime = time.Now()
-			// } else
-
-			if flushErr := w.Flush(); flushErr != nil {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":  line,
-					"error": flushErr,
-				}).Error("Error flushing response")
-				break
-			}
-
-			// Check if this is the last chunk (done=true)
-			if isDone(data) {
-				break
-			}
-		}
+	}
+	if err := scanner.Err(); err != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": err,
+		}).Error("Scanner error during streaming")
+	}
+	if flushErr := w.Flush(); flushErr != nil {
+		_, file, line, _ := runtime.Caller(0)
+		logrus.WithFields(logrus.Fields{
+			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+			"line":  line,
+			"error": flushErr,
+		}).Error("Error flushing response")
 	}
 	return responseContent.String(), nil
 }

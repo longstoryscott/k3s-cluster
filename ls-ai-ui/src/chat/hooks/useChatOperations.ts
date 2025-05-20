@@ -1,8 +1,7 @@
 import { useCallback, useRef } from 'react';
 import { ChatState, ChatActions } from './useChatState';
 import { useAuth } from '../../auth';
-import { chat, getManyConversations, getMessages, removeConversation, startConversation, updateConversationTitle, ChatUserMessage, ChatAgentMessage } from '../../api';
-import { getModels } from '../../api/model';
+import { chat, getManyConversations, getMessages, removeConversation, startConversation, updateConversationTitle, ChatUserMessage, getModels } from '../../api';
 
 export const useChatOperations = (state: ChatState, actions: ChatActions) => {
   const auth = useAuth();
@@ -53,19 +52,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
 
     try {
       const fetchedMessages = await getMessages(getToken(), conversationId);
-      // Merge optimistic (client-only) messages with status 'sending' or 'error' that are not in fetchedMessages
-      const optimisticMessages = state.messages.filter(
-        (msg) =>
-          (msg.status === 'sending' || msg.status === 'error') &&
-          // Only keep if not already in fetchedMessages (by _clientId or content/role)
-          !fetchedMessages.some(
-            (f) =>
-              (msg._clientId && f._clientId === msg._clientId) ||
-              (f.content === msg.content && f.role === msg.role)
-          )
-      );
-      actions.setMessages([...fetchedMessages, ...optimisticMessages]);
-
+      actions.setMessages(msgs => [...msgs, ...fetchedMessages.filter(m => !msgs.find(msg => msg.id === m.id))]);
       // Find and set the current conversation
       const conversation = state.conversations.find(c => c.id === conversationId);
       if (conversation) {
@@ -128,15 +115,11 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     actions.setIsLoading(true);
     actions.setError(null);
     actions.setIsTyping(true);
-    // Clear previous response
-    actions.setResponse('');
 
     // Create a unique ID for this message instance to help with tracking
-    const messageId = Date.now().toString();
     const messageWithStatus = {
       ...message,
-      status: 'sending' as const,
-      _clientId: messageId // Add a client-side ID to track this specific message instance
+      status: 'sending' as const
     };
 
     try {
@@ -145,60 +128,21 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
       if (!conversationId) {
         conversationId = await startNewConversation();
       }
+      await fetchMessages(conversationId ?? -1);
+      actions.setResponse('');
 
       // Update UI immediately with the user message
       actions.addMessage(messageWithStatus);
 
       // Stream the assistant's response
-      const generator = chat(getToken(), state.selectedModel, state.messages, message);
-      let completeResponse = ''; // Track the complete response for later addition
-
-      for await (const chunk of generator) {
-        if (chunk.message?.content) {
-          // Update the streaming response
-          completeResponse += chunk.message.content;
-          actions.setResponse(completeResponse);
-        }
-
-        if (chunk.done) {
-          break;
-        }
+      for await (const chunk of chat(getToken(), state.messages, message)) {
+        // Use functional update to ensure we're always working with the latest state
+        actions.setResponse(r => r + chunk);
       }
-
-      // When streaming completes, add the complete response to messages
-      if (completeResponse) {
-        const assistantMessage: ChatAgentMessage = {
-          role: 'assistant',
-          content: completeResponse,
-          status: 'success'
-        };
-        actions.addMessage(assistantMessage);
-      }
-
-      // Update the original message to success status by finding it with the client ID
-      const updatedMessages = state.messages.map(msg =>
-        ('_clientId' in msg && msg._clientId === messageId)
-          ? { ...msg, status: 'success' as const }
-          : msg
-      );
-      actions.setMessages(updatedMessages);
-
-      // Keep the final response visible
-      actions.setIsTyping(false);
 
     } catch (err: unknown) {
       console.error("Error sending message:", err);
       actions.setError((err as Error).message);
-
-      // Find the message by client ID and update its status to error
-      const updatedMessages = state.messages.map(msg =>
-        ('_clientId' in msg && msg._clientId === messageId)
-          ? { ...msg, status: 'error' as const }
-          : msg
-      );
-
-      // Important: Use the updated messages, not the original state.messages
-      actions.setMessages(updatedMessages);
     } finally {
       actions.setIsLoading(false);
       actions.setIsTyping(false);
@@ -207,8 +151,8 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     state.isTyping,
     state.currentConversation,
     state.messages,
-    state.selectedModel,
     actions,
+    fetchMessages,
     getToken,
     startNewConversation
   ]);
@@ -274,11 +218,19 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
 
   // Select an existing conversation
   const selectConversation = useCallback(async (id: number) => {
-    if (state.isLoading) {
-      return;
+    actions.setIsLoading(true);
+    actions.setError(null);
+    actions.setMessages([]);
+
+    try {
+      await fetchMessages(id);
+    } catch (err: unknown) {
+      actions.setError((err as Error).message);
+      console.error("Error selecting conversation:", err);
+    } finally {
+      actions.setIsLoading(false);
     }
-    await fetchMessages(id);
-  }, [state.isLoading, fetchMessages]);
+  }, [actions, fetchMessages]);
 
   // Debounced function to update conversation title
   const debouncedUpdateTitle = useCallback((id: number, title: string) => {

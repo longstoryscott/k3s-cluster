@@ -1,3 +1,7 @@
+pre {
+  white-space: pre-wrap;
+}
+
 #root {
   margin: 0 auto;
   text-align: center;

@@ -4,7 +4,7 @@ import ChatItem from './ChatItem';
 import { useChat } from '../../chat';
 
 const ChatHistory = () => {
-  const { conversations, fetchConversations, selectConversation } = useChat();
+  const { conversations, fetchConversations } = useChat();
   const theme = useTheme();
 
   useEffect(() => {
@@ -12,13 +12,6 @@ const ChatHistory = () => {
     fetchConversations();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const handleSelectChat = (chatId: number) => {
-    selectConversation(chatId);
-  };
-
-  console.log('ChatHistory conversations:', conversations);
-
   return (
     <Box>
       <Typography variant="subtitle1" sx={{ mb: theme.spacing(1) }}>
@@ -32,7 +25,6 @@ const ChatHistory = () => {
               key={chat.id}
               chatId={chat.id!}
               chatTitle={chat.title || `Chat ${chat.id}`}
-              onSelect={handleSelectChat}
             />
           ))}
         </List>

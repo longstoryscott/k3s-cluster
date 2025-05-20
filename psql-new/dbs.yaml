@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-new-init-scripts
+  namespace: "psql"
+data:
+  create-multiple-dbs.sh: |
+    #!/bin/bash
+    set -e
+
+    # Enhanced debugging
+    echo "Starting database initialization script with enhanced debugging..."
+
+    # Check the data directory
+    echo "Checking PostgreSQL data directory status:"
+    ls -la /home/postgres/pgdata
+
+    # Check PostgreSQL process
+    echo "Checking if PostgreSQL process is running:"
+    ps aux | grep postgres
+
+    # Check PostgreSQL logs
+    echo "Recent PostgreSQL logs (if available):"
+    if [ -d "/home/postgres/pg_log" ]; then
+      find /home/postgres/pg_log -type f -exec tail -n 20 {} \; 2>/dev/null || echo "No log files found"
+    else
+      echo "Log directory not found"
+    fi
+
+    # Try to connect with increased timeout and verbosity
+    echo "Attempting to connect to PostgreSQL (with increased verbosity)..."
+    export PGCONNECT_TIMEOUT=5
+
+    # First check if PostgreSQL is ready
+    RETRY_COUNT=0
+    MAX_RETRIES=30
+
+    until pg_isready -h localhost -p 5432 -U "lsm" --dbname "postgres" || [ $RETRY_COUNT -eq $MAX_RETRIES ]; do
+      RETRY_COUNT=$((RETRY_COUNT+1))
+      echo "Waiting for PostgreSQL to be ready... Attempt $RETRY_COUNT of $MAX_RETRIES"
+      echo "PostgreSQL status: $(pg_isready -h localhost -p 5432 2>&1)"
+      sleep 5
+    done
+
+    if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+      echo "ERROR: PostgreSQL failed to start after $MAX_RETRIES attempts"
+      echo "Checking if data directory is initialized:"
+      if [ -f "/home/postgres/pgdata/data/PG_VERSION" ]; then
+        echo "PG_VERSION file exists, database is already initialized"
+        cat "/home/postgres/pgdata/data/PG_VERSION"
+      else
+        echo "PG_VERSION file not found, database may not be initialized"
+      fi
+      exit 1
+    fi
+
+    echo "PostgreSQL is ready. Creating databases..."
+
+    # Use password from environment variable
+    export PGPASSWORD="${POSTGRES_PASSWORD}"
+
+    # Create databases
+    echo "Creating databases if they don't exist..."
+    psql -v ON_ERROR_STOP=0 --username "lsm" --dbname "postgres" <<-EOSQL
+      SELECT 'CREATE DATABASE ollama' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'ollama') \gexec
+      SELECT 'CREATE DATABASE nextcloud' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'nextcloud') \gexec
+    EOSQL
+
+    # Add TimescaleDB extension to required databases
+    echo "Creating TimescaleDB extension in ollama database..."
+    psql -v ON_ERROR_STOP=0 --username "lsm" --dbname "ollama" -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+
+    # List all databases to confirm
+    echo "Listing all databases:"
+    psql -U "lsm" --dbname "postgres" -c "\l"
+
+    # Unset password for security
+    unset PGPASSWORD
+
+    echo "Database initialization completed successfully!"

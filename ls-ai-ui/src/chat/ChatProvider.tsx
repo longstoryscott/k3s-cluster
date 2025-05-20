@@ -31,7 +31,7 @@ export interface ChatContextType {
   setCurrentConversation: ReturnType<typeof useChatState>[1]['setCurrentConversation'];
 }
 
-export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const ChatProvider: React.FC<{ children: React.ReactNode }> = React.memo(({ children }) => {
   const auth = useAuth();
   
   // Use our custom hooks
@@ -83,4 +83,4 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return <ChatContext.Provider value={contextValue}>{children}</ChatContext.Provider>;
-};
+});

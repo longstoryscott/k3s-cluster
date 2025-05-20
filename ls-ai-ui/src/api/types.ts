@@ -30,7 +30,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   status?: MessageStatus;
-  _clientId?: string;  // For tracking message in UI during send process
+  id?: number;
+  createdAt?: Date;
 }
 
 export interface ChatUserMessage extends ChatMessage {

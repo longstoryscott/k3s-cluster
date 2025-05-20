@@ -49,10 +49,10 @@ export const lightTheme = createTheme({
     ...commonOptions.palette,
     mode: 'light',
     primary: {
-      main: '#00695c' // Primary color (eg. blue)
+      main: '#00695c'
     },
     secondary: {
-      main: '#ff6347' // Secondary color (eg. red)
+      main: '#5e29d9'
     },
     background: {
       default: '#f5f5f9', // Default background color
@@ -70,11 +70,11 @@ export const darkTheme = createTheme({
     ...commonOptions.palette,
     mode: 'dark',
     primary: {
-      main: '#00695c', // Primary color (eg. blue) with some brightness reduction
+      main: '#00695c',
       contrastText: '#ffffff'
     },
     secondary: {
-      main: '#ff6347', // Secondary color (eg. red) with some brightness reduction
+      main: '#DDBF49',
       contrastText: '#0288d1'
     },
     background: {

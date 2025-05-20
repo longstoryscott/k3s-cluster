@@ -14,13 +14,13 @@ export interface ChatState {
 }
 
 export interface ChatActions {
-  setMessages: (messages: ChatMessage[]) => void;
+  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   setConversations: (conversations: ChatConversation[]) => void;
   setCurrentConversation: (conversation: ChatConversation | null) => void;
   setIsLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setIsTyping: (typing: boolean) => void;
-  setResponse: (response: string) => void;
+  setResponse: React.Dispatch<React.SetStateAction<string>>;
   setSelectedModel: (model: string) => void;
   addMessage: (message: ChatMessage) => void;
   addConversation: (conversation: ChatConversation) => void;

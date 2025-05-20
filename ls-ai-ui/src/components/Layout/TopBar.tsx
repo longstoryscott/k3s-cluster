@@ -1,13 +1,24 @@
-import { AppBar, Toolbar, Typography, Button, useTheme } from '@mui/material';
+import { AppBar, Toolbar, Typography, Button, useTheme, IconButton } from '@mui/material';
+import MenuIcon from '@mui/icons-material/Menu';
 import { useAuth } from '../../auth';
 
-const TopBar = () => {
+const TopBar = ({ onMenuClick }: { onMenuClick?: () => void }) => {
   const { user, logout } = useAuth();
   const theme = useTheme();
 
   return (
-    <AppBar position="static">
+    <AppBar position="sticky">
       <Toolbar>
+        {onMenuClick && (
+          <IconButton
+            color="inherit"
+            edge="start"
+            onClick={onMenuClick}
+            sx={{ mr: 2 }}
+          >
+            <MenuIcon />
+          </IconButton>
+        )}
         <Typography variant="h6" sx={{ flexGrow: 1 }}>
           Chat Application
         </Typography>

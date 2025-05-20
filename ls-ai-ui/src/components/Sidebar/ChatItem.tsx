@@ -7,16 +7,14 @@ import { useNavigate } from 'react-router-dom';
 interface ChatItemProps {
   chatId: number;
   chatTitle: string;
-  onSelect: (chatId: number) => void;
 }
 
-const ChatItem: React.FC<ChatItemProps> = ({ chatId, chatTitle, onSelect }) => {
+const ChatItem: React.FC<ChatItemProps> = ({ chatId, chatTitle }) => {
   const { deleteConversation } = useChat();
   const navigate = useNavigate();
 
   const handleSelect = () => {
     navigate(`/chat/${chatId}`);
-    onSelect(chatId);
   };
 
   const handleDelete = (event: React.MouseEvent) => {
