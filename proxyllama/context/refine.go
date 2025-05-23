@@ -21,6 +21,7 @@ func (cc *ConversationContext) GetCritiqueForResponse(ctx context.Context, respo
 	if err != nil {
 		return "", fmt.Errorf("failed to get user config: %w", err)
 	}
+
 	critiqueProfile, err := storage.GetModelProfile(ctx, cfg.ModelProfiles.SelfCritiqueProfileID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get self-critique profile: %w", err)

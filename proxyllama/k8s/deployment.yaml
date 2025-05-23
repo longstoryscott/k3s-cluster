@@ -2,10 +2,15 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: proxyllama
+  namespace: proxyllama
   labels:
     app: proxyllama
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: proxyllama
@@ -13,9 +18,10 @@ spec:
     metadata:
       labels:
         app: proxyllama
+        version: ${VERSION}
     spec:
       containers:
-        - name: proxy
+        - name: proxyllama
           # Updated to use the private registry
           image: ${REGISTRY_URL}/proxyllama:latest
           imagePullPolicy: Always
@@ -28,9 +34,9 @@ spec:
               cpu: "500m"
           env:
             - name: OLLAMA_API_BASE_URL
-              value: "http://ollama:11434"
+              value: "http://ollama.ollama.svc.cluster.local:11434"
             - name: DB_HOST
-              value: "postgres"
+              value: "postgres.psql.svc.cluster.local"
             - name: DB_PORT
               value: "5432"
             - name: DB_USER

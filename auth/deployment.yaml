@@ -38,3 +38,69 @@ spec:
             sources:
               - configMap:
                   name: config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openldap
+  namespace: auth
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openldap
+  template:
+    metadata:
+      labels:
+        app: openldap
+    spec:
+      initContainers:
+        - name: copy-ldif
+          image: busybox
+          command: ["sh", "-c", "cp /ldif-src/* /ldif-seed/"]
+          volumeMounts:
+            - name: openldap-seed-ldif
+              mountPath: /ldif-src
+            - name: openldap-seed-ldif-writable
+              mountPath: /ldif-seed
+      containers:
+        - name: openldap
+          image: osixia/openldap:1.5.0
+          ports:
+            - containerPort: 389
+          env:
+            - name: LDAP_ORGANISATION
+              value: "Long Story Media"
+            - name: LDAP_DOMAIN
+              value: "longstorymedia.com"
+            - name: LDAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: openldap-admin-secret
+                  key: LDAP_ADMIN_PASSWORD
+            - name: LDAP_SEED_LDIF_PATH
+              value: "/ldif-seed"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: ldap-data
+              mountPath: /var/lib/ldap
+            - name: ldap-config
+              mountPath: /etc/ldap/slapd.d
+            - name: openldap-seed-ldif-writable
+              mountPath: /ldif-seed
+      volumes:
+        - name: ldap-data
+          emptyDir: {}
+        - name: ldap-config
+          emptyDir: {}
+        - name: openldap-seed-ldif
+          configMap:
+            name: openldap-seed-ldif
+        - name: openldap-seed-ldif-writable
+          emptyDir: {}

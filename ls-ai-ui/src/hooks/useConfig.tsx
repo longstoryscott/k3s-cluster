@@ -56,7 +56,7 @@ export interface ModelProfile {
 
 export interface ModelProfilesConfig {
   primaryProfileId?: string;
-  primarySummaryProfileId?: string;
+  summarizationProfileId?: string;
   masterSummaryProfileId?: string;
   briefSummaryProfileId?: string;
   keyPointsProfileId?: string;

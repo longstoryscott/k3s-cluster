@@ -1,0 +1,16 @@
+mirrors:
+  "registry.local:31500":
+    endpoint:
+      - "http://registry.local:31500"
+  "192.168.0.71:31500":
+    endpoint:
+      - "http://192.168.0.71:31500"
+configs:
+  "registry.local:31500":
+    auth:
+      username: dc4c537fa4a4acf4b2906b94
+      password: 613a048331b0928c6ae3b0aa
+  "192.168.0.71:31500":
+    auth:
+      username: dc4c537fa4a4acf4b2906b94
+      password: 613a048331b0928c6ae3b0aa

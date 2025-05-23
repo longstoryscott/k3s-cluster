@@ -1,23 +1,24 @@
-import { Box, CircularProgress, Typography, useTheme } from '@mui/material';
+import { Box, Typography, useTheme } from '@mui/material';
+import LoadingAnimation from './LoadingAnimation';
 
 interface ControlLoaderProps {
   text?: string;
 }
 
-const ControlLoader = ({ text = 'Loading...' }: ControlLoaderProps) => {
+const ControlLoader = ({ text = '' }: ControlLoaderProps) => {
   const theme = useTheme();
   
   return (
     <Box 
       sx={{ 
         display: 'flex', 
-        flexDirection: 'column',
+        flexDirection: 'row',
         justifyContent: 'center', 
         alignItems: 'center', 
         p: theme.spacing(2)
       }}
     >
-      <CircularProgress size={24} />
+      <LoadingAnimation size={24} />
       {text && (
         <Typography 
           variant="body2" 

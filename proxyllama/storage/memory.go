@@ -28,25 +28,25 @@ func InitMemorySchema(ctx context.Context) error {
 	}).Info("Initializing memory schema...")
 
 	// Create memories table and hypertable
-	_, err := Pool.Exec(ctx, GetQuery("schema.init_memory_schema"))
+	_, err := Pool.Exec(ctx, GetQuery("memory.init_memory_schema"))
 	if err != nil {
 		return fmt.Errorf("failed to create memories table: %w", err)
 	}
 
 	// Create indexes for memories
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_memory_indexes"))
+	_, err = Pool.Exec(ctx, GetQuery("memory.create_memory_indexes"))
 	if err != nil {
 		return fmt.Errorf("failed to create memory indexes: %w", err)
 	}
 
 	// Enable compression on memories
-	_, err = Pool.Exec(ctx, GetQuery("schema.enable_memories_compression"))
+	_, err = Pool.Exec(ctx, GetQuery("memory.enable_memories_compression"))
 	if err != nil {
 		return fmt.Errorf("failed to enable memories compression: %w", err)
 	}
 
 	// Add compression policy for memories
-	_, err = Pool.Exec(ctx, GetQuery("schema.memories_compression_policy"))
+	_, err = Pool.Exec(ctx, GetQuery("memory.memories_compression_policy"))
 	if err != nil {
 		_, file, line, _ := runtime.Caller(0)
 		logrus.WithFields(logrus.Fields{
@@ -57,7 +57,7 @@ func InitMemorySchema(ctx context.Context) error {
 	}
 
 	// Add retention policy for memories
-	_, err = Pool.Exec(ctx, GetQuery("schema.memories_retention_policy"))
+	_, err = Pool.Exec(ctx, GetQuery("memory.memories_retention_policy"))
 	if err != nil {
 		_, file, line, _ := runtime.Caller(0)
 		logrus.WithFields(logrus.Fields{

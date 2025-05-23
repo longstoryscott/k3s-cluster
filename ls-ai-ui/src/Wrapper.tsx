@@ -5,11 +5,12 @@ import { ChatProvider } from './chat'
 import { ThemeProvider } from '@emotion/react'
 import useColorMode from './hooks/useColorMode'
 import config from './config/index'
-import { CssBaseline, LinearProgress } from '@mui/material'
+import { CssBaseline } from '@mui/material'
 import { ConfigProvider } from './context/ConfigContext'
 import LoginPage from './pages/LoginPage'
 import MainLayout from './components/Layout/MainLayout'
 import ThemeToggle from './components/Shared/ThemeToggle'
+import LoadingAnimation from './components/Shared/LoadingAnimation'
 
 
 const Wrapper:React.FC = () => {
@@ -26,7 +27,7 @@ const Wrapper:React.FC = () => {
       <ChatProvider>
         <ConfigProvider>
           {auth.evaluating ? (
-            <LinearProgress />
+            <LoadingAnimation size={600} />
           ) : auth.isAuthenticated ? (
             <MainLayout><App /></MainLayout>
           ) : (

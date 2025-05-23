@@ -10,23 +10,49 @@ staticClients:
     public: true
     name: "Public Client"
     redirectURIs:
-      - "https://example.com/oidc/callback"
+      - "https://auth.longstorymedia.com/callback"
+      - "http://localhost:5173/callback"
   - id: private-client
     secret: app-secret
     name: "Private Client"
     redirectURIs:
-      - "https://example.com/oidc/callback"
+      - "https://auth.longstorymedia.com/callback"
+      - "http://localhost:5173/callback"
 # Set up an test user
-staticPasswords:
-  - email: "longstoryscott@gmail.com"
-    # bcrypt hash of the string "password": $(echo password | htpasswd -BinC 10 admin | cut -d: -f2)
-    hash: "$2y$10$JgJIIygki8q6wPQqMYbFNOVNkYse9bC2RNAp.1ARNopVcvA8Zm5Oq"
-    username: "lsm"
-    userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+# staticPasswords:
+#   - email: "longstoryscott@gmail.com"
+#     # bcrypt hash of the string "password": $(echo password | htpasswd -BinC 10 admin | cut -d: -f2)
+#     hash: "$2y$10$JgJIIygki8q6wPQqMYbFNOVNkYse9bC2RNAp.1ARNopVcvA8Zm5Oq"
+#     username: "lsm"
+#     userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+
+connectors:
+  - type: ldap
+    id: ldap
+    name: OpenLDAP
+    config:
+      host: openldap.auth.svc.cluster.local:389
+      insecureNoSSL: true
+      bindDN: "cn=admin,dc=longstorymedia,dc=com"
+      bindPW: "6u!tar00!QAZ"
+      userSearch:
+        baseDN: "dc=longstorymedia,dc=com"
+        filter: "(objectClass=person)"
+        username: "uid"
+        idAttr: "uid"
+        emailAttr: "mail"
+        nameAttr: "cn"
+      groupSearch:
+        baseDN: "dc=longstorymedia,dc=com"
+        filter: "(objectClass=groupOfNames)"
+        userMatchers:
+          - userAttr: "dn"
+            groupAttr: "member"
+        nameAttr: "cn"
 
 # Enable local users
-enablePasswordDB: true
+# enablePasswordDB: true
 # Allow password grants with local users
 oauth2:
   skipApprovalScreen: true
-  passwordConnector: local
+  passwordConnector: ldap

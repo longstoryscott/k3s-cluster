@@ -3,7 +3,7 @@ import { Box, TextField, Typography, Button, Switch, FormControlLabel, Slider, A
 import { useConfigContext } from '../../context/ConfigContext';
 
 const RetrievalSettings = () => {
-  const { userConfig, updatePartialConfig, isLoading } = useConfigContext();
+  const { config, updatePartialConfig, isLoading } = useConfigContext();
   const [localConfig, setLocalConfig] = useState({
     enabled: true,
     limit: 5,
@@ -15,16 +15,16 @@ const RetrievalSettings = () => {
 
   useEffect(() => {
     // When user config loads, update local state
-    if (userConfig?.retrieval) {
+    if (config?.retrieval) {
       setLocalConfig({
-        enabled: userConfig.retrieval.enabled ?? true,
-        limit: userConfig.retrieval.limit ?? 5,
-        enableCrossConversation: userConfig.retrieval.enableCrossConversation ?? false,
-        similarityThreshold: userConfig.retrieval.similarityThreshold ?? 0.7,
-        alwaysRetrieve: userConfig.retrieval.alwaysRetrieve ?? false
+        enabled: config.retrieval.enabled ?? true,
+        limit: config.retrieval.limit ?? 5,
+        enableCrossConversation: config.retrieval.enableCrossConversation ?? false,
+        similarityThreshold: config.retrieval.similarityThreshold ?? 0.7,
+        alwaysRetrieve: config.retrieval.alwaysRetrieve ?? false
       });
     }
-  }, [userConfig]);
+  }, [config]);
 
   const handleToggleEnabled = () => {
     setLocalConfig({

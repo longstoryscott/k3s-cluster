@@ -9,12 +9,17 @@ export const getModels = async (accessToken: string) =>
     path: 'api/models'
   })
 
+let MODEL_PROFILES: ModelProfile[] = [];
+
 export async function listModelProfiles(token: string): Promise<ModelProfile[]> {
-  return req<ModelProfile[]>({
-    method: 'GET',
-    path: 'api/model-profiles',
-    headers: getHeaders(token)
-  });
+  if (MODEL_PROFILES.length === 0) {
+    MODEL_PROFILES = await req<ModelProfile[]>({
+      method: 'GET',
+      path: 'api/model-profiles',
+      headers: getHeaders(token)
+    });
+  }
+  return MODEL_PROFILES;
 }
 
 export async function getModelProfile(token: string, id: string): Promise<ModelProfile> {

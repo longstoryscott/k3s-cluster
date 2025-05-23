@@ -142,55 +142,55 @@ func EnsureDBConnection(ctx context.Context) error {
 // InitializeTables creates all necessary database tables
 func InitializeTables(ctx context.Context) error {
 	// Create extensions
-	_, err := Pool.Exec(ctx, GetQuery("schema.create_extensions"))
+	_, err := Pool.Exec(ctx, GetQuery("init.create_extensions"))
 	if err != nil {
 		return fmt.Errorf("failed to create extensions: %w", err)
 	}
 
 	// Create users table
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_users_table"))
+	_, err = Pool.Exec(ctx, GetQuery("user.create_users_table"))
 	if err != nil {
 		return fmt.Errorf("failed to create users table: %w", err)
 	}
 
 	// Create conversations table
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_conversations_table"))
+	_, err = Pool.Exec(ctx, GetQuery("conversation.create_conversations_table"))
 	if err != nil {
 		return fmt.Errorf("failed to create conversations table: %w", err)
 	}
 
 	// Create messages table
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_messages_table"))
+	_, err = Pool.Exec(ctx, GetQuery("message.create_messages_table"))
 	if err != nil {
 		return fmt.Errorf("failed to create messages table: %w", err)
 	}
 
 	// Create messages indexes
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_messages_indexes"))
+	_, err = Pool.Exec(ctx, GetQuery("message.create_messages_indexes"))
 	if err != nil {
 		return fmt.Errorf("failed to create message indexes: %w", err)
 	}
 
 	// Create message embeddings table
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_message_embeddings_table"))
+	_, err = Pool.Exec(ctx, GetQuery("message.create_message_embeddings_table"))
 	if err != nil {
 		return fmt.Errorf("failed to create message embeddings table: %w", err)
 	}
 
 	// Create hypertable for message_embeddings
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_message_embeddings_hypertable"))
+	_, err = Pool.Exec(ctx, GetQuery("message.create_message_embeddings_hypertable"))
 	if err != nil {
 		return fmt.Errorf("failed to create message embeddings hypertable: %w", err)
 	}
 
 	// Enable compression for message_embeddings
-	_, err = Pool.Exec(ctx, GetQuery("schema.enable_message_embeddings_compression"))
+	_, err = Pool.Exec(ctx, GetQuery("message.enable_message_embeddings_compression"))
 	if err != nil {
 		return fmt.Errorf("failed to enable message embeddings compression: %w", err)
 	}
 
 	// Add compression policy for message_embeddings
-	_, err = Pool.Exec(ctx, GetQuery("schema.message_embeddings_compression_policy"))
+	_, err = Pool.Exec(ctx, GetQuery("message.message_embeddings_compression_policy"))
 	if err != nil {
 		_, file, line, _ := runtime.Caller(0)
 		logrus.WithFields(logrus.Fields{
@@ -201,7 +201,7 @@ func InitializeTables(ctx context.Context) error {
 	}
 
 	// Add retention policy for message_embeddings
-	_, err = Pool.Exec(ctx, GetQuery("schema.message_embeddings_retention_policy"))
+	_, err = Pool.Exec(ctx, GetQuery("message.message_embeddings_retention_policy"))
 	if err != nil {
 		_, file, line, _ := runtime.Caller(0)
 		logrus.WithFields(logrus.Fields{
@@ -212,103 +212,103 @@ func InitializeTables(ctx context.Context) error {
 	}
 
 	// Create summaries table
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_summaries_table"))
+	_, err = Pool.Exec(ctx, GetQuery("summary.create_summaries_table"))
 	if err != nil {
 		return fmt.Errorf("failed to create summaries table: %w", err)
 	}
 
 	// Create model profiles table
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_model_profiles_table"))
+	_, err = Pool.Exec(ctx, GetQuery("modelprofile.create_model_profiles_table"))
 	if err != nil {
 		return fmt.Errorf("failed to create model profiles table: %w", err)
 	}
 
 	// Create model profiles index
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_model_profiles_index"))
+	_, err = Pool.Exec(ctx, GetQuery("modelprofile.create_model_profiles_index"))
 	if err != nil {
 		return fmt.Errorf("failed to create model profiles index: %w", err)
 	}
 
 	// Create hypertable for conversations
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_conversations_hypertable"))
+	_, err = Pool.Exec(ctx, GetQuery("conversation.create_conversations_hypertable"))
 	if err != nil {
 		return fmt.Errorf("failed to create conversations hypertable: %w", err)
 	}
 
 	// Create conversations indexes
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_conversations_indexes"))
+	_, err = Pool.Exec(ctx, GetQuery("conversation.create_conversations_indexes"))
 	if err != nil {
 		return fmt.Errorf("failed to create conversations indexes: %w", err)
 	}
 
 	// Create hypertable for messages
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_messages_hypertable"))
+	_, err = Pool.Exec(ctx, GetQuery("message.create_messages_hypertable"))
 	if err != nil {
 		return fmt.Errorf("failed to create messages hypertable: %w", err)
 	}
 
 	// Create additional message indexes
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_additional_messages_indexes"))
+	_, err = Pool.Exec(ctx, GetQuery("message.create_additional_messages_indexes"))
 	if err != nil {
 		return fmt.Errorf("failed to create additional message indexes: %w", err)
 	}
 
 	// Create hypertable for summaries
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_summaries_hypertable"))
+	_, err = Pool.Exec(ctx, GetQuery("summary.create_summaries_hypertable"))
 	if err != nil {
 		return fmt.Errorf("failed to create summaries hypertable: %w", err)
 	}
 
 	// Create summaries indexes
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_summaries_indexes"))
+	_, err = Pool.Exec(ctx, GetQuery("summary.create_summaries_indexes"))
 	if err != nil {
 		return fmt.Errorf("failed to create summaries indexes: %w", err)
 	}
 
 	// Create user check trigger
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_user_check_trigger"))
+	_, err = Pool.Exec(ctx, GetQuery("user.create_user_check_trigger"))
 	if err != nil {
 		return fmt.Errorf("failed to create user check trigger: %w", err)
 	}
 
 	// Create conversation update trigger
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_conversation_update_trigger"))
+	_, err = Pool.Exec(ctx, GetQuery("conversation.create_conversation_update_trigger"))
 	if err != nil {
 		return fmt.Errorf("failed to create conversation update trigger: %w", err)
 	}
 
 	// Create conversation check triggers
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_conversation_check_triggers"))
+	_, err = Pool.Exec(ctx, GetQuery("conversation.create_conversation_check_triggers"))
 	if err != nil {
 		return fmt.Errorf("failed to create conversation check triggers: %w", err)
 	}
 
 	// Create cascade delete trigger
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_cascade_delete_trigger"))
+	_, err = Pool.Exec(ctx, GetQuery("conversation.create_cascade_delete_trigger"))
 	if err != nil {
 		return fmt.Errorf("failed to create cascade delete trigger: %w", err)
 	}
 
 	// Enable compression on messages
-	_, err = Pool.Exec(ctx, GetQuery("schema.enable_messages_compression"))
+	_, err = Pool.Exec(ctx, GetQuery("message.enable_messages_compression"))
 	if err != nil {
 		return fmt.Errorf("failed to enable messages compression: %w", err)
 	}
 
 	// Enable compression on conversations
-	_, err = Pool.Exec(ctx, GetQuery("schema.enable_conversations_compression"))
+	_, err = Pool.Exec(ctx, GetQuery("conversation.enable_conversations_compression"))
 	if err != nil {
 		return fmt.Errorf("failed to enable conversations compression: %w", err)
 	}
 
 	// Enable compression on summaries
-	_, err = Pool.Exec(ctx, GetQuery("schema.enable_summaries_compression"))
+	_, err = Pool.Exec(ctx, GetQuery("summary.enable_summaries_compression"))
 	if err != nil {
 		return fmt.Errorf("failed to enable summaries compression: %w", err)
 	}
 
 	// Add compression policy for messages
-	_, err = Pool.Exec(ctx, GetQuery("schema.messages_compression_policy"))
+	_, err = Pool.Exec(ctx, GetQuery("message.messages_compression_policy"))
 	if err != nil {
 		_, file, line, _ := runtime.Caller(0)
 		logrus.WithFields(logrus.Fields{
@@ -319,7 +319,7 @@ func InitializeTables(ctx context.Context) error {
 	}
 
 	// Add compression policy for conversations
-	_, err = Pool.Exec(ctx, GetQuery("schema.conversations_compression_policy"))
+	_, err = Pool.Exec(ctx, GetQuery("conversation.conversations_compression_policy"))
 	if err != nil {
 		_, file, line, _ := runtime.Caller(0)
 		logrus.WithFields(logrus.Fields{
@@ -330,7 +330,7 @@ func InitializeTables(ctx context.Context) error {
 	}
 
 	// Add compression policy for summaries
-	_, err = Pool.Exec(ctx, GetQuery("schema.summaries_compression_policy"))
+	_, err = Pool.Exec(ctx, GetQuery("summary.summaries_compression_policy"))
 	if err != nil {
 		_, file, line, _ := runtime.Caller(0)
 		logrus.WithFields(logrus.Fields{
@@ -341,7 +341,7 @@ func InitializeTables(ctx context.Context) error {
 	}
 
 	// Add retention policy for conversations
-	_, err = Pool.Exec(ctx, GetQuery("schema.conversations_retention_policy"))
+	_, err = Pool.Exec(ctx, GetQuery("conversation.conversations_retention_policy"))
 	if err != nil {
 		_, file, line, _ := runtime.Caller(0)
 		logrus.WithFields(logrus.Fields{
@@ -352,7 +352,7 @@ func InitializeTables(ctx context.Context) error {
 	}
 
 	// Add retention policy for messages
-	_, err = Pool.Exec(ctx, GetQuery("schema.messages_retention_policy"))
+	_, err = Pool.Exec(ctx, GetQuery("message.messages_retention_policy"))
 	if err != nil {
 		_, file, line, _ := runtime.Caller(0)
 		logrus.WithFields(logrus.Fields{
@@ -363,7 +363,7 @@ func InitializeTables(ctx context.Context) error {
 	}
 
 	// Add retention policy for summaries
-	_, err = Pool.Exec(ctx, GetQuery("schema.summaries_retention_policy"))
+	_, err = Pool.Exec(ctx, GetQuery("summary.summaries_retention_policy"))
 	if err != nil {
 		_, file, line, _ := runtime.Caller(0)
 		logrus.WithFields(logrus.Fields{
@@ -382,13 +382,13 @@ func InitializeTables(ctx context.Context) error {
 // EnsureResearchTables ensures that the research tables are created
 func EnsureResearchTables(ctx context.Context) error {
 	// Create research_tasks table
-	_, err := Pool.Exec(ctx, GetQuery("schema.create_research_tasks_table"))
+	_, err := Pool.Exec(ctx, GetQuery("research.create_research_tasks_table"))
 	if err != nil {
 		return fmt.Errorf("failed to create research_tasks table: %w", err)
 	}
 
 	// Create research_subtasks table
-	_, err = Pool.Exec(ctx, GetQuery("schema.create_research_subtasks_table"))
+	_, err = Pool.Exec(ctx, GetQuery("research.create_research_subtasks_table"))
 	if err != nil {
 		return fmt.Errorf("failed to create research_subtasks table: %w", err)
 	}

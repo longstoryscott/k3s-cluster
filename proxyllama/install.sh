@@ -1,12 +1,13 @@
 #!/bin/bash
 
-source "${1}/../helpers.sh"
+source "$(dirname "$0")/../helpers.sh"
 
 set -e
 
 # Use registry.local instead of NODE_IP:PORT
-REGISTRY_HOME="${HOME}/.registry"
-REGISTRY_URL="registry.local"
+REGISTRY_HOME="$(dirname "$0")/../registry"
+REGISTRY_URL="192.168.0.71:31500"
+VERSION="$(date +%Y.%m.%d)"
 
 # Registry credentials
 USER_SECRET_FILE="${REGISTRY_HOME}/.secrets/registryuser"
@@ -32,20 +33,20 @@ kubectl create secret generic secrets \
 # Create registry credentials secret
 kubectl create secret docker-registry registry-credentials \
     -n proxyllama \
-    --docker-server="https://${REGISTRY_URL}" \
+    --docker-server="${REGISTRY_URL}" \
     --docker-username="${REGISTRY_USER}" \
     --docker-password="${REGISTRY_PW}" \
     --dry-run=client -o yaml | kubectl apply -f - --wait=true
 
 echo "Building and pushing image to private registry..."
-bash "${1}/build-push.sh"
+bash "$(dirname "$0")/build-push.sh" "${VERSION}"
 
 # Update the deployment with the correct registry URL
-sed "s/\${REGISTRY_URL}/${REGISTRY_URL}/g" "${1}/k8s/deployment.yaml" >"${1}/k8s/deployment.yaml.tmp"
-mv "${1}/k8s/deployment.yaml.tmp" "${1}/k8s/deployment.yaml"
+sed -e "s/\${REGISTRY_URL}/${REGISTRY_URL}/g" -e "s/\${VERSION}/\"${VERSION}\"/g" "$(dirname "$0")/k8s/deployment.yaml" >"$(dirname "$0")/k8s/deployment.${VERSION}.yaml"
 
 echo "Applying Kubernetes resources..."
-kubectl apply -n proxyllama -f "${1}/k8s/deployment.yaml" --wait=true
-kubectl apply -n proxyllama -f "${1}/k8s/service.yaml" --wait=true
+kubectl apply -n proxyllama -f "$(dirname "$0")/k8s/deployment.${VERSION}.yaml" --wait=true
+kubectl apply -n proxyllama -f "$(dirname "$0")/k8s/service.yaml" --wait=true
+kubectl apply -n proxyllama -f "$(dirname "$0")/k8s/referencegrant.yaml" --wait=true
 
 echo "✅ ProxyLlama deployment complete using private registry at ${REGISTRY_URL}"

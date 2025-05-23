@@ -1,14 +1,49 @@
 import React, { useState } from 'react';
-import { TextField, Button, Box, Typography, useTheme } from '@mui/material';
+import { TextField, Button, Box, Typography, useTheme, Switch, FormControlLabel, CircularProgress, Tooltip } from '@mui/material';
 import { useChat } from '../../chat';
+import { useConfigContext } from '../../context/ConfigContext';
+import ModelProfileSelector from '../ModelSelector/ModelProfileSelector';
 
 const ChatInput = () => {
   const [input, setInput] = useState('');
   const { sendMessage, isTyping, currentConversation } = useChat();
   const theme = useTheme();
-  
+  const { config, updatePartialConfig, isLoading } = useConfigContext();
+  const alwaysRetrieve = config?.retrieval?.alwaysRetrieve || false;
+
   // Check if there's an active conversation
   const hasConversation = !!currentConversation?.id;
+
+  // Get toggle states from config (default to false if not loaded)
+  const summarizationEnabled = config?.summarization?.enabled !== false;
+  const critiqueEnabled = config?.summarization?.enableResponseCritique || false;
+  const retrievalEnabled = config?.retrieval?.enabled !== false;
+
+  // Handlers for toggles
+  const handleToggleSummarization = async () => {
+    await updatePartialConfig('summarization', {
+      ...config?.summarization,
+      enabled: !summarizationEnabled
+    });
+  };
+  const handleToggleCritique = async () => {
+    await updatePartialConfig('summarization', {
+      ...config?.summarization,
+      enableResponseCritique: !critiqueEnabled
+    });
+  };
+  const handleToggleRetrieval = async () => {
+    await updatePartialConfig('retrieval', {
+      ...config?.retrieval,
+      enabled: !retrievalEnabled
+    });
+  };
+  const handleToggleAlwaysRetrieve = async () => {
+    await updatePartialConfig('retrieval', {
+      ...config?.retrieval,
+      alwaysRetrieve: !alwaysRetrieve
+    });
+  };
 
   const handleKeyPress = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -35,6 +70,59 @@ const ChatInput = () => {
         borderColor: theme.palette.divider
       }}
     >
+      {/* Quick toggles for summarization, critique, and retrieval */}
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: theme.spacing(1), gap: 2 }}>
+        <FormControlLabel
+          control={
+            <Switch
+              checked={summarizationEnabled}
+              onChange={handleToggleSummarization}
+              disabled={isLoading}
+              color="primary"
+            />
+          }
+          label="Summarization"
+        />
+        <FormControlLabel
+          control={
+            <Switch
+              checked={critiqueEnabled}
+              onChange={handleToggleCritique}
+              disabled={isLoading}
+              color="primary"
+            />
+          }
+          label="Critique"
+        />
+        <FormControlLabel
+          control={
+            <Switch
+              checked={retrievalEnabled}
+              onChange={handleToggleRetrieval}
+              disabled={isLoading}
+              color="primary"
+            />
+          }
+          label="Memory Retrieval"
+        />
+        <FormControlLabel
+          control={
+            <Switch
+              checked={alwaysRetrieve}
+              onChange={handleToggleAlwaysRetrieve}
+              disabled={isLoading}
+              color="primary"
+            />
+          }
+          label="Always Enable Memory Retrieval"
+        />
+        <Tooltip title="Select a model profile for the current conversation. Model profiles for other tasks can be selected in settings. The profiles themselves can be configured on the Model Profiles page.)">
+          <Box sx={{ minWidth: 180 }}>
+            <ModelProfileSelector task={{ key: 'primaryProfileId', label: 'Primary Model Profile' }} />
+          </Box>
+        </Tooltip>
+        {isLoading && <CircularProgress size={20} sx={{ ml: 1 }} />}
+      </Box>
       {!hasConversation && (
         <Typography 
           variant="body2" 

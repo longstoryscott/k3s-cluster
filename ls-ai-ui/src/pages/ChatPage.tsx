@@ -12,11 +12,25 @@ const ChatPage = memo(() => {
   const { conversationId } = useParams();
   const containerRef = useRef<HTMLBodyElement>(document.body as HTMLBodyElement);
   const shouldScrollToBottom = useRef<boolean>(true);
+  const lastScrollTime = useRef<number>(0);
   const [currentMessage, setCurrentMessage] = useState<ChatMessage>({
     role: 'assistant' as const,
     content: response,
     id: (messages[messages.length - 1]?.id ?? 0) + 1
   });
+
+
+  // Throttle scroll events to improve performance
+  const handleScroll = () => {
+    const now = Date.now();
+    // Only process scroll events every 100ms
+    if (now - lastScrollTime.current > 100) {
+      // If user scrolls up more than 10px from bottom, disable auto-scrolling
+      const isAtBottom = containerRef.current.scrollHeight - (window.scrollY + window.innerHeight) < 100;
+      shouldScrollToBottom.current = isAtBottom;
+      lastScrollTime.current = now;
+    }
+  };
 
   // Load conversation from URL parameter when component mounts or conversationId changes
   useEffect(() => {
@@ -32,30 +46,12 @@ const ChatPage = memo(() => {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, currentConversation]);
-
-  // // Update URL when currentConversation changes
-  // useEffect(() => {
-  //   if (currentConversation?.id && (!conversationId || parseInt(conversationId, 10) !== currentConversation.id)) {
-  //     navigate(`/chat/${currentConversation.id}`, { replace: true });
-  //   }
-  // }, [currentConversation?.id, conversationId]);
   
   // Track user scroll position
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) {
-      return;
-    }
-    
-    const handleScroll = () => {
-      // If user scrolls up more than 100px from bottom, disable auto-scrolling
-      const isAtBottom = container.scrollHeight - (window.scrollY + window.screen.height) < 100;
-      shouldScrollToBottom.current = isAtBottom;
-    };
-    
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [containerRef]);
+  }, []);
   
   // Scroll to bottom whenever messages change or streaming occurs - with priority timing
   useLayoutEffect(() => {
@@ -79,13 +75,6 @@ const ChatPage = memo(() => {
     
     return () => clearTimeout(timeoutId);
   }, [messages, response, isTyping]);
-
-  // Prepare the streaming response - create a stable object that won't cause unnecessary re-renders
-  // const streamingMessage = response ? {
-  //   role: 'assistant' as const,
-  //   content: response,
-  //   id: (messages[messages.length - 1]?.id ?? 0) + 1
-  // } : null;
 
   useEffect(() => {
     setCurrentMessage(prev => ({
@@ -122,7 +111,7 @@ const ChatPage = memo(() => {
           
         {/* Display typing indicator when no response content yet */}
         {isTyping && (
-          <ControlLoader text='Typing...'/>
+          <ControlLoader text={response ? 'Writing...' : 'Thinking...'} />
         )}
       </ChatContainer>
     </Box>

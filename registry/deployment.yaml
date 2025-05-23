@@ -17,6 +17,8 @@ spec:
     spec:
       serviceAccountName: registry
       automountServiceAccountToken: false
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: registry
           image: registry:2
@@ -38,14 +40,6 @@ spec:
               value: debug
             - name: REGISTRY_HTTP_ADDR
               value: 0.0.0.0:5000
-            # Explicitly disable TLS since we're terminating at the gateway
-            - name: REGISTRY_HTTP_TLS_CERTIFICATE
-              value: ""
-            - name: REGISTRY_HTTP_TLS_KEY
-              value: ""
-            # Set this to false to explicitly disable TLS
-            - name: REGISTRY_HTTP_TLS_ENABLED
-              value: "false"
             - name: REGISTRY_STORAGE_DELETE_ENABLED
               value: "true"
             - name: REGISTRY_HTTP_SECRET
@@ -60,9 +54,6 @@ spec:
             - name: registry-auth
               mountPath: /auth
               readOnly: true
-            - name: registry-certs
-              mountPath: /certs
-              readOnly: true
           resources:
             limits:
               cpu: 250m
@@ -74,7 +65,7 @@ spec:
             httpGet:
               path: /
               port: 5000
-              scheme: HTTP # Changed from HTTPS to HTTP
+              scheme: HTTP
             initialDelaySeconds: 10
             timeoutSeconds: 5
             periodSeconds: 10
@@ -82,7 +73,7 @@ spec:
             httpGet:
               path: /
               port: 5000
-              scheme: HTTP # Changed from HTTPS to HTTP
+              scheme: HTTP
             initialDelaySeconds: 5
             timeoutSeconds: 3
             periodSeconds: 5
@@ -93,6 +84,3 @@ spec:
         - name: registry-auth
           secret:
             secretName: registry-auth
-        - name: registry-certs
-          secret:
-            secretName: registry-certs-secret

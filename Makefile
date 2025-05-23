@@ -11,6 +11,7 @@ AUTH = $(CURDIR)/auth
 PROXYLLAMA = $(CURDIR)/proxyllama
 MONITORING = $(CURDIR)/monitoring
 NVIDIA = $(CURDIR)/nvidia
+AILAB = $(CURDIR)/ls-ai-ui
 
 export HELM_KUBECONTEXT=lsnet
 export NODES=(lsnode-0 lsnode-1 lsnode-2 lsnode-3)
@@ -36,23 +37,20 @@ auth: ex
 registry:
 	$(REGISTRY)/registry-mgmt.sh install
 
-registry-%:
-	$(REGISTRY)/registry-mgmt.sh $*
-
 registry-help:
 	$(REGISTRY)/registry-mgmt.sh
 
 registry-user:
 	$(REGISTRY)/registry-mgmt.sh manage-users add
 
-registry-cert:
-	$(REGISTRY)/registry-mgmt.sh manage-certs
-	
+registry-ls-%:
+	curl -s -u $$(cat $(CURDIR)/registry/.secrets/registryuser):$$(cat $(CURDIR)/registry/.secrets/registrypw) http://registry.local:31500/v2/$*/tags/list
+
 configure-docker:
 	$(REGISTRY)/registry-mgmt.sh configure-docker
 
 docker-login:
-	REGISTRY_USER=$$(cat $(CURDIR)/registry/.secrets/registryuser) && REGISTRY_PW=$$(cat $(CURDIR)/registry/.secrets/registrypw) && echo $$REGISTRY_PW | docker login https://registry.local -u $$REGISTRY_USER --password-stdin
+	REGISTRY_USER=$$(cat $(CURDIR)/registry/.secrets/registryuser) && REGISTRY_PW=$$(cat $(CURDIR)/registry/.secrets/registrypw) && echo $$REGISTRY_PW | docker login http://registry.local:31500 -u $$REGISTRY_USER --password-stdin
 
 router: ex
 	$(ROUTER)/install.sh $(ROUTER)
@@ -78,11 +76,21 @@ redis:
 proxyllama:
 	$(PROXYLLAMA)/install.sh $(PROXYLLAMA)
 
+proxyllama-push:
+	docker build -t registry.local:31500/proxyllama:latest $(PROXYLLAMA)
+	docker tag registry.local:31500/proxyllama:latest registry.local:31500/proxyllama:$(shell date +%Y%m%d)
+	docker push registry.local:31500/proxyllama:latest
+	docker push registry.local:31500/proxyllama:$(shell date +%Y%m%d)
+
+ai-lab:
+	$(AILAB)/deploy.sh
+
 monitoring: ex
 	$(MONITORING)/install.sh $(MONITORING)
 
 nvidia:
 	$(NVIDIA)/install.sh
+
 destroy:
 	$(SCRIPTS)/k8s-down.sh
 
@@ -91,5 +99,9 @@ sync:
 
 apply: sync
 	ssh -p 2222 lsm@lsnet.tplinkdns.com "cd k8s && make"
+
+registry-simple: ex
+	$(REGISTRY)/registry-mgmt.sh install-simple
+	$(REGISTRY)/registry-mgmt.sh configure-docker-simple
 
 .PHONY: router ex ollama psql mysql proxyllama nc monitoring fnf registry redis auth nvidia

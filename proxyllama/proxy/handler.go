@@ -40,9 +40,9 @@ func GetProxyHandler(ctx context.Context, reqBody []byte, path, method string, s
 
 	// Copy headers from original request
 	// This is important for Ollama to understand the request
-	for key, value := range GetHeadersFromContext(ctx) {
-		req.Header.Set(key, value)
-	}
+	// for key, value := range GetHeadersFromContext(ctx) {
+	// 	req.Header.Set(key, value)
+	// }
 
 	// Create HTTP client
 	client := createHTTPClient()

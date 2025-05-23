@@ -2,3 +2,5 @@ test-manifest.yaml
 .idea/
 .secrets/
 .config*
+
+*.ldif

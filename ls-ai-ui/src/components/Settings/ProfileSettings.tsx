@@ -5,7 +5,7 @@ import { useAuth } from '../../auth';
 
 const ProfileSettings = () => {
   const { user } = useAuth();
-  const { userConfig, updatePartialConfig, isLoading } = useConfigContext();
+  const { config, updatePartialConfig, isLoading } = useConfigContext();
   const [preferences, setPreferences] = useState({
     fontSize: 14,
     language: 'en',
@@ -16,14 +16,14 @@ const ProfileSettings = () => {
 
   // Update local state when the user config loads or changes
   useEffect(() => {
-    if (userConfig?.preferences) {
+    if (config?.preferences) {
       setPreferences({
-        fontSize: userConfig.preferences.fontSize || 14,
-        language: userConfig.preferences.language || 'en',
-        notificationsOn: userConfig.preferences.notificationsOn !== false
+        fontSize: config.preferences.fontSize || 14,
+        language: config.preferences.language || 'en',
+        notificationsOn: config.preferences.notificationsOn !== false
       });
     }
-  }, [userConfig]);
+  }, [config]);
 
   const handleSave = async () => {
     setSaveStatus(null);

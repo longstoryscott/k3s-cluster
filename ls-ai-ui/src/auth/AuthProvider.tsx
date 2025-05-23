@@ -74,6 +74,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       formData.append('refresh_token', refreshToken);
       formData.append('client_id', config.auth.clientId);
       // formData.append('client_secret', config.auth.clientSecret);
+      formData.append('scope', config.auth.scope);
 
       const response = await fetch(config.auth.tokenEndpoint, {
         method: 'POST',
@@ -109,7 +110,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     formData.append('password', password);
     formData.append('client_id', config.auth.clientId);
     // formData.append('client_secret', config.auth.clientSecret);
-    formData.append('scope', 'openid profile email offline_access');
+    formData.append('scope', config.auth.scope);
 
     const response = await fetch(config.auth.tokenEndpoint, {
       method: 'POST',

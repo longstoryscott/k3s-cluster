@@ -12,9 +12,9 @@ export async function* gen(opts: RequestOptions): AsyncGenerator<ChatResponse> {
   // Handle authentication errors
   if (response.status === 401 || response.status === 403) {
     // Force logout by clearing session storage and redirecting
-    sessionStorage.removeItem(config.auth.tokenStorageKey);
-    sessionStorage.removeItem(config.auth.userStorageKey);
-    window.location.href = '/login';
+    // sessionStorage.removeItem(config.auth.tokenStorageKey);
+    // sessionStorage.removeItem(config.auth.userStorageKey);
+    // window.location.href = '/login';
     throw new Error('Authentication failed');
   }
 
@@ -167,9 +167,9 @@ export async function req<T>(opts: RequestOptions): Promise<T> {
     // Handle authentication errors
     if (response.status === 401 || response.status === 403) {
       // Force logout by clearing session storage and redirecting
-      sessionStorage.removeItem(config.auth.tokenStorageKey);
-      sessionStorage.removeItem(config.auth.userStorageKey);
-      window.location.href = '/login';
+      // sessionStorage.removeItem(config.auth.tokenStorageKey);
+      // sessionStorage.removeItem(config.auth.userStorageKey);
+      // window.location.href = '/login';
       throw new Error('Authentication failed');
     }
 

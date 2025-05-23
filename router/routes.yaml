@@ -19,22 +19,7 @@ spec:
       protocol: HTTP
     - name: registry
       port: 5000
-      protocol: HTTPS
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - name: registry-certs-secret
-            namespace: registry
-    - name: registry-default-port
-      port: 443
-      protocol: HTTPS
-      hostname: registry.local
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - name: registry-certs-secret
-            kind: Secret
-            namespace: registry
+      protocol: HTTP
     - name: grafana
       port: 3001
       protocol: HTTP
@@ -47,6 +32,9 @@ spec:
     - name: fnf
       protocol: HTTP
       port: 8082
+    - name: proxyllama
+      protocol: HTTP
+      port: 8083
 ---
 apiVersion: gateway.nginx.org/v1alpha1
 kind: ClientSettingsPolicy
@@ -276,4 +264,27 @@ spec:
         - name: registry
           namespace: registry
           port: 5000
+          kind: Service
+--- # Proxyllama
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: proxyllama-route
+  namespace: nginx-gateway
+spec:
+  parentRefs:
+    - name: lsm-gateway
+      sectionName: proxyllama
+  hostnames:
+    - "ai.longstorymedia.com"
+    - "localhost"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: proxyllama
+          namespace: proxyllama
+          port: 80
           kind: Service

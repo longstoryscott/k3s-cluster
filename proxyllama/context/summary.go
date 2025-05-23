@@ -21,6 +21,10 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 		return models.Summary{}, fmt.Errorf("failed to get user config: %w", err)
 	}
 
+	if !*usrCfg.Summarization.Enabled {
+		return models.Summary{}, nil // Summarization is disabled
+	}
+
 	// Find messages that haven't been summarized yet
 	unsummarizedMessages, messageIDs := cc.getUnsummarizedMessages(ctx)
 

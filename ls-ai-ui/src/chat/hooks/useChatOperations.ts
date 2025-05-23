@@ -52,7 +52,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
 
     try {
       const fetchedMessages = await getMessages(getToken(), conversationId);
-      actions.setMessages(msgs => [...msgs, ...fetchedMessages.filter(m => !msgs.find(msg => msg.id === m.id))]);
+      actions.setMessages(msgs => [...(msgs ?? []), ...(fetchedMessages ?? []).filter(m => !msgs.find(msg => msg.id === m.id))]);
       // Find and set the current conversation
       const conversation = state.conversations.find(c => c.id === conversationId);
       if (conversation) {
@@ -147,11 +147,11 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
       actions.setIsLoading(false);
       actions.setIsTyping(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     state.isTyping,
     state.currentConversation,
     state.messages,
-    actions,
     fetchMessages,
     getToken,
     startNewConversation
