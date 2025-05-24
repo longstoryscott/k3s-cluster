@@ -3,10 +3,11 @@ import { TextField, Button, Box, Typography, useTheme, Switch, FormControlLabel,
 import { useChat } from '../../chat';
 import { useConfigContext } from '../../context/ConfigContext';
 import ModelProfileSelector from '../ModelSelector/ModelProfileSelector';
+import SearchIndicator from './SearchIndicator';
 
 const ChatInput = () => {
   const [input, setInput] = useState('');
-  const { sendMessage, isTyping, currentConversation } = useChat();
+  const { sendMessage, isTyping, currentConversation, isSearching } = useChat();
   const theme = useTheme();
   const { config, updatePartialConfig, isLoading } = useConfigContext();
   const alwaysRetrieve = config?.retrieval?.alwaysRetrieve || false;
@@ -18,6 +19,7 @@ const ChatInput = () => {
   const summarizationEnabled = config?.summarization?.enabled !== false;
   const critiqueEnabled = config?.summarization?.enableResponseCritique || false;
   const retrievalEnabled = config?.retrieval?.enabled !== false;
+  const webSearchEnabled = config?.webSearch?.enabled || false;
 
   // Handlers for toggles
   const handleToggleSummarization = async () => {
@@ -42,6 +44,13 @@ const ChatInput = () => {
     await updatePartialConfig('retrieval', {
       ...config?.retrieval,
       alwaysRetrieve: !alwaysRetrieve
+    });
+  };
+  
+  const handleToggleWebSearch = async () => {
+    await updatePartialConfig('webSearch', {
+      ...config?.webSearch,
+      enabled: !webSearchEnabled
     });
   };
 
@@ -70,8 +79,11 @@ const ChatInput = () => {
         borderColor: theme.palette.divider
       }}
     >
+      {/* Search indicator when web search is in progress */}
+      {isSearching && <SearchIndicator />}
+      
       {/* Quick toggles for summarization, critique, and retrieval */}
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: theme.spacing(1), gap: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: theme.spacing(1), gap: 2, flexWrap: 'wrap' }}>
         <FormControlLabel
           control={
             <Switch
@@ -115,6 +127,17 @@ const ChatInput = () => {
             />
           }
           label="Always Enable Memory Retrieval"
+        />
+        <FormControlLabel
+          control={
+            <Switch
+              checked={webSearchEnabled}
+              onChange={handleToggleWebSearch}
+              disabled={isLoading}
+              color="primary"
+            />
+          }
+          label="Web Search"
         />
         <Tooltip title="Select a model profile for the current conversation. Model profiles for other tasks can be selected in settings. The profiles themselves can be configured on the Model Profiles page.)">
           <Box sx={{ minWidth: 180 }}>

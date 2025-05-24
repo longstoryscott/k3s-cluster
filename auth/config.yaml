@@ -1,8 +1,14 @@
-issuer: http://dex.auth.svc.cluster.local:5556
+issuer: https://auth.longstorymedia.com
 storage:
   type: memory
 web:
   http: 0.0.0.0:5556
+  templates: /etc/dex/custom-templates/templates
+frontend:
+  # dir: /etc/dex/custom-templates
+  issuer: Long Story Media
+  extra:
+    custom_message: "Welcome to Long Story Media"
 logger:
   level: "debug"
 staticClients:
@@ -10,13 +16,13 @@ staticClients:
     public: true
     name: "Public Client"
     redirectURIs:
-      - "https://auth.longstorymedia.com/callback"
+      - "https://ai.longstorymedia.com/callback"
       - "http://localhost:5173/callback"
   - id: private-client
     secret: app-secret
     name: "Private Client"
     redirectURIs:
-      - "https://auth.longstorymedia.com/callback"
+      - "https://ai.longstorymedia.com/callback"
       - "http://localhost:5173/callback"
 # Set up an test user
 # staticPasswords:

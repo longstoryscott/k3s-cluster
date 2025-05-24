@@ -75,7 +75,7 @@ const ProfileSettings = () => {
       
       <TextField
         label="Name"
-        value={user?.name || ''}
+        value={user?.profile.name || ''}
         fullWidth
         margin="normal"
         disabled
@@ -84,7 +84,7 @@ const ProfileSettings = () => {
       
       <TextField
         label="Email"
-        value={user?.email || ''}
+        value={user?.profile.email || ''}
         fullWidth
         margin="normal"
         disabled

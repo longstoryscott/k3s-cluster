@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Button, TextField, Typography, Paper, Box, Alert, CircularProgress, useTheme } from '@mui/material';
+import { Button, TextField, Typography, Paper, Box, Alert, useTheme } from '@mui/material';
 import { useAuth } from '../auth';
+import LoadingAnimation from '../components/Shared/LoadingAnimation';
 
 const LoginPage = () => {
   const [username, setUsername] = useState('');
@@ -16,7 +17,7 @@ const LoginPage = () => {
     setIsLoading(true);
     
     try {
-      await auth.login(username, password);
+      await auth.userManager.getUser();
       // No need to navigate here as the AuthProvider will handle this
     } catch (error) {
       console.error('Login failed:', error);
@@ -91,7 +92,7 @@ const LoginPage = () => {
             disabled={isLoading || !username || !password}
             sx={{ mt: theme.spacing(3), mb: theme.spacing(2) }}
           >
-            {isLoading ? <CircularProgress size={24} /> : 'Sign In'}
+            {isLoading ? <LoadingAnimation /> : 'Sign In'}
           </Button>
         </Box>
       </Paper>

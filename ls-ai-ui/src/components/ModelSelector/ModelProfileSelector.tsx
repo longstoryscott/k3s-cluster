@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useConfigContext } from "../../context/ConfigContext";
 import { ModelProfile, ModelProfilesConfig } from "../../hooks/useConfig";
 import { useAuth } from "../../auth";
-import { listModelProfiles } from "../../api";
+import { getToken, listModelProfiles } from "../../api";
 
 const ModelProfileSelector = ({ task }: { task: { key: keyof ModelProfilesConfig; label: string; }}) => {
   const { config, updateConfig } = useConfigContext();
@@ -23,7 +23,7 @@ const ModelProfileSelector = ({ task }: { task: { key: keyof ModelProfilesConfig
     const fetchProfiles = async () => {
       try {
         // You may need to pass the token here
-        const data = await listModelProfiles(auth.user.accessToken || '');
+        const data = await listModelProfiles(getToken(auth.user));
         setProfiles(data);
       } catch (err: unknown) {
         if (err instanceof Error) {

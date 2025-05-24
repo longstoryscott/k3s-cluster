@@ -1,97 +1,22 @@
 package config
 
-import (
-	"reflect"
-)
+func MergeWithDefaultConfig(userConfig *UserConfig) {
+	base := GetConfig()
 
-// MergeStructs recursively merges non-zero fields from src into dst, including fields that are nil or missing in dst
-func MergeStructs(dst, src any) {
-	dstVal := reflect.ValueOf(dst).Elem()
-	srcVal := reflect.ValueOf(src).Elem()
-
-	// Only merge if both are structs
-	if dstVal.Kind() != reflect.Struct || srcVal.Kind() != reflect.Struct {
-		return
+	// Fill in nil fields in userConfig from base config
+	if userConfig.ModelProfiles == nil {
+		userConfig.ModelProfiles = &base.ModelProfiles
 	}
-
-	dstType := dstVal.Type()
-	srcType := srcVal.Type()
-	fieldNames := map[string]struct{}{}
-
-	// Collect all field names from both structs
-	for i := range dstVal.NumField() {
-		fieldNames[dstType.Field(i).Name] = struct{}{}
+	if userConfig.Summarization == nil {
+		userConfig.Summarization = &base.Summarization
 	}
-	for i := range srcVal.NumField() {
-		fieldNames[srcType.Field(i).Name] = struct{}{}
+	if userConfig.Retrieval == nil {
+		userConfig.Retrieval = &base.Retrieval
 	}
-
-	for fieldName := range fieldNames {
-		_, dstOk := dstType.FieldByName(fieldName)
-		_, srcOk := srcType.FieldByName(fieldName)
-		var dstFieldVal, srcFieldVal reflect.Value
-		if dstOk {
-			dstFieldVal = dstVal.FieldByName(fieldName)
-		}
-		if srcOk {
-			srcFieldVal = srcVal.FieldByName(fieldName)
-		}
-
-		// If the field exists in src but not in dst, or dst is zero/nil, set it from src
-		if srcOk && (!dstOk || (dstOk && isZeroValue(dstFieldVal))) {
-			if dstOk && dstFieldVal.CanSet() && srcFieldVal.IsValid() && srcFieldVal.Type() == dstFieldVal.Type() {
-				dstFieldVal.Set(srcFieldVal)
-			}
-			continue
-		}
-
-		// If the field exists in both, merge recursively or set if non-zero in src
-		if dstOk && srcOk && dstFieldVal.CanSet() && srcFieldVal.IsValid() && dstFieldVal.Type() == srcFieldVal.Type() {
-			switch dstFieldVal.Kind() {
-			case reflect.Struct:
-				MergeStructs(dstFieldVal.Addr().Interface(), srcFieldVal.Addr().Interface())
-			case reflect.Ptr:
-				if !srcFieldVal.IsNil() {
-					if dstFieldVal.IsNil() {
-						dstFieldVal.Set(reflect.New(dstFieldVal.Type().Elem()))
-					}
-					MergeStructs(dstFieldVal.Interface(), srcFieldVal.Interface())
-				}
-			case reflect.Slice, reflect.Array:
-				if srcFieldVal.Len() > 0 {
-					dstFieldVal.Set(srcFieldVal)
-				}
-			default:
-				zero := reflect.Zero(dstFieldVal.Type()).Interface()
-				if !reflect.DeepEqual(srcFieldVal.Interface(), zero) {
-					dstFieldVal.Set(srcFieldVal)
-				}
-			}
-		}
+	if userConfig.WebSearch == nil {
+		userConfig.WebSearch = &base.WebSearch
 	}
-}
-
-func isZeroValue(v reflect.Value) bool {
-	switch v.Kind() {
-	case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map, reflect.Func:
-		return v.IsNil()
-	case reflect.Array:
-		zero := true
-		for i := range v.Len() {
-			zero = zero && isZeroValue(v.Index(i))
-		}
-		return zero
-	default:
-		zero := reflect.Zero(v.Type()).Interface()
-		return reflect.DeepEqual(v.Interface(), zero)
+	if userConfig.Preferences == nil {
+		userConfig.Preferences = &base.Preferences
 	}
-}
-
-// MergeWithDefaultConfig returns a config that combines user config with defaults
-func MergeWithDefaultConfig(userConfig *UserConfig) Config {
-	mergedConfig := GetConfig()
-	if userConfig != nil {
-		MergeStructs(&mergedConfig, userConfig)
-	}
-	return mergedConfig
 }

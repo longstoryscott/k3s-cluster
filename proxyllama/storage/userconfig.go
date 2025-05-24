@@ -2,10 +2,12 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"proxyllama/config"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -72,12 +74,39 @@ func GetUserConfig(ctx context.Context, userID string) (*config.UserConfig, erro
 	// Parse JSON into config struct
 	var usrConfig config.UserConfig
 	err := Pool.QueryRow(ctx, GetQuery("user.get_config"), userID).Scan(&usrConfig)
+
 	if err != nil {
-		return nil, err
+		if err == sql.ErrNoRows || strings.Contains(err.Error(), "cannot scan NULL into *config.UserConfig") {
+			// No rows found, or empty config
+			logrus.WithFields(logrus.Fields{
+				"userID": userID,
+			}).Warn("No user config found, setting to default")
+			usrConfig = config.UserConfig{UserID: userID}
+		} else {
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":   line,
+				"userID": userID,
+				"error":  err,
+			}).Error("Failed to scan user config row")
+			return nil, err
+		}
+	} else {
+		// Successfully retrieved user config
+		logrus.WithFields(logrus.Fields{
+			"userID": userID,
+			"config": usrConfig,
+		}).Info("User config retrieved from database")
 	}
 
 	// Ensure all required fields have values by merging with defaults
 	config.MergeWithDefaultConfig(&usrConfig)
+
+	logrus.WithFields(logrus.Fields{
+		"userID": userID,
+		"config": usrConfig,
+	}).Debug("User config after merging with defaults")
 
 	// Cache for future use
 	cacheUserConfig(ctx, userID, &usrConfig)

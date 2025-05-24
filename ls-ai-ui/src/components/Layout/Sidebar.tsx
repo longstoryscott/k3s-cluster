@@ -33,7 +33,7 @@ const Sidebar = ({ onClose }: { onClose?: () => void }) => {
         </IconButton>
       )}
       <Typography variant="h6" sx={{ mb: theme.spacing(2) }}>
-        Welcome, {user.name || 'User'}
+        Welcome, {user?.profile.name || 'User'}
       </Typography>
       <Navigation />
       <Box sx={{ mt: theme.spacing(2), mb: theme.spacing(2) }}>

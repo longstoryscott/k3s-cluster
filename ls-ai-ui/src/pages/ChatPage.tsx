@@ -4,11 +4,11 @@ import { useParams } from 'react-router-dom';
 import ChatContainer from '../components/Chat/ChatContainer';
 import ChatBubble from '../components/Chat/ChatBubble';
 import { useChat } from '../chat';
-import ControlLoader from '../components/Shared/ControlLoader';
+import ThinkSection from '../components/Chat/ThinkSection';
 import { ChatMessage } from '../api';
 
 const ChatPage = memo(() => {
-  const { messages, response, isTyping, currentConversation, selectConversation } = useChat();
+  const { messages, response, isTyping, isSearching, currentConversation, selectConversation } = useChat();
   const { conversationId } = useParams();
   const containerRef = useRef<HTMLBodyElement>(document.body as HTMLBodyElement);
   const shouldScrollToBottom = useRef<boolean>(true);
@@ -83,6 +83,23 @@ const ChatPage = memo(() => {
     }));
   }, [response]);
 
+  // Get feedback type from response if it's a web search
+  const getSearchingFeedbackText = () => {
+    if (!isSearching) {
+      return '';
+    }
+    
+    if (response.includes('Searching the web')) {
+      return response;
+    }
+    
+    if (response.includes('Web search complete')) {
+      return response;
+    }
+    
+    return '';
+  };
+
   return (
     <Box 
       sx={{ 
@@ -100,18 +117,22 @@ const ChatPage = memo(() => {
           />
         ))}
           
+        {/* Display searching or thinking status */}
+        {(isTyping || isSearching) && (
+          <ThinkSection
+            thinking={isTyping && !isSearching}
+            searching={isSearching}
+            text={getSearchingFeedbackText()}
+          />
+        )}
+          
         {/* Only display in-progress response if it's not already in messages */}
-        {currentMessage.content && (
+        {currentMessage.content && !isSearching && (
           <ChatBubble 
             key="streaming-response"
             message={currentMessage} 
             inProgress={isTyping} 
           />
-        )}
-          
-        {/* Display typing indicator when no response content yet */}
-        {isTyping && (
-          <ControlLoader text={response ? 'Writing...' : 'Thinking...'} />
         )}
       </ChatContainer>
     </Box>

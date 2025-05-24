@@ -51,7 +51,7 @@ func GetSummariesForConversation(ctx context.Context, conversationID int) ([]Sum
 	// Not in cache, get from database
 	rows, err := Pool.Query(ctx, GetQuery("summary.get_summaries_for_conversation"), conversationID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query summaries: %w", err)
+		return nil, fmt.Errorf("failed to query summaries for conversation %d: %w", conversationID, err)
 	}
 	defer rows.Close()
 

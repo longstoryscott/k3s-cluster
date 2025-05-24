@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"proxyllama/config"
 	"proxyllama/proxy"
@@ -92,15 +93,15 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 	}
 
 	// After successful commit and getting messageID, generate and store embedding in the background
-	if *usrCfg.Summarization.EnableRAG {
-		go func(mID int, mContent, modelName string) {
-			// Use a background context for the goroutine
+	if usrCfg.Summarization.EnableRAG {
+		go func(mID int, mContent, modelName, userID string) {
 			bgCtx := context.Background()
 			ctx, cancel := context.WithTimeout(bgCtx, 30*time.Second)
 			defer cancel()
 
-			// Check if this message already has an embedding
-			hasEmbedding, err := HasEmbedding(ctx, mID)
+			// Use the new memory API for embedding check and storage
+			memoryID := fmt.Sprintf("msg-%d", mID)
+			hasEmbedding, err := HasMemoryEmbedding(ctx, memoryID)
 			if err != nil {
 				_, file, line, _ := runtime.Caller(0)
 				logrus.WithFields(logrus.Fields{
@@ -108,27 +109,24 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 					"line":      line,
 					"messageId": mID,
 					"error":     err,
-				}).Error("Error checking embedding for message")
+				}).Error("Error checking memory embedding for message")
 				return
 			}
-
-			// Skip if embedding already exists
 			if hasEmbedding {
 				_, file, line, _ := runtime.Caller(0)
 				logrus.WithFields(logrus.Fields{
 					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
 					"line":      line,
 					"messageId": mID,
-				}).Info("Message already has an embedding, skipping generation")
+				}).Info("Message already has a memory embedding, skipping generation")
 				return
 			}
-
 			_, file, line, _ := runtime.Caller(0)
 			logrus.WithFields(logrus.Fields{
 				"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
 				"line":      line,
 				"messageId": mID,
-			}).Info("Generating embedding for message")
+			}).Info("Generating embedding for message (memory API)")
 			embedding, err := proxy.GetEmbedding(ctx, mContent, modelName)
 			if err != nil {
 				_, file, line, _ := runtime.Caller(0)
@@ -137,37 +135,36 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 					"line":      line,
 					"messageId": mID,
 					"error":     err,
-				}).Error("Error generating embedding for message")
+				}).Error("Error generating embedding for message (memory API)")
 				return
 			}
-
 			if len(embedding) == 0 {
 				_, file, line, _ := runtime.Caller(0)
 				logrus.WithFields(logrus.Fields{
 					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
 					"line":      line,
 					"messageId": mID,
-				}).Warn("Warning: Got empty embedding for message")
+				}).Warn("Warning: Got empty embedding for message (memory API)")
 				return
 			}
-
 			_, file, line, _ = runtime.Caller(0)
 			logrus.WithFields(logrus.Fields{
 				"file":       filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
 				"line":       line,
 				"messageId":  mID,
 				"vectorSize": len(embedding),
-			}).Info("Storing embedding for message")
-			if err := StoreEmbedding(ctx, mID, embedding); err != nil {
+			}).Info("Storing embedding for message in memories table")
+			err = StoreMemory(ctx, userID, "message", messageID, embedding)
+			if err != nil {
 				_, file, line, _ := runtime.Caller(0)
 				logrus.WithFields(logrus.Fields{
 					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
 					"line":      line,
 					"messageId": mID,
 					"error":     err,
-				}).Error("Error storing embedding for message")
+				}).Error("Error storing memory embedding for message")
 			}
-		}(messageID, content, profile.ModelName)
+		}(messageID, content, profile.ModelName, usrCfg.UserID)
 	}
 
 	return messageID, nil

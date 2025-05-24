@@ -1,5 +1,19 @@
+import { User } from "oidc-client-ts";
 import config from "../config";
 import { ChatResponse, RequestOptions } from "./types";
+
+export function getToken(user?: User): string {
+  if (!user) {
+    return '';
+  }
+
+  const token = user.access_token;
+  if (!token) {
+    throw new Error('No access token found');
+  }
+
+  return token;
+}
 
 export async function* gen(opts: RequestOptions): AsyncGenerator<ChatResponse> {
   opts.headers = {
@@ -11,10 +25,6 @@ export async function* gen(opts: RequestOptions): AsyncGenerator<ChatResponse> {
 
   // Handle authentication errors
   if (response.status === 401 || response.status === 403) {
-    // Force logout by clearing session storage and redirecting
-    // sessionStorage.removeItem(config.auth.tokenStorageKey);
-    // sessionStorage.removeItem(config.auth.userStorageKey);
-    // window.location.href = '/login';
     throw new Error('Authentication failed');
   }
 
@@ -166,10 +176,6 @@ export async function req<T>(opts: RequestOptions): Promise<T> {
 
     // Handle authentication errors
     if (response.status === 401 || response.status === 403) {
-      // Force logout by clearing session storage and redirecting
-      // sessionStorage.removeItem(config.auth.tokenStorageKey);
-      // sessionStorage.removeItem(config.auth.userStorageKey);
-      // window.location.href = '/login';
       throw new Error('Authentication failed');
     }
 

@@ -27,7 +27,7 @@ func (cc *ConversationContext) GetRelevantMemories(ctx context.Context, query st
 	}
 
 	// Skip if RAG is not enabled
-	if !*usrCfg.Summarization.EnableRAG {
+	if !usrCfg.Summarization.EnableRAG {
 		return nil, nil
 	}
 

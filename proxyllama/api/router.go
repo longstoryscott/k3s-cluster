@@ -28,6 +28,7 @@ func RegisterAllRoutes(app *fiber.App) {
 	RegisterConversationRoutes(app)
 	RegisterOllamaRoutes(app)
 	RegisterResearchRoutes(app)
+	RegisterWebSearchRoutes(app)
 	RegisterConfigRoutes(app)
 	RegisterModelProfileRoutes(app)
 

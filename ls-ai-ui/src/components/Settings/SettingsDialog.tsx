@@ -1,6 +1,11 @@
 import { useState } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Typography } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, IconButton, Tabs, Tab, Box } from '@mui/material';
+import CloseIcon from '@mui/icons-material/Close';
 import { useAuth } from '../../auth';
+import ProfileSettings from './ProfileSettings';
+import RetrievalSettings from './RetrievalSettings';
+import SummarizationSettings from './SummarizationSettings';
+import WebSearchSettings from './WebSearchSettings';
 
 interface SettingsDialogProps {
   open: boolean;
@@ -8,44 +13,49 @@ interface SettingsDialogProps {
 }
 
 const SettingsDialog = ({ open, onClose }: SettingsDialogProps) => {
-  const { user, logout } = useAuth();
-  const [username, setUsername] = useState(user.name);
-  const [email, setEmail] = useState(user.email);
+  const { logout } = useAuth();
+  const [activeTab, setActiveTab] = useState(0);
 
-  const handleSave = () => {
-    // Logic to save settings (e.g., update user profile)
-    // This would typically call an API to update user settings
-    onClose();
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    event.preventDefault();
+    setActiveTab(newValue);
   };
-
   const handleLogout = () => {
     logout();
     onClose();
   };
 
   return (
-    <Dialog open={open} onClose={onClose}>
-      <DialogTitle>Settings</DialogTitle>
-      <DialogContent>
-        <Typography variant="h6">Profile Settings</Typography>
-        <TextField
-          label="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          fullWidth
-          margin="normal"
-        />
-        <TextField
-          label="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          fullWidth
-          margin="normal"
-        />
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        Settings
+        <IconButton edge="end" color="inherit" onClick={onClose} aria-label="close">
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent dividers>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+          <Tabs value={activeTab} onChange={handleTabChange} aria-label="settings tabs">
+            <Tab label="Profile" id="settings-tab-0" />
+            <Tab label="Memory Retrieval" id="settings-tab-1" />
+            <Tab label="Summarization" id="settings-tab-2" />
+            <Tab label="Web Search" id="settings-tab-3" />
+          </Tabs>
+        </Box>
+        <Box sx={{ pt: 2 }}>
+          {activeTab === 0 && <ProfileSettings />}
+          {activeTab === 1 && <RetrievalSettings />}
+          {activeTab === 2 && <SummarizationSettings />}
+          {activeTab === 3 && <WebSearchSettings />}
+        </Box>
       </DialogContent>
       <DialogActions>
-        <Button onClick={handleLogout} color="secondary">Logout</Button>
-        <Button onClick={handleSave} color="primary">Save</Button>
+        <Button onClick={handleLogout} color="secondary">
+          Logout
+        </Button>
+        <Button onClick={onClose}>
+          Close
+        </Button>
       </DialogActions>
     </Dialog>
   );

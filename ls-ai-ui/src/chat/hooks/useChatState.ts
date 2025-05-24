@@ -11,6 +11,7 @@ export interface ChatState {
   response: string;
   selectedModel: string;
   models: Model[];
+  isSearching: boolean; // Add isSearching property
 }
 
 export interface ChatActions {
@@ -27,6 +28,7 @@ export interface ChatActions {
   updateConversationInList: (id: number, updates: Partial<ChatConversation>) => void;
   removeConversationFromList: (id: number) => void;
   setModels: (models: Model[]) => void;
+  setIsSearching: (searching: boolean) => void; // Add setIsSearching action
 }
 
 export const useChatState = (): [ChatState, ChatActions] => {
@@ -41,6 +43,7 @@ export const useChatState = (): [ChatState, ChatActions] => {
     return localStorage.getItem('selectedModel') || '';
   });
   const [models, setModelsState] = useState<Model[]>([]);
+  const [isSearching, setIsSearching] = useState(false); // Initialize isSearching state
 
   const setModels = useCallback((models: Model[]) => {
     setModelsState(models);
@@ -86,7 +89,8 @@ export const useChatState = (): [ChatState, ChatActions] => {
     isTyping,
     response,
     selectedModel,
-    models
+    models,
+    isSearching // Include isSearching in the state
   };
 
   const actions: ChatActions = {
@@ -102,7 +106,8 @@ export const useChatState = (): [ChatState, ChatActions] => {
     addConversation,
     updateConversationInList,
     removeConversationFromList,
-    setModels
+    setModels,
+    setIsSearching // Include setIsSearching in the actions
   };
 
   return [state, actions];

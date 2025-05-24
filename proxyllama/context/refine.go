@@ -156,12 +156,12 @@ func RefineResponse(response, userMessage, userID string, conversationID int) st
 	refinedRes := response // Start with the original response
 
 	// Step 1: Apply basic filtering if enabled
-	if *cfg.Summarization.EnableResponseFiltering {
+	if cfg.Summarization.EnableResponseFiltering {
 		refinedRes = FilterResponseText(refinedRes)
 	}
 
 	// Step 2: Apply self-critique if enabled
-	if *cfg.Summarization.EnableResponseCritique {
+	if cfg.Summarization.EnableResponseCritique {
 		// Use the fresh background context and conversation context
 		critique, err := cc.GetCritiqueForResponse(ctx, refinedRes)
 		if err == nil && critique != "" {

@@ -56,6 +56,12 @@ func userConfigJanitor() {
 	}
 }
 
+// UpdateUserConfig provides a wrapper around the config package's UpdateUserConfig
+func UpdateUserConfig(userConfig config.UserConfig) {
+	conf := config.GetConfig()
+	conf.UpdateUserConfig(userConfig)
+}
+
 // GetUserConfig returns the user config from cache, falling back to storage
 func GetUserConfig(userID string) (*config.UserConfig, error) {
 	userConfigCacheMutex.RLock()
@@ -67,6 +73,9 @@ func GetUserConfig(userID string) (*config.UserConfig, error) {
 	}
 	userConfigCacheMisses++
 	// Fallback to storage
+	logrus.WithFields(logrus.Fields{
+		"userID": userID,
+	}).Debug("User config not found in cache, retrieving from storage")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	ucFromStorage, err := storage.GetUserConfig(ctx, userID)

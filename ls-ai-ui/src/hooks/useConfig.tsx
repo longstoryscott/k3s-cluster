@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth';
-import { getConfig, updateConfig } from '../api';
+import { getConfig, getToken, updateConfig } from '../api';
 
 // Define TypeScript interfaces for our configuration structure matching the backend
 interface SummarizationConfig {
@@ -29,6 +29,13 @@ interface PreferencesConfig {
   fontSize?: number;
   notificationsOn?: boolean;
   language?: string;
+}
+
+interface WebSearchConfig {
+  enabled?: boolean;
+  autoDetect?: boolean;
+  maxResults?: number;
+  includeResults?: boolean;
 }
 
 export interface ModelProfile {
@@ -74,6 +81,7 @@ export interface Config {
   summarization?: SummarizationConfig;
   retrieval?: RetrievalConfig;
   preferences?: PreferencesConfig;
+  webSearch?: WebSearchConfig;
   modelProfiles?: ModelProfilesConfig;
 }
 
@@ -90,7 +98,7 @@ export function useConfig() {
     setError(null);
     
     try {
-      const token = user?.accessToken;
+      const token = getToken(user);
       if (!token) {
         throw new Error('Authentication required');
       }
@@ -102,6 +110,7 @@ export function useConfig() {
       const extractedUserConfig: Config = {
         summarization: data.summarization,
         retrieval: data.retrieval,
+        webSearch: data.webSearch,
         preferences: {
           theme: data.preferences?.theme || "light",
           fontSize: data.preferences?.fontSize || 14,
@@ -118,17 +127,17 @@ export function useConfig() {
     } finally {
       setIsLoading(false);
     }
-  }, [user?.accessToken]);
+  }, [user]);
 
   // Update full user configuration
   const updateUserConfig = async (newConfig: Config): Promise<boolean> => {
-    if (!user?.accessToken) {
+    if (!getToken(user)) {
       setError(new Error('Authentication required'));
       return false;
     }
     
     try {
-      await updateConfig(user.accessToken, newConfig);
+      await updateConfig(getToken(user), newConfig);
       // Refresh the config after update
       await fetchConfig();
       return true;
@@ -157,10 +166,10 @@ export function useConfig() {
 
   // Load configuration on mount and when user changes
   useEffect(() => {
-    if (user?.accessToken) {
+    if (getToken(user)) {
       fetchConfig();
     }
-  }, [user?.accessToken, fetchConfig]);
+  }, [user, fetchConfig]);
 
   return { 
     config, 

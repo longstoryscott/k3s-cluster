@@ -26,9 +26,20 @@ type Config struct {
 	// Default user preferences, will be copied to new users
 	Summarization SummarizationConfig `json:"summarization" mapstructure:"summarization"`
 	Retrieval     RetrievalConfig     `json:"retrieval" mapstructure:"retrieval"`
+	WebSearch     WebSearchConfig     `json:"webSearch" mapstructure:"web_search"`
 	Preferences   PreferencesConfig   `json:"preferences" mapstructure:"preferences"`
 	ModelProfiles ModelProfileConfig  `json:"modelProfiles,omitempty"`
 	LogLevel      string              `json:"logLevel" mapstructure:"log_level"`
+}
+
+// UserConfig represents user-specific configuration
+type UserConfig struct {
+	UserID        string               `json:"userId,omitempty"`
+	Summarization *SummarizationConfig `json:"summarization,omitempty"`
+	Retrieval     *RetrievalConfig     `json:"retrieval,omitempty"`
+	WebSearch     *WebSearchConfig     `json:"webSearch,omitempty"`
+	Preferences   *PreferencesConfig   `json:"preferences,omitempty"`
+	ModelProfiles *ModelProfileConfig  `json:"modelProfiles,omitempty"`
 }
 
 // ServerConfig contains server configuration
@@ -76,37 +87,36 @@ type AuthConfig struct {
 	ClientSecret string `json:"clientSecret" mapstructure:"client_secret"`
 }
 
-// UserConfig represents user-specific configuration
-type UserConfig struct {
-	UserID        string               `json:"userId,omitempty"`
-	Summarization *SummarizationConfig `json:"summarization,omitempty"`
-	Retrieval     *RetrievalConfig     `json:"retrieval,omitempty"`
-	Preferences   *PreferencesConfig   `json:"preferences,omitempty"`
-	ModelProfiles *ModelProfileConfig  `json:"modelProfiles,omitempty"`
+// WebSearchConfig contains web search settings
+type WebSearchConfig struct {
+	Enabled        bool `json:"enabled,omitempty" mapstructure:"enabled"`
+	AutoDetect     bool `json:"autoDetect,omitempty" mapstructure:"auto_detect"`
+	MaxResults     int  `json:"maxResults,omitempty" mapstructure:"max_results"`
+	IncludeResults bool `json:"includeResults,omitempty" mapstructure:"include_results"`
 }
 
 // SummarizationConfig contains conversation summarization settings
 type SummarizationConfig struct {
-	Enabled                      *bool   `json:"enabled,omitempty" mapstructure:"enabled"`
+	Enabled                      bool    `json:"enabled,omitempty" mapstructure:"enabled"`
 	MessagesBeforeSummary        int     `json:"messagesBeforeSummary,omitempty" mapstructure:"messages_before_summary"`
 	SummariesBeforeConsolidation int     `json:"summariesBeforeConsolidation,omitempty" mapstructure:"summaries_before_consolidation"`
 	EmbeddingModel               string  `json:"embeddingModel,omitempty" mapstructure:"embedding_model"`
 	EmbeddingDimension           int     `json:"embeddingDimension,omitempty" mapstructure:"embedding_dimension"`
-	EnableRAG                    *bool   `json:"enableRAG,omitempty" mapstructure:"enable_rag"`
-	EnableResponseFiltering      *bool   `json:"enableResponseFiltering,omitempty" mapstructure:"enable_response_filtering"`
-	EnableResponseCritique       *bool   `json:"enableResponseCritique,omitempty" mapstructure:"enable_response_critique"`
+	EnableRAG                    bool    `json:"enableRAG,omitempty" mapstructure:"enable_rag"`
+	EnableResponseFiltering      bool    `json:"enableResponseFiltering,omitempty" mapstructure:"enable_response_filtering"`
+	EnableResponseCritique       bool    `json:"enableResponseCritique,omitempty" mapstructure:"enable_response_critique"`
 	MaxSummaryLevels             int     `json:"maxSummaryLevels,omitempty" mapstructure:"max_summary_levels"`
 	SummaryWeightCoefficient     float64 `json:"summaryWeightCoefficient,omitempty" mapstructure:"summary_weight_coefficient"`
 }
 
 // RetrievalConfig contains memory retrieval settings
 type RetrievalConfig struct {
-	Enabled                 *bool   `json:"enabled,omitempty" mapstructure:"enabled"`
+	Enabled                 bool    `json:"enabled,omitempty" mapstructure:"enabled"`
 	Limit                   int     `json:"limit,omitempty" mapstructure:"limit"`
 	ProfileID               string  `json:"profileId,omitempty" mapstructure:"profile_id"`
-	EnableCrossConversation *bool   `json:"enableCrossConversation,omitempty" mapstructure:"enable_cross_conversation"`
+	EnableCrossConversation bool    `json:"enableCrossConversation,omitempty" mapstructure:"enable_cross_conversation"`
 	SimilarityThreshold     float64 `json:"similarityThreshold,omitempty" mapstructure:"similarity_threshold"`
-	AlwaysRetrieve          *bool   `json:"alwaysRetrieve,omitempty" mapstructure:"always_retrieve"`
+	AlwaysRetrieve          bool    `json:"alwaysRetrieve,omitempty" mapstructure:"always_retrieve"`
 }
 
 // PreferencesConfig contains user preferences
@@ -114,7 +124,7 @@ type PreferencesConfig struct {
 	DefaultProfileID string `json:"defaultProfileId,omitempty" mapstructure:"default_profile_id"`
 	Theme            string `json:"theme,omitempty" mapstructure:"theme"`
 	FontSize         int    `json:"fontSize,omitempty" mapstructure:"font_size"`
-	NotificationsOn  *bool  `json:"notificationsOn,omitempty" mapstructure:"notifications_on"`
+	NotificationsOn  bool   `json:"notificationsOn,omitempty" mapstructure:"notifications_on"`
 	Language         string `json:"language,omitempty" mapstructure:"language"`
 }
 
@@ -238,6 +248,10 @@ func setViperDefaults(v *viper.Viper) {
 	v.SetDefault("retrieval.enable_cross_conversation", false)
 	v.SetDefault("retrieval.similarity_threshold", 0.7)
 	v.SetDefault("retrieval.always_retrieve", false)
+	v.SetDefault("web_search.enabled", false)
+	v.SetDefault("web_search.auto_detect", true)
+	v.SetDefault("web_search.max_results", 3)
+	v.SetDefault("web_search.include_results", true)
 	v.SetDefault("preferences.default_model", "qwen3:0.6b")
 	v.SetDefault("preferences.theme", "light")
 	v.SetDefault("preferences.font_size", 14)
@@ -298,6 +312,12 @@ func LoadConfig(path string) (*Config, error) {
 	viper.SetDefault("retrieval.similarity_threshold", 0.7)
 	viper.SetDefault("retrieval.always_retrieve", false)
 
+	// Set default web search config
+	viper.SetDefault("web_search.enabled", false)
+	viper.SetDefault("web_search.auto_detect", true)
+	viper.SetDefault("web_search.max_results", 3)
+	viper.SetDefault("web_search.include_results", true)
+
 	// Set default user preferences
 	viper.SetDefault("preferences.default_model", "qwen3:0.6b")
 	viper.SetDefault("preferences.theme", "light")
@@ -345,6 +365,7 @@ func (c *Config) GetUserConfig(userID string) UserConfig {
 		UserID:        userID,
 		Summarization: &c.Summarization,
 		Retrieval:     &c.Retrieval,
+		WebSearch:     &c.WebSearch,
 		Preferences:   &c.Preferences,
 	}
 }

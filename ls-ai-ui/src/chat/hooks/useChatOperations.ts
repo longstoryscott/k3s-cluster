@@ -1,23 +1,32 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 import { ChatState, ChatActions } from './useChatState';
 import { useAuth } from '../../auth';
-import { chat, getManyConversations, getMessages, removeConversation, startConversation, updateConversationTitle, ChatUserMessage, getModels } from '../../api';
+import { chat, getManyConversations, getMessages, removeConversation, startConversation, updateConversationTitle, ChatUserMessage, getModels, getToken } from '../../api';
+import { useWebSearch } from './useWebSearch';
 
 export const useChatOperations = (state: ChatState, actions: ChatActions) => {
   const auth = useAuth();
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const abortController = useRef<AbortController | null>(null);
+  const {
+    detectWebSearchIntent,
+    performWebSearch,
+    formatSearchResultsForLLM,
+    isWebSearchEnabled,
+    isSearching
+  } = useWebSearch({ autoSearch: true });
 
-  // Helper function to get access token
-  const getToken = useCallback(() => {
-    return auth.user?.accessToken || '';
-  }, [auth.user?.accessToken]);
+  // Sync isSearching state from useWebSearch hook to ChatState
+  useEffect(() => {
+    actions.setIsSearching(isSearching);
+  }, [isSearching, actions]);
 
   // Fetch models
   const fetchModels = useCallback(async () => {
     actions.setIsLoading(true);
     actions.setError(null);
     try {
-      const modelsData = await getModels(getToken());
+      const modelsData = await getModels(getToken(auth.user));
       actions.setModels(modelsData?.models);
     } catch (err: unknown) {
       actions.setError((err as Error).message);
@@ -25,7 +34,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     } finally {
       actions.setIsLoading(false);
     }
-  }, [actions, getToken]);
+  }, [actions, auth.user]);
 
   // Fetch conversations
   const fetchConversations = useCallback(async () => {
@@ -33,7 +42,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     actions.setError(null);
 
     try {
-      const conversationsData = await getManyConversations(getToken());
+      const conversationsData = await getManyConversations(getToken(auth.user));
       actions.setConversations(conversationsData);
     } catch (err: unknown) {
       actions.setError((err as Error).message);
@@ -41,7 +50,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     } finally {
       actions.setIsLoading(false);
     }
-  }, [actions, getToken]);
+  }, [actions, auth.user]);
 
   // Fetch messages for a specific conversation
   const fetchMessages = useCallback(async (conversationId: number) => {
@@ -51,7 +60,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     actions.setResponse('');
 
     try {
-      const fetchedMessages = await getMessages(getToken(), conversationId);
+      const fetchedMessages = await getMessages(getToken(auth.user), conversationId);
       actions.setMessages(msgs => [...(msgs ?? []), ...(fetchedMessages ?? []).filter(m => !msgs.find(msg => msg.id === m.id))]);
       // Find and set the current conversation
       const conversation = state.conversations.find(c => c.id === conversationId);
@@ -59,7 +68,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
         actions.setCurrentConversation(conversation);
       } else {
         // If not in our list, fetch all conversations
-        const conversationsData = await getManyConversations(getToken());
+        const conversationsData = await getManyConversations(getToken(auth.user));
         // Update the full conversations list
         actions.setConversations(conversationsData);
 
@@ -75,7 +84,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     } finally {
       actions.setIsLoading(false);
     }
-  }, [actions, getToken, state.conversations]);
+  }, [actions, auth.user, state.conversations]);
 
   // Start a new conversation
   const startNewConversation = useCallback(async (model?: string) => {
@@ -85,7 +94,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     const modelToUse = model || state.selectedModel;
 
     try {
-      const newConversation = await startConversation(getToken(), modelToUse);
+      const newConversation = await startConversation(getToken(auth.user), modelToUse);
 
       // Update local state
       actions.setCurrentConversation(newConversation);
@@ -103,7 +112,12 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     } finally {
       actions.setIsLoading(false);
     }
-  }, [state.selectedModel, actions, getToken]);
+  }, [state.selectedModel, actions, auth.user]);
+
+  // Reset response
+  const resetResponse = useCallback(() => {
+    actions.setResponse('');
+  }, [actions]);
 
   // Send a message in the current conversation
   const sendMessage = useCallback(async (message: ChatUserMessage) => {
@@ -131,11 +145,44 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
       await fetchMessages(conversationId ?? -1);
       actions.setResponse('');
 
+      // Check if we should do a web search based on the prompt
+      let finalMessage = { ...message };
+
+      if (isWebSearchEnabled) {
+        try {
+          const needsSearch = await detectWebSearchIntent(message.content);
+
+          if (needsSearch) {
+            actions.setResponse('Searching the web for information...');
+            // We don't need to explicitly set isSearching here as it's handled by the useWebSearch hook
+            // and synced via the useEffect above
+
+            const searchResults = await performWebSearch(message.content);
+            if (searchResults && !searchResults.error) {
+              // Format the search results for the LLM
+              const formattedResults = formatSearchResultsForLLM(searchResults);
+
+              // Add search results to the prompt
+              finalMessage = {
+                ...message,
+                content: `${formattedResults}\n\nBased on the above web search results, please respond to: ${message.content}`
+              };
+
+              // Add a system note about the search
+              actions.setResponse('Web search complete. Processing your request...');
+            }
+          }
+        } catch (searchError) {
+          console.error('Error during web search:', searchError);
+          // Continue with original message if search fails
+        }
+      }
+
       // Update UI immediately with the user message
       actions.addMessage(messageWithStatus);
 
       // Stream the assistant's response
-      for await (const chunk of chat(getToken(), state.messages, message)) {
+      for await (const chunk of chat(getToken(auth.user), state.messages, finalMessage)) {
         // Use functional update to ensure we're always working with the latest state
         actions.setResponse(r => r + chunk);
       }
@@ -147,14 +194,18 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
       actions.setIsLoading(false);
       actions.setIsTyping(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     state.isTyping,
     state.currentConversation,
     state.messages,
     fetchMessages,
-    getToken,
-    startNewConversation
+    auth.user,
+    startNewConversation,
+    actions,
+    isWebSearchEnabled,
+    detectWebSearchIntent,
+    performWebSearch,
+    formatSearchResultsForLLM
   ]);
 
   // Retry a failed message
@@ -198,7 +249,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     actions.setError(null);
 
     try {
-      await removeConversation(getToken(), id);
+      await removeConversation(getToken(auth.user), id);
 
       // Update local state
       actions.removeConversationFromList(id);
@@ -214,7 +265,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     } finally {
       actions.setIsLoading(false);
     }
-  }, [state.isLoading, state.currentConversation, actions, getToken]);
+  }, [state.isLoading, state.currentConversation, actions, auth.user]);
 
   // Select an existing conversation
   const selectConversation = useCallback(async (id: number) => {
@@ -240,14 +291,14 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
 
     debounceTimers.current['updateTitle'] = setTimeout(async () => {
       try {
-        await updateConversationTitle(getToken(), id, title);
+        await updateConversationTitle(getToken(auth.user), id, title);
       } catch (err: unknown) {
         actions.setError((err as Error).message);
         console.error("Error updating conversation title:", err);
       }
       delete debounceTimers.current['updateTitle'];
     }, 500);
-  }, [getToken, actions]);
+  }, [auth.user, actions]);
 
   // Update conversation title
   const setConversationTitle = useCallback(async (id: number, title: string) => {
@@ -264,6 +315,17 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     deleteConversation,
     selectConversation,
     setConversationTitle,
-    fetchModels
+    fetchModels,
+    response: state.response,
+    isTyping: state.isTyping,
+    isSearching, // Expose isSearching to components using this hook
+    resetResponse,
+    abortGeneration: useCallback(() => {
+      if (abortController.current) {
+        abortController.current.abort();
+        abortController.current = null;
+        actions.setIsTyping(false);
+      }
+    }, [actions])
   };
 };

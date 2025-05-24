@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import App from './App'
+import Router from './Router'
 import { useAuth } from './auth'
 import { ChatProvider } from './chat'
 import { ThemeProvider } from '@emotion/react'
@@ -7,7 +7,6 @@ import useColorMode from './hooks/useColorMode'
 import config from './config/index'
 import { CssBaseline } from '@mui/material'
 import { ConfigProvider } from './context/ConfigContext'
-import LoginPage from './pages/LoginPage'
 import MainLayout from './components/Layout/MainLayout'
 import ThemeToggle from './components/Shared/ThemeToggle'
 import LoadingAnimation from './components/Shared/LoadingAnimation'
@@ -24,17 +23,17 @@ const Wrapper:React.FC = () => {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <ChatProvider>
-        <ConfigProvider>
-          {auth.evaluating ? (
-            <LoadingAnimation size={600} />
-          ) : auth.isAuthenticated ? (
-            <MainLayout><App /></MainLayout>
-          ) : (
-            <LoginPage />
-          )}
-        </ConfigProvider>
-      </ChatProvider>
+      <ConfigProvider>
+        {auth.evaluating ? (
+          <LoadingAnimation size={600} sx={{position: 'absolute', left: '50%', top: '50%'}} />
+        ) : (
+          <ChatProvider>
+            <MainLayout>
+              <Router />
+            </MainLayout>
+          </ChatProvider>
+        )}
+      </ConfigProvider>
       <ThemeToggle mode={mode} setMode={setMode} />
     </ThemeProvider>
   )

@@ -6,6 +6,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import { ModelProfile } from '../hooks/useConfig';
 import { useAuth } from '../auth';
 import ModelSelector from '../components/ModelSelector/ModelSelector';
+import { getToken } from '../api';
 
 const emptyProfile: ModelProfile = {
   id: '',
@@ -28,7 +29,7 @@ const ModelProfilesPage = () => {
     const fetchProfiles = async () => {
       try {
         // You may need to pass the token here
-        const data = await listModelProfiles(auth.user.accessToken || '');
+        const data = await listModelProfiles(getToken(auth.user));
         setProfiles(data);
       } catch (err: unknown) {
         if (err instanceof Error) {
@@ -37,12 +38,11 @@ const ModelProfilesPage = () => {
       }
     };
     fetchProfiles();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [auth.user]);
 
   // Handle add/edit profile
   const handleSaveProfile = async (isNew: boolean = false) => {
-    const token = auth.user.accessToken || '';
+    const token = getToken(auth.user);
     if (editingProfile?.id && !isNew) {
       await updateModelProfile(token, editingProfile.id, editingProfile);
     } else {
@@ -60,7 +60,7 @@ const ModelProfilesPage = () => {
 
   // Handle delete
   const handleDeleteProfile = async (id: string) => {
-    const token = auth.user.accessToken || '';
+    const token = getToken(auth.user);
     await deleteModelProfile(token, id);
     setProfiles(profiles.filter(p => p.id !== id));
   };

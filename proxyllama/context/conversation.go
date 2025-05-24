@@ -346,7 +346,7 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 		return nil, err
 	}
 
-	if *userConfig.Summarization.EnableRAG {
+	if userConfig.Summarization.EnableRAG {
 		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
@@ -520,13 +520,13 @@ func (cc *ConversationContext) RetrieveAndInjectMemories(ctx context.Context, cu
 		return err
 	}
 
-	if !*userConfig.Retrieval.Enabled {
+	if !userConfig.Retrieval.Enabled {
 		return nil // Retrieval disabled in user config
 	}
 
 	// Check if query suggests memory retrieval would be helpful
 	shouldRetrieve := cc.shouldRetrieveMemories(currentUserQuery)
-	if !shouldRetrieve && !*userConfig.Retrieval.AlwaysRetrieve {
+	if !shouldRetrieve && !userConfig.Retrieval.AlwaysRetrieve {
 		_, file, line, _ := runtime.Caller(0)
 		logrus.WithFields(logrus.Fields{
 			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
@@ -554,7 +554,7 @@ func (cc *ConversationContext) RetrieveAndInjectMemories(ctx context.Context, cu
 	}
 
 	// First try vector similarity search if RAG is enabled
-	if *userConfig.Summarization.EnableRAG {
+	if userConfig.Summarization.EnableRAG {
 		_, file, line, _ := runtime.Caller(0)
 		logrus.WithFields(logrus.Fields{
 			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
@@ -583,7 +583,7 @@ func (cc *ConversationContext) RetrieveAndInjectMemories(ctx context.Context, cu
 			}
 
 			// If cross-conversation memory retrieval is enabled, try that
-			if *userConfig.Retrieval.EnableCrossConversation {
+			if userConfig.Retrieval.EnableCrossConversation {
 				// Search across all conversations with similarity threshold
 				threshold := userConfig.Retrieval.SimilarityThreshold
 				if threshold <= 0 {

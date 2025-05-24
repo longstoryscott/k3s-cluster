@@ -5,6 +5,7 @@ import ModelSettings from '../components/Settings/ModelSettings';
 import SummarizationSettings from '../components/Settings/SummarizationSettings';
 import RetrievalSettings from '../components/Settings/RetrievalSettings';
 import { useConfig } from '../hooks/useConfig';
+import WebSearchSettings from '../components/Settings/WebSearchSettings';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -92,7 +93,7 @@ const SettingsPage = () => {
               <Tab label="Models" {...a11yProps(1)} />
               <Tab label="Summarization" {...a11yProps(2)} />
               <Tab label="Memory Retrieval" {...a11yProps(3)} />
-              <Tab label="API Integration" {...a11yProps(4)} />
+              <Tab label="Web Search Settings" {...a11yProps(4)} />
             </Tabs>
             
             <Box sx={{ p: 2 }}>
@@ -107,6 +108,9 @@ const SettingsPage = () => {
               </TabPanel>
               <TabPanel value={tabValue} index={3}>
                 <RetrievalSettings />
+              </TabPanel>
+              <TabPanel value={tabValue} index={4}>
+                <WebSearchSettings />
               </TabPanel>
             </Box>
           </Paper>

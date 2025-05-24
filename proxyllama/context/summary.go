@@ -21,7 +21,7 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 		return models.Summary{}, fmt.Errorf("failed to get user config: %w", err)
 	}
 
-	if !*usrCfg.Summarization.Enabled {
+	if !usrCfg.Summarization.Enabled {
 		return models.Summary{}, nil // Summarization is disabled
 	}
 

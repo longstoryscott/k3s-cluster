@@ -3,7 +3,7 @@ import { Box, Typography, Button, Alert, Grid } from '@mui/material';
 import { useConfigContext } from '../../context/ConfigContext';
 import { ModelProfilesConfig } from '../../hooks/useConfig';
 import { useAuth } from '../../auth';
-import { updateConfig } from '../../api';
+import { getToken, updateConfig } from '../../api';
 import ModelProfileSelector from '../ModelSelector/ModelProfileSelector';
 
 const TASKS: { key: keyof ModelProfilesConfig; label: string; }[] = [
@@ -44,7 +44,7 @@ const ModelSettings = () => {
 
       console.log('Saving config:', config);
 
-      const success = await updateConfig(auth.user.accessToken || '', config)
+      const success = await updateConfig(getToken(auth.user), config)
       
       if (success) {
         setSaveStatus({

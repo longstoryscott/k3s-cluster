@@ -19,6 +19,10 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/dex
+            # Mount the entire templates directory structure at once
+            # Important: This should completely replace the built-in templates
+            - name: dex-templates-dir
+              mountPath: /etc/dex/custom-templates
           ports:
             - containerPort: 5556
           args:
@@ -32,12 +36,70 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "500m"
+          env:
+            - name: DEXFRONTEND_DIR
+              value: /etc/dex/custom-templates/
+      initContainers:
+        - name: setup-templates
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              echo "Setting up template directory structure..."
+              mkdir -p /templates/templates /templates/static /templates/themes
+
+              # Process template files
+              for file in $(ls -1 /cm-data | grep templates_); do
+                filename=$(echo $file | sed 's/templates_//')
+                echo "Processing template file: $filename"
+                cp /cm-data/$file /templates/templates/$filename
+              done
+
+              # Process static files
+              for file in $(ls -1 /cm-data | grep static_); do
+                filename=$(echo $file | sed 's/static_//')
+                echo "Processing static file: $filename"
+                cp /cm-data/$file /templates/static/$filename
+              done
+
+              # Process theme files
+              for file in $(ls -1 /cm-data | grep themes_); do
+                filename=$(echo $file | sed 's/themes_//')
+                echo "Processing theme file: $filename"
+                cp /cm-data/$file /templates/themes/$filename
+              done
+
+              # Process root files
+              if [ -f "/cm-data/robots.txt" ]; then
+                echo "Copying robots.txt"
+                cp /cm-data/robots.txt /templates/robots.txt
+              fi
+
+              if [ -f "/cm-data/web.go" ]; then
+                echo "Copying web.go"
+                cp /cm-data/web.go /templates/web.go
+              fi
+
+              echo "Template setup complete"
+              ls -la /templates
+              ls -la /templates/templates
+          volumeMounts:
+            - name: dex-templates
+              mountPath: /cm-data
+            - name: dex-templates-dir
+              mountPath: /templates
       volumes:
         - name: config
           projected:
             sources:
               - configMap:
                   name: config
+        - name: dex-templates-dir
+          emptyDir: {}
+        - name: dex-templates
+          configMap:
+            name: dex-templates
 ---
 apiVersion: apps/v1
 kind: Deployment
