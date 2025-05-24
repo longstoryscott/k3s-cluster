@@ -247,13 +247,6 @@ func normalizeVector(vec []float32) []float32 {
 	return result
 }
 
-// HasMemoryEmbedding checks if a memory already has an embedding (by id)
-func HasMemoryEmbedding(ctx context.Context, id string) (bool, error) {
-	var exists bool
-	err := Pool.QueryRow(ctx, GetQuery("memory.has_embedding"), id).Scan(&exists)
-	return exists, err
-}
-
 // GetSimilarMemories finds semantically similar memories for a user
 func GetSimilarMemories(ctx context.Context, userID string, queryEmbedding []float32, similarityThreshold float32, limit int) ([]Memory, error) {
 	processedEmbedding, _ := processEmbedding(queryEmbedding)

@@ -9,6 +9,7 @@ import (
 	pxcx "proxyllama/context"
 	"proxyllama/models"
 	"proxyllama/proxy"
+	"proxyllama/recherche"
 	"runtime"
 
 	"github.com/gofiber/fiber/v2"
@@ -70,6 +71,51 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 				"error": err,
 			}).Warn("Error retrieving memories")
 			// Non-critical error, we can continue without memories
+		}
+
+		cfg, err := pxcx.GetUserConfig(uid)
+		if err != nil {
+			_, file, line, _ := runtime.Caller(0)
+			logrus.WithFields(logrus.Fields{
+				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+				"line":  line,
+				"error": err,
+			}).Error("Error retrieving user config")
+			return handleError(err, fiber.StatusInternalServerError, "Failed to retrieve user configuration")
+		}
+
+		doWebSearch := cfg.WebSearch.Enabled
+
+		if !doWebSearch && cfg.WebSearch.AutoDetect {
+			doWebSearch = recherche.DetectSearchIntent(userMessage, nil)
+		}
+
+		// Check if web search is enabled
+		if doWebSearch {
+			// Attempt to perform a web search and inject results
+			searchResult, err := recherche.QuickSearch(c.Context(), userMessage, cfg.WebSearch.MaxResults, cfg.WebSearch.IncludeResults)
+			if err != nil {
+				_, file, line, _ := runtime.Caller(0)
+				logrus.WithFields(logrus.Fields{
+					"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+					"line":  line,
+					"error": err,
+				}).Warn("Error performing web search")
+				// Non-critical error, we can continue without web search results
+			}
+
+			if searchResult != nil {
+				// Inject the search results into the conversation context
+				if err := cc.InjectWebSearchResult(c.Context(), *searchResult); err != nil {
+					_, file, line, _ := runtime.Caller(0)
+					logrus.WithFields(logrus.Fields{
+						"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+						"line":  line,
+						"error": err,
+					}).Warn("Error injecting web search results")
+					// Non-critical error, we can continue without web search results
+				}
+			}
 		}
 	}
 

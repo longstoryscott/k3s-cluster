@@ -3,7 +3,7 @@ import { darkTheme, lightTheme } from "./theme";
 
 export default {
   server: {
-    baseUrl: 'https://ai.longstorymedia.com'
+    baseUrl: 'http://localhost:8080'
   },
   auth: {
     clientId: import.meta.env.VITE_CLIENT_ID,

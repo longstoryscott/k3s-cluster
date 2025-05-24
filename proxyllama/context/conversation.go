@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"proxyllama/models"
 	"proxyllama/proxy"
+	"proxyllama/recherche"
 	"proxyllama/storage"
 	"runtime"
 	"strings"
@@ -25,6 +26,7 @@ type ConversationContext struct {
 	Summaries         []models.Summary
 	Messages          []models.Message
 	RetrievedMemories []models.Message // Memories retrieved using semantic or keyword search
+	SearchResults     []models.Message // Search results from web search
 }
 
 // GetOrCreateConversation retrieves or creates a conversation context
@@ -304,6 +306,19 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 			"line":  line,
 			"count": len(cc.RetrievedMemories),
 		}).Info("Added retrieved memories to request context")
+	}
+
+	// Add search results if available
+	if len(cc.SearchResults) > 0 {
+		req.Messages = append(req.Messages, CreateSystemMessage(
+			"Here are some relevant search results that might help:"))
+
+		for _, result := range cc.SearchResults {
+			req.Messages = append(req.Messages, models.OllamaMessage{
+				Role:    "system",
+				Content: result.Content,
+			})
+		}
 	}
 
 	// Add master summary if available
@@ -749,4 +764,33 @@ func (cc *ConversationContext) shouldSummarize() bool {
 
 	// Determine if we need to summarize
 	return messagesSinceLastSummary >= messageThreshold
+}
+
+func (cc *ConversationContext) InjectWebSearchResult(ctx context.Context, result recherche.SearchResult) error {
+	// Add system message to introduce the web search results
+	cc.Messages = append(cc.SearchResults, models.Message{
+		Role:    "system",
+		Content: "Here are some relevant web search results:",
+	})
+
+	// Add each result as a system message
+	// for _, result := range results {
+	// content := fmt.Sprintf("Web search result: %s", result.)
+
+	for _, c := range result.Contents {
+		if len(c) > 0 {
+			cc.SearchResults = append(cc.SearchResults, models.Message{
+				Role:    "system",
+				Content: c,
+			})
+		}
+	}
+	// content := fmt.Sprintf("Web search result: %s", result.Snippet)
+	// cc.SearchResults = append(cc.SearchResults, models.Message{
+	// 	Role:    "system",
+	// 	Content: result.Contents[],
+	// })
+	// }
+
+	return nil
 }

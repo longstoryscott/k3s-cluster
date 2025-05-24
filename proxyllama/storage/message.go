@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"proxyllama/config"
 	"proxyllama/proxy"
@@ -98,29 +97,6 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 			bgCtx := context.Background()
 			ctx, cancel := context.WithTimeout(bgCtx, 30*time.Second)
 			defer cancel()
-
-			// Use the new memory API for embedding check and storage
-			memoryID := fmt.Sprintf("msg-%d", mID)
-			hasEmbedding, err := HasMemoryEmbedding(ctx, memoryID)
-			if err != nil {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":      line,
-					"messageId": mID,
-					"error":     err,
-				}).Error("Error checking memory embedding for message")
-				return
-			}
-			if hasEmbedding {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":      line,
-					"messageId": mID,
-				}).Info("Message already has a memory embedding, skipping generation")
-				return
-			}
 			_, file, line, _ := runtime.Caller(0)
 			logrus.WithFields(logrus.Fields{
 				"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
