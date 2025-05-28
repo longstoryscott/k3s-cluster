@@ -3,20 +3,18 @@ package recherche
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
-	"proxyllama/models"
-
 	"github.com/PuerkitoBio/goquery"
-	"github.com/sirupsen/logrus"
+
+	"proxyllama/util"
+
+	customsearch "google.golang.org/api/customsearch/v1"
+	"google.golang.org/api/option"
 )
 
 // SearchResult represents a search result from a web query
@@ -27,115 +25,36 @@ type SearchResult struct {
 	Error    string   `json:"error,omitempty"`
 }
 
+var googleSeachApiKey string = "AIzaSyB5RNu4WR24OapJug9rbzAgsPru7gbvFTk"
+var cx string = "0445a4af16a624cfe"
+
 // PerformWebSearch performs a web search for the given query and returns URLs
 func PerformWebSearch(ctx context.Context, query string, numResults int) ([]string, error) {
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":       filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":       line,
-		"query":      query,
-		"numResults": numResults,
-	}).Info("Performing web search")
-
-	// Create a DuckDuckGo API request URL
-	searchURL := fmt.Sprintf("https://api.duckduckgo.com/?q=%s&format=json&pretty=1&no_html=1&skip_disambig=1", url.QueryEscape(query))
-
-	// Create HTTP request with context
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+	svc, err := customsearch.NewService(ctx, option.WithAPIKey(googleSeachApiKey))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create search request: %w", err)
+		util.HandleError(err)
 	}
 
-	// Set a user agent to avoid potential blocks
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	// Create HTTP client
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:          100,
-			MaxIdleConnsPerHost:   100,
-			DisableKeepAlives:     false,
-			ResponseHeaderTimeout: 5 * time.Second,
-			TLSHandshakeTimeout:   5 * time.Second,
-		},
-	}
-
-	// Make the request
-	resp, err := client.Do(req)
+	resp, err := svc.Cse.List().Cx(cx).Q(query).Do()
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute search request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("search API returned non-OK status: %d", resp.StatusCode)
-	}
-
-	// Read and parse the response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read search response: %w", err)
-	}
-
-	var searchResult struct {
-		AbstractURL   string `json:"AbstractURL"`
-		RelatedTopics []struct {
-			FirstURL string `json:"FirstURL"`
-			Text     string `json:"Text"`
-		} `json:"RelatedTopics"`
-		Results []struct {
-			FirstURL string `json:"FirstURL"`
-		} `json:"Results"`
-	}
-
-	if err := json.Unmarshal(body, &searchResult); err != nil {
-		return nil, fmt.Errorf("failed to parse search results: %w", err)
+		util.HandleError(err)
 	}
 
 	// Collect URLs from the response
 	var urls []string
 
-	// Add the abstract URL if available
-	if searchResult.AbstractURL != "" {
-		urls = append(urls, searchResult.AbstractURL)
-	}
+	for _, result := range resp.Items {
+		urls = append(urls, result.Link)
 
-	// Add related topic URLs
-	for _, topic := range searchResult.RelatedTopics {
-		if topic.FirstURL != "" {
-			urls = append(urls, topic.FirstURL)
-
-			// Stop if we have enough results
-			if len(urls) >= numResults {
-				break
-			}
-		}
-	}
-
-	// Add results URLs if we still need more
-	if len(urls) < numResults {
-		for _, result := range searchResult.Results {
-			if result.FirstURL != "" {
-				urls = append(urls, result.FirstURL)
-
-				// Stop if we have enough results
-				if len(urls) >= numResults {
-					break
-				}
-			}
+		// Stop if we have enough results
+		if len(urls) >= numResults {
+			break
 		}
 	}
 
 	// If we didn't get any results, fall back to Wikipedia and Britannica
 	if len(urls) == 0 {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Warn("No search results found, falling back to default sources")
+		util.LogWarning("No search results found, falling back to default sources")
 		urls = append(urls,
 			"https://en.wikipedia.org/wiki/"+strings.ReplaceAll(query, " ", "_"),
 			"https://www.britannica.com/search?query="+strings.ReplaceAll(query, " ", "+"))
@@ -146,24 +65,13 @@ func PerformWebSearch(ctx context.Context, query string, numResults int) ([]stri
 		urls = urls[:numResults]
 	}
 
-	_, file, line, _ = runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":    filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":    line,
-		"query":   query,
-		"results": len(urls),
-	}).Info("Found search results")
+	util.LogInfo(fmt.Sprintf("Found %d search results for query: %s", len(urls), query))
 	return urls, nil
 }
 
 // ExtractTextFromURL extracts text content from a URL
 func ExtractTextFromURL(ctx context.Context, urlString string) (string, error) {
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-		"url":  urlString,
-	}).Info("Extracting text from URL")
+	util.LogInfo(fmt.Sprintf("Extracting text from URL: %s", urlString))
 
 	client := http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, "GET", urlString, nil)
@@ -176,17 +84,20 @@ func ExtractTextFromURL(ctx context.Context, urlString string) (string, error) {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		util.HandleError(fmt.Errorf("failed to fetch URL: %w", err))
 		return "", fmt.Errorf("failed to fetch URL: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		util.HandleError(fmt.Errorf("failed with status %d", resp.StatusCode))
 		return "", fmt.Errorf("failed with status %d", resp.StatusCode)
 	}
 
 	// Use goquery to parse the HTML
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
+		util.HandleError(fmt.Errorf("failed to parse HTML: %w", err))
 		return "", fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
@@ -279,13 +190,7 @@ func QuickSearch(ctx context.Context, query string, maxResults int, includeConte
 			content, err := ExtractTextFromURL(ctx, url)
 			if err != nil {
 				// Just log the error and continue
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":  line,
-					"url":   url,
-					"error": err,
-				}).Warn("Error extracting text from URL")
+				util.LogWarning(fmt.Sprintf("Error extracting text from URL %s: %v", url, err))
 				continue
 			}
 			if content != "" {
@@ -295,54 +200,4 @@ func QuickSearch(ctx context.Context, query string, maxResults int, includeConte
 	}
 
 	return result, nil
-}
-
-// DetectSearchIntent determines if a query likely requires web search
-func DetectSearchIntent(query string, userMessages []models.OllamaMessage) bool {
-	// Check for explicit web search indicators
-	lowerQuery := strings.ToLower(query)
-	explicitIndicators := []string{
-		"search", "google", "look up", "find information", "search for",
-		"what is the latest", "recent news", "current", "today's",
-		"latest update", "website", "webpage", "url", "link",
-		"http://", "https://", "www.",
-	}
-
-	for _, indicator := range explicitIndicators {
-		if strings.Contains(lowerQuery, indicator) {
-			return true
-		}
-	}
-
-	// Check for question formats that likely need external information
-	questionIndicators := []string{
-		"what is", "who is", "where is", "when did", "how does",
-		"why does", "can you find", "what are", "is there",
-		"tell me about", "explain", "define", "summarize",
-	}
-
-	for _, indicator := range questionIndicators {
-		if strings.HasPrefix(lowerQuery, indicator) {
-			return true
-		}
-	}
-
-	// Check for date/time-sensitive queries
-	timeIndicators := []string{
-		"today", "yesterday", "this week", "this month", "this year",
-		"latest", "newest", "recent", "current", "update",
-	}
-
-	for _, indicator := range timeIndicators {
-		if strings.Contains(lowerQuery, indicator) {
-			return true
-		}
-	}
-
-	// Check for URLs in the query
-	if strings.Contains(query, "http://") || strings.Contains(query, "https://") {
-		return true
-	}
-
-	return false
 }

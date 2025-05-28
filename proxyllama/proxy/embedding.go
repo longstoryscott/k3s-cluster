@@ -1,63 +1,86 @@
 package proxy
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"proxyllama/config"
-	"time"
+	"proxyllama/models"
+	"proxyllama/util"
 )
 
-// OllamaEmbeddingResponse represents the response from Ollama's embeddings API
-type OllamaEmbeddingResponse struct {
-	Embedding []float32 `json:"embedding"`
-	Error     string    `json:"error,omitempty"`
+const MAX_EMBEDDING_LENGTH = 2500 // Maximum length for text embeddings, adjust as needed
+
+// splitTextIntoChunks splits a string into slices of maxChunkSize length
+func splitTextIntoChunks(text string, maxChunkSize int) []string {
+	var chunks []string
+	runes := []rune(text)
+	for i := 0; i < len(runes); i += maxChunkSize {
+		end := i + maxChunkSize
+		if end > len(runes) {
+			end = len(runes)
+		}
+		chunks = append(chunks, string(runes[i:end]))
+	}
+	return chunks
 }
 
-// GetEmbedding retrieves a vector embedding for the provided text from Ollama
-func GetEmbedding(ctx context.Context, textToEmbed string, modelName string) ([]float32, error) {
-	// Ensure modelName is an embedding model or one that supports it
-	conf := config.GetConfig()
-	url := conf.Ollama.BaseURL + "/api/embeddings" // Make sure this is the correct endpoint
+// GetOllamaEmbedding retrieves a vector embedding for the provided text from Ollama
+func GetOllamaEmbedding(ctx context.Context, textToEmbed string, modelName string) ([]float32, error) {
+	// Sanitize the input text before embedding
+	cleanText := util.SanitizeText(textToEmbed)
 
-	requestPayload := map[string]string{
-		"model":  modelName, // This should be a valid embedding model loaded in Ollama
-		"prompt": textToEmbed,
+	var inputChunks []string
+	if len([]rune(cleanText)) > MAX_EMBEDDING_LENGTH {
+		inputChunks = splitTextIntoChunks(cleanText, MAX_EMBEDDING_LENGTH)
+	} else {
+		inputChunks = []string{cleanText}
+	}
+
+	requestPayload := models.OllamaEmbeddingReq{
+		Model:    modelName,
+		Input:    inputChunks,
+		Truncate: true, // Truncate long inputs to fit model constraints
 	}
 	payloadBytes, err := json.Marshal(requestPayload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal embedding request: %w", err)
+		return nil, util.HandleError(fmt.Errorf("failed to marshal embedding request: %w", err))
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(payloadBytes))
+	handler, _, err := GetProxyHandler(ctx, payloadBytes, "/api/embed", http.MethodPost, false, func() *models.OllamaEmbeddingResponse {
+		return &models.OllamaEmbeddingResponse{}
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create embedding request: %w", err)
+		return nil, util.HandleError(fmt.Errorf("failed to get proxy handler for embedding request: %w", err))
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 60 * time.Second} // Adjust timeout as needed
-	resp, err := client.Do(req)
+	util.LogDebug("Successfully retrieved proxy handler for embedding request")
+
+	w := &bytes.Buffer{}
+	wr := bufio.NewWriter(w)
+
+	respStr, err := handler(wr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send embedding request to Ollama: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Ollama embedding request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+		return nil, util.HandleError(fmt.Errorf("error handling embedding response: %w", err))
 	}
 
-	var embeddingResponse OllamaEmbeddingResponse
-	if err := json.NewDecoder(resp.Body).Decode(&embeddingResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode embedding response: %w", err)
+	var embeddingResponse models.OllamaEmbeddingResponse
+	if err := json.Unmarshal([]byte(respStr), &embeddingResponse); err != nil {
+		return nil, util.HandleError(fmt.Errorf("failed to decode embedding response: %w", err))
 	}
 
-	if embeddingResponse.Error != "" {
-		return nil, fmt.Errorf("Ollama embedding error: %s", embeddingResponse.Error)
+	if len(embeddingResponse.Embeddings) == 0 {
+		util.LogWarning("Received empty embedding response from Ollama")
+		return []float32{}, nil // Return empty slice instead of error
 	}
 
-	return embeddingResponse.Embedding, nil
+	// Concatenate all embeddings if multiple chunks were sent
+	var joinedEmbedding []float32
+	for _, emb := range embeddingResponse.Embeddings {
+		joinedEmbedding = append(joinedEmbedding, emb...)
+	}
+
+	return joinedEmbedding, nil
 }

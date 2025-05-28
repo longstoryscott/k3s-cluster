@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"proxyllama/config"
+	"proxyllama/util"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -39,7 +40,7 @@ func parseTTL(ttlStr string, fallback time.Duration) time.Duration {
 
 // InitStorageCache initializes the Redis client for storage caching
 func InitStorageCache() error {
-	conf := config.GetConfig()
+	conf := config.GetConfig(nil)
 
 	// Create Redis client
 	// Parse Redis timeout values from string to time.Duration
@@ -148,16 +149,22 @@ func CacheMessage(ctx context.Context, message *Message) error {
 		return nil
 	}
 
-	conf := config.GetConfig()
+	conf := config.GetConfig(nil)
 	data, err := json.Marshal(message)
 	if err != nil {
-		return fmt.Errorf("failed to marshal message: %w", err)
+		return util.HandleError(fmt.Errorf("failed to marshal message: %w", err))
 	}
 
 	ttl := parseTTL(conf.Redis.MessageTTL, 0)
 
 	key := cacheKey(messageKeyPrefix, message.ID)
-	return redisClient.Set(ctx, key, data, ttl).Err()
+	if err := redisClient.Set(ctx, key, data, ttl).Err(); err != nil {
+		return util.HandleError(fmt.Errorf("failed to cache message: %w", err))
+	}
+
+	// Also cache the message ID in the conversation's message list (as a Redis list)
+	conversationMessagesKey := cacheKey(conversationKeyPrefix, fmt.Sprintf("%d:messages", message.ConversationID))
+	return redisClient.RPush(ctx, conversationMessagesKey, message.ID).Err()
 }
 
 // InvalidateMessageCache removes a message from cache
@@ -219,27 +226,26 @@ func GetMessagesByConversationIDFromCache(ctx context.Context, conversationID in
 		}
 	}
 
-	// Fall back to getting by message IDs if direct list isn't available
+	// Fall back to getting by message IDs from Redis list
 	messageIDsKey := cacheKey(conversationKeyPrefix, fmt.Sprintf("%d:messages", conversationID))
-
-	// Check if we have the message ID list
-	messageIDsStr, err := redisClient.Get(ctx, messageIDsKey).Result()
+	idStrs, err := redisClient.LRange(ctx, messageIDsKey, 0, -1).Result()
 	if err != nil {
 		return nil, false
 	}
 
 	var messageIDs []int
-	if err := json.Unmarshal([]byte(messageIDsStr), &messageIDs); err != nil {
-		return nil, false
+	for _, s := range idStrs {
+		var id int
+		if _, err := fmt.Sscanf(s, "%d", &id); err == nil {
+			messageIDs = append(messageIDs, id)
+		}
 	}
 
-	// Now get each message from cache
 	var messages []Message
 	for _, msgID := range messageIDs {
 		if msg, found := GetMessageFromCache(ctx, msgID); found {
 			messages = append(messages, *msg)
 		} else {
-			// If any message is missing, return false to fetch all from DB
 			return nil, false
 		}
 	}
@@ -253,7 +259,7 @@ func CacheMessagesByConversationID(ctx context.Context, conversationID int, mess
 		return nil
 	}
 
-	conf := config.GetConfig()
+	conf := config.GetConfig(nil)
 
 	// Cache the full message list
 	messagesListKey := cacheKey(messagesListPrefix, conversationID)
@@ -268,7 +274,7 @@ func CacheMessagesByConversationID(ctx context.Context, conversationID int, mess
 	}
 
 	// Also cache each individual message and track IDs
-	var messageIDs []int
+	var messageIDs []interface{}
 	for i := range messages {
 		messageIDs = append(messageIDs, messages[i].ID)
 		if err := CacheMessage(ctx, &messages[i]); err != nil {
@@ -276,14 +282,20 @@ func CacheMessagesByConversationID(ctx context.Context, conversationID int, mess
 		}
 	}
 
-	// Cache the message ID list for this conversation
-	messageIDsData, err := json.Marshal(messageIDs)
-	if err != nil {
-		return fmt.Errorf("failed to marshal message IDs: %w", err)
-	}
-
+	// Store the message ID list as a Redis list (overwrite existing)
 	messageIDsKey := cacheKey(conversationKeyPrefix, fmt.Sprintf("%d:messages", conversationID))
-	return redisClient.Set(ctx, messageIDsKey, messageIDsData, ttl).Err()
+	if err := redisClient.Del(ctx, messageIDsKey).Err(); err != nil {
+		return err
+	}
+	if len(messageIDs) > 0 {
+		if err := redisClient.RPush(ctx, messageIDsKey, messageIDs...).Err(); err != nil {
+			return err
+		}
+	}
+	if ttl > 0 {
+		redisClient.Expire(ctx, messageIDsKey, ttl)
+	}
+	return nil
 }
 
 // ========== Summary Cache Operations ==========
@@ -315,7 +327,7 @@ func CacheSummary(ctx context.Context, summary *Summary) error {
 		return nil
 	}
 
-	conf := config.GetConfig()
+	conf := config.GetConfig(nil)
 	data, err := json.Marshal(summary)
 	if err != nil {
 		return fmt.Errorf("failed to marshal summary: %w", err)
@@ -386,7 +398,7 @@ func CacheSummariesByConversationID(ctx context.Context, conversationID int, sum
 		return nil
 	}
 
-	conf := config.GetConfig()
+	conf := config.GetConfig(nil)
 
 	// Cache the full summaries list
 	summariesListKey := cacheKey(summariesListPrefix, conversationID)
@@ -481,7 +493,7 @@ func CacheConversation(ctx context.Context, conversation *Conversation) error {
 		return nil
 	}
 
-	conf := config.GetConfig()
+	conf := config.GetConfig(nil)
 	data, err := json.Marshal(conversation)
 	if err != nil {
 		return fmt.Errorf("failed to marshal conversation: %w", err)
@@ -547,7 +559,7 @@ func CacheConversationsByUserID(ctx context.Context, userID string, conversation
 		return nil
 	}
 
-	conf := config.GetConfig()
+	conf := config.GetConfig(nil)
 
 	// First cache each individual conversation
 	var conversationIDs []int

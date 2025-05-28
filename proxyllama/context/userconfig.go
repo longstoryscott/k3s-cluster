@@ -2,14 +2,12 @@ package context
 
 import (
 	"context"
-	"path/filepath"
 	"proxyllama/config"
 	"proxyllama/storage"
-	"runtime"
 	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"proxyllama/util"
 )
 
 // userConfigCacheEntry holds a user config and its expiry
@@ -58,7 +56,7 @@ func userConfigJanitor() {
 
 // UpdateUserConfig provides a wrapper around the config package's UpdateUserConfig
 func UpdateUserConfig(userConfig config.UserConfig) {
-	conf := config.GetConfig()
+	conf := config.GetConfig(nil)
 	conf.UpdateUserConfig(userConfig)
 }
 
@@ -73,9 +71,7 @@ func GetUserConfig(userID string) (*config.UserConfig, error) {
 	}
 	userConfigCacheMisses++
 	// Fallback to storage
-	logrus.WithFields(logrus.Fields{
-		"userID": userID,
-	}).Debug("User config not found in cache, retrieving from storage")
+	util.LogDebug("User config not found in cache, retrieving from storage", map[string]interface{}{"userID": userID})
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	ucFromStorage, err := storage.GetUserConfig(ctx, userID)
@@ -89,11 +85,7 @@ func GetUserConfig(userID string) (*config.UserConfig, error) {
 // SetUserConfig updates the cache and storage
 func SetUserConfig(userConfig *config.UserConfig) error {
 	if userConfig == nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Warn("SetUserConfig called with nil userConfig")
+		util.LogWarning("SetUserConfig called with nil userConfig")
 		return nil
 	}
 	userConfigCacheMutex.Lock()

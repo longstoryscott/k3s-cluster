@@ -2,15 +2,14 @@ package api
 
 import (
 	"bufio"
-	"encoding/json"
+	"context"
 	"net/http"
-	"path/filepath"
 	"proxyllama/auth"
 	pxcx "proxyllama/context"
 	"proxyllama/models"
 	"proxyllama/proxy"
-	"proxyllama/recherche"
-	"runtime"
+	"proxyllama/util"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
@@ -24,7 +23,7 @@ func RegisterOllamaRoutes(app *fiber.App) {
 // ReverseProxyHandler forwards the request to Ollama and streams the response back to the client
 func ReverseProxyHandler(c *fiber.Ctx) error {
 	// Parse the incoming request
-	var chatReq models.OllamaReq
+	var chatReq models.OllamaChatReq
 	if err := c.BodyParser(&chatReq); err != nil {
 		return handleError(err, fiber.StatusBadRequest, "Invalid request body")
 	}
@@ -39,120 +38,6 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to process conversation")
 	}
 
-	// Get the user message from the request (last message from user)
-	var userMessage string
-	for i := len(chatReq.Messages) - 1; i >= 0; i-- {
-		if chatReq.Messages[i].Role == "user" {
-			userMessage = chatReq.Messages[i].Content
-			break
-		}
-	}
-
-	// Add the user message to context
-	contextError := false
-	if err := cc.AddUserMessage(c.Context(), userMessage); err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Error("Error adding user message")
-		contextError = true
-	}
-
-	// Retrieve memories if there was no error adding the user message
-	if !contextError {
-		// Attempt to retrieve and inject relevant memories for the user's query
-		if err := cc.RetrieveAndInjectMemories(c.Context(), userMessage); err != nil {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
-				"error": err,
-			}).Warn("Error retrieving memories")
-			// Non-critical error, we can continue without memories
-		}
-
-		cfg, err := pxcx.GetUserConfig(uid)
-		if err != nil {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
-				"error": err,
-			}).Error("Error retrieving user config")
-			return handleError(err, fiber.StatusInternalServerError, "Failed to retrieve user configuration")
-		}
-
-		doWebSearch := cfg.WebSearch.Enabled
-
-		if !doWebSearch && cfg.WebSearch.AutoDetect {
-			doWebSearch = recherche.DetectSearchIntent(userMessage, nil)
-		}
-
-		// Check if web search is enabled
-		if doWebSearch {
-			// Attempt to perform a web search and inject results
-			searchResult, err := recherche.QuickSearch(c.Context(), userMessage, cfg.WebSearch.MaxResults, cfg.WebSearch.IncludeResults)
-			if err != nil {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":  line,
-					"error": err,
-				}).Warn("Error performing web search")
-				// Non-critical error, we can continue without web search results
-			}
-
-			if searchResult != nil {
-				// Inject the search results into the conversation context
-				if err := cc.InjectWebSearchResult(c.Context(), *searchResult); err != nil {
-					_, file, line, _ := runtime.Caller(0)
-					logrus.WithFields(logrus.Fields{
-						"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-						"line":  line,
-						"error": err,
-					}).Warn("Error injecting web search results")
-					// Non-critical error, we can continue without web search results
-				}
-			}
-		}
-	}
-
-	var ollamaReqBody []byte
-	var jsonErr error
-
-	// Only use context if there was no error adding the user message
-	if !contextError {
-		// Convert conversation context to Ollama format (includes summaries)
-		ollamaReqBody, jsonErr = cc.ToJSON()
-		if jsonErr != nil {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
-				"error": jsonErr,
-			}).Error("Error converting context to JSON")
-			contextError = true
-		}
-	} else { // Fall back to the original request if we had any context errors
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Warn("Falling back to original request without context")
-		// Use the original request but ensure the model is set correctly and stream is true
-		fallbackReq := models.OllamaReq{
-			Model:    chatReq.Model,
-			Messages: chatReq.Messages,
-			Stream:   true, // Always force streaming
-		}
-		ollamaReqBody, jsonErr = json.Marshal(fallbackReq)
-		if jsonErr != nil {
-			return handleError(jsonErr, fiber.StatusInternalServerError, "Failed to format request")
-		}
-	}
-
 	headers := proxy.ContextHeaders{}
 	c.Request().Header.VisitAll(func(key, value []byte) {
 		keyStr := string(key)
@@ -164,7 +49,14 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 
 	c.Context().SetUserValue(proxy.ReqHeadersKey, headers)
 
-	handler, statusCode, err := proxy.GetProxyHandler(c.Context(), ollamaReqBody, c.Path(), http.MethodPost, true)
+	ollamaReqBody, err := cc.PrepareOllamaRequest(c.Context(), chatReq)
+	if err != nil {
+		return handleError(err, fiber.StatusInternalServerError, "Failed to prepare Ollama request")
+	}
+
+	handler, statusCode, err := proxy.GetProxyHandler(c.Context(), ollamaReqBody, c.Path(), http.MethodPost, true, func() *models.OllamaChatResp {
+		return &models.OllamaChatResp{}
+	})
 	if err != nil {
 		return handleError(err, fiber.StatusBadGateway, "Error during streaming")
 	}
@@ -174,12 +66,7 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 	c.Response().SetBodyStreamWriter(func(w *bufio.Writer) {
 		res, err = handler(w)
 		if err != nil {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
-				"error": err,
-			}).Error("Error during handler execution")
+			handleError(err, fiber.StatusInternalServerError, "Error during handler execution")
 			return
 		}
 
@@ -187,22 +74,29 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 		if res != "" {
 			// Apply refinement steps to the response in a separate goroutine
 			// to avoid keeping the client connection open longer than necessary
-			go func(response, userID string, convID int) {
-				pxcx.RefineResponse(response, userMessage, userID, convID)
-			}(res, cc.UserID, cc.ConversationID)
+			// go func(response, userID string, convID int) {
+			// 	pxcx.RefineResponse(response, userMessage, userID, convID)
+			// }(res, cc.UserID, cc.ConversationID)
+
+			go func(r string, cctx *pxcx.ConversationContext) {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
+				defer cancel()
+				_, err := cc.AddAssistantMessage(ctx, res)
+				if err != nil {
+					util.HandleError(err)
+				} else {
+					util.LogInfo("Successfully stored assistant message in conversation", logrus.Fields{"conversationId": cc.ConversationID})
+				}
+			}(res, cc)
 		} else if res == "" {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line": line,
-			}).Warn("Empty assistant response, not storing")
+			util.LogWarning("Empty assistant response, not storing")
 		}
 
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Info("Chat streaming complete")
+		// Log the completion of the chat streaming
+		util.LogInfo("Chat streaming complete", logrus.Fields{
+			"conversationId": cc.ConversationID,
+			"userId":         cc.UserID,
+		})
 	})
 
 	return nil

@@ -3,14 +3,11 @@ package context
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"proxyllama/models"
 	"proxyllama/proxy"
 	"proxyllama/storage"
-	"runtime"
+	"proxyllama/util"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 // RetrievedMemory represents a message that was retrieved based on vector similarity
@@ -20,7 +17,7 @@ type RetrievedMemory struct {
 }
 
 // GetRelevantMemories retrieves semantically similar messages based on a query
-func (cc *ConversationContext) GetRelevantMemories(ctx context.Context, query string, limit int) ([]models.OllamaMessage, error) {
+func (cc *ConversationContext) GetRelevantMemories(ctx context.Context, query string) ([]models.OllamaChatMessage, error) {
 	usrCfg, err := GetUserConfig(cc.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user config: %w", err)
@@ -31,56 +28,35 @@ func (cc *ConversationContext) GetRelevantMemories(ctx context.Context, query st
 		return nil, nil
 	}
 
-	// Set default limit if not specified
-	if limit <= 0 {
-		limit = 5 // Default to 5 most relevant memories
-	}
-
 	profile, err := storage.GetModelProfile(ctx, usrCfg.ModelProfiles.EmbeddingProfileID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get model profile: %w", err)
 	}
 
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Generating embedding for query to find relevant memories")
+	util.LogInfo("Generating embedding for query to find relevant memories")
 
-	queryEmbedding, err := proxy.GetEmbedding(ctx, query, profile.ModelName)
+	queryEmbedding, err := proxy.GetOllamaEmbedding(ctx, query, profile.ModelName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
 	}
 
-	// Define similarity threshold (adjust as needed)
-	similarityThreshold := float32(0.7) // Messages with 70%+ similarity
-
 	// Get similar messages from database
-	similarMessages, err := storage.GetSimilarMessages(ctx, queryEmbedding, similarityThreshold, limit)
+	similarMessages, err := storage.GetSimilarMessages(ctx, queryEmbedding, float32(usrCfg.Retrieval.SimilarityThreshold), usrCfg.Retrieval.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve similar messages: %w", err)
 	}
 
 	if len(similarMessages) == 0 {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Info("No relevant memories found for query")
+		util.LogInfo("No relevant memories found for query")
 		return nil, nil
 	}
 
-	_, file, line, _ = runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":  line,
-		"count": len(similarMessages),
-	}).Info("Found relevant memories for query")
+	util.LogInfo("Found relevant memories for query", map[string]interface{}{"count": len(similarMessages)})
 
 	// Convert to OllamaMessages for context
-	var ollamaMessages []models.OllamaMessage
+	var ollamaMessages []models.OllamaChatMessage
 	for _, msg := range similarMessages {
-		ollamaMessages = append(ollamaMessages, models.OllamaMessage{
+		ollamaMessages = append(ollamaMessages, models.OllamaChatMessage{
 			Role:    msg.Role,
 			Content: msg.Content,
 		})
@@ -90,7 +66,7 @@ func (cc *ConversationContext) GetRelevantMemories(ctx context.Context, query st
 }
 
 // EnhanceRequestWithRAG adds relevant memories to the request based on the latest user query
-func (cc *ConversationContext) EnhanceRequestWithRAG(ctx context.Context, req *models.OllamaReq) error {
+func (cc *ConversationContext) EnhanceRequestWithRAG(ctx context.Context, req *models.OllamaChatReq) error {
 	// Find the latest user message to use as query
 	var latestUserMessage string
 	for i := len(req.Messages) - 1; i >= 0; i-- {
@@ -109,14 +85,9 @@ func (cc *ConversationContext) EnhanceRequestWithRAG(ctx context.Context, req *m
 	defer cancel()
 
 	// Get relevant memories
-	relevantMemories, err := cc.GetRelevantMemories(timeoutCtx, latestUserMessage, 5)
+	relevantMemories, err := cc.GetRelevantMemories(timeoutCtx, latestUserMessage)
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Failed to get relevant memories")
+		util.LogWarning(fmt.Sprintf("failed to get relevant memories: %v", err))
 		return nil // Continue without RAG enhancement
 	}
 
@@ -125,7 +96,7 @@ func (cc *ConversationContext) EnhanceRequestWithRAG(ctx context.Context, req *m
 	}
 
 	// Create a new request with memories inserted at the right position
-	var enhancedMessages []models.OllamaMessage
+	var enhancedMessages []models.OllamaChatMessage
 
 	// First add any system messages (these should come first)
 	systemMessagesCount := 0
@@ -137,7 +108,7 @@ func (cc *ConversationContext) EnhanceRequestWithRAG(ctx context.Context, req *m
 	}
 
 	// Add a system message to explain the memories
-	enhancedMessages = append(enhancedMessages, models.OllamaMessage{
+	enhancedMessages = append(enhancedMessages, models.OllamaChatMessage{
 		Role:    "system",
 		Content: fmt.Sprintf("Here are %d relevant memories from previous conversations that may help answer the current query:", len(relevantMemories)),
 	})
@@ -146,7 +117,7 @@ func (cc *ConversationContext) EnhanceRequestWithRAG(ctx context.Context, req *m
 	enhancedMessages = append(enhancedMessages, relevantMemories...)
 
 	// Add another system message to separate memories from the current conversation
-	enhancedMessages = append(enhancedMessages, models.OllamaMessage{
+	enhancedMessages = append(enhancedMessages, models.OllamaChatMessage{
 		Role:    "system",
 		Content: "Now continuing with the current conversation:",
 	})
@@ -161,11 +132,6 @@ func (cc *ConversationContext) EnhanceRequestWithRAG(ctx context.Context, req *m
 	// Replace messages in the request
 	req.Messages = enhancedMessages
 
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":  line,
-		"count": len(relevantMemories),
-	}).Info("Enhanced request with relevant memories")
+	util.LogInfo("Enhanced request with relevant memories", map[string]interface{}{"count": len(relevantMemories)})
 	return nil
 }

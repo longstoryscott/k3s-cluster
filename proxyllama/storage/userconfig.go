@@ -4,13 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"path/filepath"
 	"proxyllama/config"
-	"runtime"
+	"proxyllama/util"
 	"strings"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 const userConfigKeyPrefix = "proxyllama:userconfig:"
@@ -48,13 +45,10 @@ func cacheUserConfig(ctx context.Context, userID string, cfg *config.UserConfig)
 	}
 	ttl := 24 * time.Hour // Cache user config for 24h, adjust as needed
 	key := getUserConfigCacheKey(userID)
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":   line,
+	util.LogInfo("Caching user config", map[string]interface{}{
 		"userID": userID,
 		"ttl":    ttl,
-	}).Info("Caching user config")
+	})
 	redisClient.Set(ctx, key, data, ttl)
 }
 
@@ -78,35 +72,24 @@ func GetUserConfig(ctx context.Context, userID string) (*config.UserConfig, erro
 	if err != nil {
 		if err == sql.ErrNoRows || strings.Contains(err.Error(), "cannot scan NULL into *config.UserConfig") {
 			// No rows found, or empty config
-			logrus.WithFields(logrus.Fields{
+			util.LogWarning("No user config found, setting to default", map[string]interface{}{
 				"userID": userID,
-			}).Warn("No user config found, setting to default")
+			})
 			usrConfig = config.UserConfig{UserID: userID}
 		} else {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":   line,
-				"userID": userID,
-				"error":  err,
-			}).Error("Failed to scan user config row")
+			util.HandleError(err)
 			return nil, err
 		}
 	} else {
 		// Successfully retrieved user config
-		logrus.WithFields(logrus.Fields{
+		util.LogInfo("User config retrieved from database", map[string]interface{}{
 			"userID": userID,
 			"config": usrConfig,
-		}).Info("User config retrieved from database")
+		})
 	}
 
 	// Ensure all required fields have values by merging with defaults
 	config.MergeWithDefaultConfig(&usrConfig)
-
-	logrus.WithFields(logrus.Fields{
-		"userID": userID,
-		"config": usrConfig,
-	}).Debug("User config after merging with defaults")
 
 	// Cache for future use
 	cacheUserConfig(ctx, userID, &usrConfig)

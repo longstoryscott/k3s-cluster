@@ -1,6 +1,7 @@
 import { User } from "oidc-client-ts";
 import config from "../config";
 import { ChatResponse, RequestOptions } from "./types";
+import { logoutSession } from "../auth";
 
 export function getToken(user?: User): string {
   if (!user) {
@@ -25,6 +26,7 @@ export async function* gen(opts: RequestOptions): AsyncGenerator<ChatResponse> {
 
   // Handle authentication errors
   if (response.status === 401 || response.status === 403) {
+    await logoutSession();
     throw new Error('Authentication failed');
   }
 
@@ -176,6 +178,7 @@ export async function req<T>(opts: RequestOptions): Promise<T> {
 
     // Handle authentication errors
     if (response.status === 401 || response.status === 403) {
+      await logoutSession();
       throw new Error('Authentication failed');
     }
 

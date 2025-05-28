@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -13,10 +11,11 @@ import (
 	"proxyllama/config"
 	"proxyllama/context"
 	"proxyllama/storage"
+	"proxyllama/util"
 )
 
 func main() {
-	conf := config.GetConfig()
+	conf := config.GetConfig(nil)
 
 	// Set logrus log level from config
 	switch conf.LogLevel {
@@ -31,6 +30,10 @@ func main() {
 	default:
 		logrus.SetLevel(logrus.InfoLevel)
 	}
+	fmtter := new(logrus.TextFormatter)
+	fmtter.TimestampFormat = "2006-01-02 15:04:05"
+	logrus.SetFormatter(fmtter)
+	fmtter.FullTimestamp = true
 
 	psqlconn := fmt.Sprintf(
 		"postgresql://%s:%s@%s:%d/%s?sslmode=%s",
@@ -43,71 +46,42 @@ func main() {
 	)
 
 	if err := storage.InitDB(psqlconn); err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Fatal("Failed to connect to db")
+		util.HandleError(err)
 	}
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":       filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":       line,
+	util.LogInfo("Connected to PostgreSQL database", logrus.Fields{
 		"connection": psqlconn,
-	}).Info("Connected to PostgreSQL database")
+	})
 
 	// Initialize research schema
 	// storage.InitResearchSchema(ctx)
 
 	// Initialize Redis for storage caching
 	if err := storage.InitStorageCache(); err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
+		util.LogWarning("Failed to initialize Redis storage cache", logrus.Fields{
 			"error": err,
-		}).Warn("Failed to initialize Redis storage cache")
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Warn("Storage will operate without Redis caching")
+		})
+		util.LogWarning("Storage will operate without Redis caching")
 	} else if conf.Redis.Enabled {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Info("Redis storage cache initialized successfully")
+		util.LogInfo("Redis storage cache initialized successfully")
 		// Clean up Redis connections when the application exits
 		defer storage.CloseRedisCache()
 	}
 
 	// Initialize the conversation cache with configured settings
 	if conf.Redis.Enabled {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
+		util.LogInfo("Initializing conversation cache with Redis", logrus.Fields{
 			"host": conf.Redis.Host,
 			"port": conf.Redis.Port,
 			"ttl":  conf.Redis.ConversationTTL,
-		}).Info("Initializing conversation cache with Redis")
+		})
 	} else {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-			"ttl":  conf.Redis.ConversationTTL,
-		}).Info("Redis disabled, using in-memory cache")
+		util.LogInfo("Redis disabled, using in-memory cache", logrus.Fields{
+			"ttl": conf.Redis.ConversationTTL,
+		})
 	}
 	duration, err := time.ParseDuration(conf.Redis.ConversationTTL)
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Fatal("Invalid conversation TTL")
+		util.HandleError(err)
 	}
 	context.InitCache(duration)
 
@@ -123,20 +97,12 @@ func main() {
 
 	// Use port from configuration instead of hardcoding it
 	serverAddress := fmt.Sprintf("%s:%d", conf.Server.Host, conf.Server.Port)
-	_, file, line, _ = runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":    filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":    line,
+	util.LogInfo("Server started", logrus.Fields{
 		"address": serverAddress,
-	}).Info("Server started")
+	})
 
 	// Use logrus.Fatal for fatal error handling
 	if err := app.Listen(serverAddress); err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Fatal("Server failed to start")
+		util.HandleError(err)
 	}
 }

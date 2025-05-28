@@ -4,8 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
-	"runtime"
+	"proxyllama/util"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -25,14 +24,21 @@ func CreateSummary(ctx context.Context, conversationID int, content string, leve
 	// Convert source IDs to JSON
 	sourceIDsJSON, err := json.Marshal(sourceIDs)
 	if err != nil {
-		return 0, fmt.Errorf("failed to marshal source IDs: %w", err)
+		return 0, util.HandleError(fmt.Errorf("failed to marshal source IDs: %w", err))
 	}
+
+	util.LogDebug("Creating summary for conversation", logrus.Fields{
+		"conversation_id": conversationID,
+		"content":         content,
+		"level":           level,
+		"source_ids":      sourceIDs,
+	})
 
 	var summaryID int
 	err = Pool.QueryRow(ctx, GetQuery("summary.create_summary"),
 		conversationID, content, level, sourceIDsJSON).Scan(&summaryID)
 	if err != nil {
-		return 0, fmt.Errorf("failed to create summary: %w", err)
+		return 0, util.HandleError(fmt.Errorf("failed to create summary: %w", err))
 	}
 
 	// Invalidate the conversation summaries cache
@@ -68,12 +74,7 @@ func GetSummariesForConversation(ctx context.Context, conversationID int) ([]Sum
 		if err := json.Unmarshal(sourceIDsJSON, &s.SourceIDs); err != nil {
 			// If JSON parsing fails, initialize an empty slice
 			s.SourceIDs = make([]int, 0)
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
-				"error": err,
-			}).Warn("Failed to parse source IDs JSON")
+			util.LogWarning(fmt.Sprintf("Failed to parse source IDs JSON for summary %d: %v", s.ID, err))
 		}
 
 		summaries = append(summaries, s)
@@ -86,13 +87,7 @@ func GetSummariesForConversation(ctx context.Context, conversationID int) ([]Sum
 	// Cache the results
 	if err := CacheSummariesByConversationID(ctx, conversationID, summaries); err != nil {
 		// Just log, don't fail on cache error
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":           filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":           line,
-			"error":          err,
-			"conversationId": conversationID,
-		}).Warn("Failed to cache summaries for conversation")
+		util.LogWarning(fmt.Sprintf("Failed to cache summaries for conversation %d: %v", conversationID, err))
 	}
 
 	return summaries, nil
@@ -121,12 +116,7 @@ func GetRecentSummaries(ctx context.Context, conversationID int, level int, limi
 		if err := json.Unmarshal(sourceIDsJSON, &s.SourceIDs); err != nil {
 			// If JSON parsing fails, initialize an empty map
 			s.SourceIDs = make([]int, 0)
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
-				"error": err,
-			}).Warn("Failed to parse source IDs JSON")
+			util.LogWarning(fmt.Sprintf("Failed to parse source IDs JSON for recent summary %d: %v", s.ID, err))
 		}
 
 		summaries = append(summaries, s)
@@ -167,12 +157,7 @@ func GetSummary(ctx context.Context, summaryID int) (*Summary, error) {
 	if err := json.Unmarshal(sourceIDsJSON, &s.SourceIDs); err != nil {
 		// If JSON parsing fails, initialize an empty map
 		s.SourceIDs = make([]int, 0)
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Failed to parse source IDs JSON")
+		util.LogWarning(fmt.Sprintf("Failed to parse source IDs JSON for summary %d: %v", s.ID, err))
 	}
 
 	return &s, nil

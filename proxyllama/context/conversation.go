@@ -4,12 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"proxyllama/models"
 	"proxyllama/proxy"
 	"proxyllama/recherche"
 	"proxyllama/storage"
-	"runtime"
+	"proxyllama/util"
 	"strings"
 	"time"
 
@@ -36,13 +35,10 @@ func GetOrCreateConversation(ctx context.Context, userID string, conversationID 
 		// Try to get from cache first
 		if cache := GetCache(); cache != nil {
 			if cachedContext, found := cache.Get(userID, *conversationID); found {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":           filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":           line,
+				util.LogInfo("Retrieved conversation from cache", logrus.Fields{
 					"conversationId": *conversationID,
 					"userId":         userID,
-				}).Info("Retrieved conversation from cache")
+				})
 				return cachedContext, nil
 			}
 		}
@@ -92,13 +88,10 @@ func GetOrCreateConversation(ctx context.Context, userID string, conversationID 
 		// Store in cache
 		if cache := GetCache(); cache != nil {
 			cache.Set(&convContext)
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":           filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":           line,
+			util.LogInfo("Cached conversation", logrus.Fields{
 				"conversationId": convContext.ConversationID,
 				"userId":         userID,
-			}).Info("Cached conversation")
+			})
 		}
 	} else {
 		// Create a new conversation
@@ -168,15 +161,15 @@ func loadConversationSummaries(ctx context.Context, cc *ConversationContext) err
 }
 
 // AddUserMessage adds a user message to the conversation
-func (cc *ConversationContext) AddUserMessage(ctx context.Context, content string) error {
+func (cc *ConversationContext) AddUserMessage(ctx context.Context, content string) ([]float32, error) {
 	usrCfg, err := GetUserConfig(cc.UserID)
 	if err != nil {
-		return fmt.Errorf("failed to get user config: %w", err)
+		return nil, util.HandleError(fmt.Errorf("failed to get user config: %w", err))
 	}
 	// Add to database
-	msgID, err := storage.AddMessage(ctx, cc.ConversationID, "user", content, usrCfg)
+	msgID, embedding, err := storage.AddMessage(ctx, cc.ConversationID, "user", content, usrCfg)
 	if err != nil {
-		return fmt.Errorf("failed to add user message: %w", err)
+		return nil, util.HandleError(fmt.Errorf("failed to add user message: %w", err))
 	}
 
 	// Add to context
@@ -190,13 +183,7 @@ func (cc *ConversationContext) AddUserMessage(ctx context.Context, content strin
 	if len(cc.Messages) == 1 {
 		title := generateTitle(content)
 		if err := storage.UpdateConversationTitle(ctx, cc.ConversationID, title); err != nil {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":           filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":           line,
-				"error":          err,
-				"conversationId": cc.ConversationID,
-			}).Error("Failed to update conversation title")
+			util.HandleError(fmt.Errorf("failed to update conversation title: %v", err))
 		}
 	}
 
@@ -205,19 +192,21 @@ func (cc *ConversationContext) AddUserMessage(ctx context.Context, content strin
 		cache.Set(cc)
 	}
 
-	return nil
+	return embedding, nil
 }
 
 // AddAssistantMessage adds an assistant message to the conversation
-func (cc *ConversationContext) AddAssistantMessage(ctx context.Context, content string) error {
+func (cc *ConversationContext) AddAssistantMessage(ctx context.Context, content string) ([]float32, error) {
+	util.LogInfo("Storing assistant response", logrus.Fields{"length": len(content)})
+
 	usrCfg, err := GetUserConfig(cc.UserID)
 	if err != nil {
-		return fmt.Errorf("failed to get user config: %w", err)
+		return nil, fmt.Errorf("failed to get user config: %w", err)
 	}
 	// Add to database
-	msgID, err := storage.AddMessage(ctx, cc.ConversationID, "assistant", content, usrCfg)
+	msgID, embedding, err := storage.AddMessage(ctx, cc.ConversationID, "assistant", content, usrCfg)
 	if err != nil {
-		return fmt.Errorf("failed to add assistant message: %w", err)
+		return nil, fmt.Errorf("failed to add assistant message: %w", err)
 	}
 
 	// Add to context
@@ -229,33 +218,25 @@ func (cc *ConversationContext) AddAssistantMessage(ctx context.Context, content 
 
 	// Check if we need to summarize messages
 	if cc.shouldSummarize() {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":           filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":           line,
-			"conversationId": cc.ConversationID,
-		}).Info("Summarizing messages for conversation")
+		util.LogInfo("Summarizing messages for conversation")
 		go func() {
-			bgrndCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			bgrndCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 			defer cancel()
 			if _, err := cc.SummarizeMessages(bgrndCtx); err != nil {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":  line,
-					"error": err,
-				}).Error("Failed to summarize messages")
+				util.HandleError(fmt.Errorf("failed to summarize messages: %w", err))
 				// Continue even if summarization fails
 			}
 		}()
 	}
 
-	// Update cache with modified conversation context
-	if cache := GetCache(); cache != nil {
-		cache.Set(cc)
-	}
+	go func(cc *ConversationContext) {
+		// Update cache with modified conversation context
+		if cache := GetCache(); cache != nil {
+			cache.Set(cc)
+		}
+	}(cc)
 
-	return nil
+	return embedding, nil
 }
 
 // ToJSON converts the conversation context to Ollama-compatible format
@@ -270,7 +251,7 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 		return nil, fmt.Errorf("failed to get default model profile: %w", err)
 	}
 
-	req := models.OllamaReq{
+	req := models.OllamaChatReq{
 		Model:  defaultModel.ModelName,
 		Stream: true,
 	}
@@ -286,26 +267,23 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 			if strings.Contains(mem.Content, "From conversation") {
 				// Already formatted as system message
 				content := mem.Content
-				req.Messages = append(req.Messages, models.OllamaMessage{
+				req.Messages = append(req.Messages, models.OllamaChatMessage{
 					Role:    role,
 					Content: content,
 				})
 			} else {
 				// Format the memory with role information
 				content := fmt.Sprintf("Previously (%s): %s", mem.Role, mem.Content)
-				req.Messages = append(req.Messages, models.OllamaMessage{
+				req.Messages = append(req.Messages, models.OllamaChatMessage{
 					Role:    role,
 					Content: content,
 				})
 			}
 		}
 
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
+		util.LogInfo("Added retrieved memories to request context", logrus.Fields{
 			"count": len(cc.RetrievedMemories),
-		}).Info("Added retrieved memories to request context")
+		})
 	}
 
 	// Add search results if available
@@ -314,7 +292,7 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 			"Here are some relevant search results that might help:"))
 
 		for _, result := range cc.SearchResults {
-			req.Messages = append(req.Messages, models.OllamaMessage{
+			req.Messages = append(req.Messages, models.OllamaChatMessage{
 				Role:    "system",
 				Content: result.Content,
 			})
@@ -330,12 +308,9 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 		// Add the master summary
 		req.Messages = append(req.Messages, CreateSystemMessage(cc.MasterSummary.Content))
 
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":      line,
+		util.LogInfo("Using master summary for conversation context", logrus.Fields{
 			"summaryId": cc.MasterSummary.ID,
-		}).Info("Using master summary for conversation context")
+		})
 	}
 
 	// Add level summaries (one from each level)
@@ -352,12 +327,7 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 	ctx := context.Background()
 	userConfig, err := GetUserConfig(cc.UserID)
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Could not load user configuration, using system defaults")
+		util.LogWarning("Could not load user configuration, using system defaults", logrus.Fields{"error": err})
 		return nil, err
 	}
 
@@ -366,47 +336,30 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 		defer cancel()
 
 		if err := cc.EnhanceRequestWithRAG(timeoutCtx, &req); err != nil {
-			// Log the error but continue without RAG
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
-				"error": err,
-			}).Warn("Failed to enhance request with RAG")
+			util.LogWarning("Failed to enhance request with RAG", logrus.Fields{"error": err})
 		}
 	}
 
 	// debug log the content of each message in the request
 	for i, msg := range req.Messages {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
+		util.LogDebug(truncateForLog(msg.Content), logrus.Fields{
 			"index": i,
 			"role":  msg.Role,
-		}).Debug(truncateForLog(msg.Content))
+		})
 	}
 
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":  line,
+	util.LogDebug("Message chain order", logrus.Fields{
 		"chain": describeMessageChain(req.Messages),
-	}).Debug("Message chain order")
+	})
 
 	return json.Marshal(req)
 }
 
 // addLevelSummariesToReq adds one summary from each level to the request
-func (cc *ConversationContext) addLevelSummariesToReq(req *models.OllamaReq) error {
+func (cc *ConversationContext) addLevelSummariesToReq(req *models.OllamaChatReq) error {
 	userConfig, err := GetUserConfig(cc.UserID)
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Could not load user configuration, using system defaults")
+		util.LogWarning("Could not load user configuration, using system defaults", logrus.Fields{"error": err})
 		return err
 	}
 
@@ -425,27 +378,19 @@ func (cc *ConversationContext) addLevelSummariesToReq(req *models.OllamaReq) err
 		summaryCount++
 	}
 	if summaryCount > 0 {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
+		util.LogInfo("Using summaries (one per level) for conversation context", logrus.Fields{
 			"count": summaryCount,
-		}).Info("Using summaries (one per level) for conversation context")
+		})
 	}
 	return nil
 }
 
 // addRecentMessagesToReq adds the most recent messages to the request
-func (cc *ConversationContext) addRecentMessagesToReq(req *models.OllamaReq) error {
+func (cc *ConversationContext) addRecentMessagesToReq(req *models.OllamaChatReq) error {
 	// Get user-specific configuration
 	userConfig, err := GetUserConfig(cc.UserID)
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Could not load user configuration, using system defaults")
+		util.LogWarning("Could not load user configuration, using system defaults", logrus.Fields{"error": err})
 		return err
 	}
 
@@ -461,17 +406,14 @@ func (cc *ConversationContext) addRecentMessagesToReq(req *models.OllamaReq) err
 		startIndex = 0
 	}
 
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":  line,
+	util.LogInfo("Including most recent messages in request to Ollama", logrus.Fields{
 		"count": messagesToInclude,
-	}).Info("Including most recent messages in request to Ollama")
+	})
 
 	// Add regular messages (most recent based on configuration)
 	// Ensure messages are in chronological order (oldest first, newest last)
 	for i := startIndex; i < len(cc.Messages); i++ {
-		req.Messages = append(req.Messages, models.OllamaMessage{
+		req.Messages = append(req.Messages, models.OllamaChatMessage{
 			Role:    cc.Messages[i].Role,
 			Content: cc.Messages[i].Content,
 		})
@@ -481,15 +423,15 @@ func (cc *ConversationContext) addRecentMessagesToReq(req *models.OllamaReq) err
 }
 
 // CreateSystemMessage is a helper to create a system message
-func CreateSystemMessage(content string) models.OllamaMessage {
-	return models.OllamaMessage{
+func CreateSystemMessage(content string) models.OllamaChatMessage {
+	return models.OllamaChatMessage{
 		Role:    "system",
 		Content: content,
 	}
 }
 
 // describeMessageChain returns a string describing the message chain order
-func describeMessageChain(messages []models.OllamaMessage) string {
+func describeMessageChain(messages []models.OllamaChatMessage) string {
 	result := ""
 	for _, msg := range messages {
 		// Append first character of role (S for system, U for user, A for assistant)
@@ -519,36 +461,14 @@ func truncateForLog(content string) string {
 }
 
 // RetrieveAndInjectMemories retrieves relevant memories based on the current user query
-func (cc *ConversationContext) RetrieveAndInjectMemories(ctx context.Context, currentUserQuery string) error {
+func (cc *ConversationContext) RetrieveAndInjectMemories(ctx context.Context, queryEmbedding []float32) error {
 	// Clear any previous memories
 	cc.RetrievedMemories = nil
 
 	// Get user-specific configuration
 	userConfig, err := GetUserConfig(cc.UserID)
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Could not load user configuration, using system defaults")
-		return err
-	}
-
-	if !userConfig.Retrieval.Enabled {
-		return nil // Retrieval disabled in user config
-	}
-
-	// Check if query suggests memory retrieval would be helpful
-	shouldRetrieve := cc.shouldRetrieveMemories(currentUserQuery)
-	if !shouldRetrieve && !userConfig.Retrieval.AlwaysRetrieve {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"query": truncateForLog(currentUserQuery),
-		}).Info("Query doesn't appear to need memory retrieval, skipping")
-		return nil
+		return util.HandleError(err)
 	}
 
 	// Set a search limit from user config
@@ -557,35 +477,14 @@ func (cc *ConversationContext) RetrieveAndInjectMemories(ctx context.Context, cu
 		limit = 5
 	}
 
-	profile, err := storage.GetModelProfile(ctx, userConfig.ModelProfiles.EmbeddingProfileID)
-	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Could not load embedding model profile, using system defaults")
-		return nil
-	}
-
 	// First try vector similarity search if RAG is enabled
 	if userConfig.Summarization.EnableRAG {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Info("Performing semantic search for memories")
-		queryEmbedding, err := proxy.GetEmbedding(ctx, currentUserQuery, profile.ModelName)
+		util.LogInfo("Performing semantic search for memories")
 		if err == nil && len(queryEmbedding) > 0 {
 			// Search in the current conversation first
 			similarMessages, err := storage.SearchMessagesBySimilarity(ctx, cc.ConversationID, queryEmbedding, limit)
 			if err == nil && len(similarMessages) > 0 {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":  line,
-					"count": len(similarMessages),
-				}).Info("Found semantically similar messages in current conversation")
+				util.LogInfo(fmt.Sprintf("Found %v semantically similar messages in current conversation", len(similarMessages)))
 				// Convert and add to retrieved memories
 				for _, msg := range similarMessages {
 					cc.RetrievedMemories = append(cc.RetrievedMemories, models.Message{
@@ -607,12 +506,7 @@ func (cc *ConversationContext) RetrieveAndInjectMemories(ctx context.Context, cu
 
 				similarMessages, err = storage.SearchAllMessagesBySimilarity(ctx, queryEmbedding, threshold, limit)
 				if err == nil && len(similarMessages) > 0 {
-					_, file, line, _ := runtime.Caller(0)
-					logrus.WithFields(logrus.Fields{
-						"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-						"line":  line,
-						"count": len(similarMessages),
-					}).Info("Found semantically similar messages across conversations")
+					util.LogInfo(fmt.Sprintf("Found %v semantically similar messages across conversation", len(similarMessages)))
 					// Convert and add to retrieved memories
 					for _, msg := range similarMessages {
 						formattedContent := fmt.Sprintf(
@@ -633,90 +527,7 @@ func (cc *ConversationContext) RetrieveAndInjectMemories(ctx context.Context, cu
 		}
 	}
 
-	// Fall back to keyword search if vector search didn't yield results
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Falling back to keyword search")
-	keywordMessages, err := storage.SearchMessagesByKeyword(ctx, cc.ConversationID, currentUserQuery, limit)
-	if err == nil && len(keywordMessages) > 0 {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"count": len(keywordMessages),
-		}).Info("Found keyword-matched messages")
-		// Convert and add to retrieved memories
-		for _, msg := range keywordMessages {
-			cc.RetrievedMemories = append(cc.RetrievedMemories, models.Message{
-				Role:    msg.Role,
-				Content: msg.Content,
-				ID:      msg.ID,
-			})
-		}
-		return nil
-	}
-
-	_, file, line, _ = runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":  line,
-		"query": truncateForLog(currentUserQuery),
-	}).Info("No relevant memories found for query")
 	return nil
-}
-
-// shouldRetrieveMemories determines if a query likely needs memory retrieval
-func (cc *ConversationContext) shouldRetrieveMemories(query string) bool {
-	// Convert query to lowercase for case-insensitive matching
-	lowercaseQuery := strings.ToLower(query)
-
-	// List of keywords and phrases that suggest the user is asking about past information
-	memoryTriggers := []string{
-		"remember", "recall", "previous", "earlier", "before", "last time",
-		"you said", "mentioned", "told me", "yesterday", "last week",
-		"forgot", "remind me", "i asked", "we discussed", "we talked about",
-		"what did i", "what did you", "did i tell", "did you tell",
-	}
-
-	// Check if any memory trigger is in the query
-	for _, trigger := range memoryTriggers {
-		if strings.Contains(lowercaseQuery, trigger) {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":    filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":    line,
-				"trigger": trigger,
-			}).Info("Memory retrieval triggered by keyword")
-			return true
-		}
-	}
-
-	// Question patterns that often benefit from memory retrieval
-	questionPatterns := []string{
-		"what was", "who was", "where was", "when was", "how was",
-		"what were", "who were", "where were", "when were", "how were",
-		"what did", "who did", "where did", "when did", "how did",
-	}
-
-	// Check for question patterns
-	for _, pattern := range questionPatterns {
-		if strings.Contains(lowercaseQuery, pattern) {
-			// Check if the question appears to be about past interactions
-			if strings.Contains(lowercaseQuery, "you") || strings.Contains(lowercaseQuery, "we") || strings.Contains(lowercaseQuery, "i") {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":    filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":    line,
-					"pattern": pattern,
-				}).Info("Memory retrieval triggered by question pattern")
-				return true
-			}
-		}
-	}
-
-	return false
 }
 
 // shouldSummarize determines if the conversation needs to be summarized
@@ -724,12 +535,7 @@ func (cc *ConversationContext) shouldSummarize() bool {
 	// Load user-specific configuration
 	userConfig, err := GetUserConfig(cc.UserID)
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Could not load user configuration, using system defaults")
+		util.LogWarning("Could not load user configuration, using system defaults", logrus.Fields{"error": err})
 		return false
 	}
 
@@ -766,31 +572,56 @@ func (cc *ConversationContext) shouldSummarize() bool {
 	return messagesSinceLastSummary >= messageThreshold
 }
 
-func (cc *ConversationContext) InjectWebSearchResult(ctx context.Context, result recherche.SearchResult) error {
-	// Add system message to introduce the web search results
-	cc.Messages = append(cc.SearchResults, models.Message{
-		Role:    "system",
-		Content: "Here are some relevant web search results:",
+func (cc *ConversationContext) SearchAndInjectResults(ctx context.Context, query string) error {
+	cfg, err := GetUserConfig(cc.UserID)
+	if err != nil {
+		util.LogWarning("Could not load user configuration, using system defaults")
+		return err
+	}
+
+	fmtProfile, err := storage.GetModelProfile(ctx, cfg.ModelProfiles.FormattingProfileID)
+	if err != nil {
+		return util.HandleError(err)
+	}
+
+	util.LogDebug("Formatting query for web search", logrus.Fields{
+		"query": query,
+		"model": fmtProfile.ModelName,
 	})
 
-	// Add each result as a system message
-	// for _, result := range results {
-	// content := fmt.Sprintf("Web search result: %s", result.)
-
-	for _, c := range result.Contents {
-		if len(c) > 0 {
-			cc.SearchResults = append(cc.SearchResults, models.Message{
-				Role:    "system",
-				Content: c,
-			})
-		}
+	req := models.OllamaGenerateReq{
+		Model:  fmtProfile.ModelName,
+		Prompt: fmt.Sprintf("Please format the following query for web search without any extra explanation. Make sure it is concise and focuses on key words and the original intent.\n\n %s", query),
 	}
-	// content := fmt.Sprintf("Web search result: %s", result.Snippet)
-	// cc.SearchResults = append(cc.SearchResults, models.Message{
-	// 	Role:    "system",
-	// 	Content: result.Contents[],
-	// })
-	// }
+
+	// Format the query for web search
+	fmtQ, err := proxy.StreamOllamaGenerateRequest(ctx, fmtProfile.ModelName, req)
+	if err != nil {
+		return util.HandleError(err)
+	}
+
+	util.LogDebug("Formatted query for web search", logrus.Fields{
+		"query": fmtQ,
+	})
+
+	// Attempt to perform a web search and inject results
+	searchResult, err := recherche.QuickSearch(ctx, fmtQ, cfg.WebSearch.MaxResults, true)
+	if err != nil {
+		util.LogWarning("Error performing web search")
+	}
+
+	if searchResult != nil {
+		for _, c := range searchResult.Contents {
+			if len(c) > 0 {
+				cc.SearchResults = append(cc.SearchResults, models.Message{
+					Role:    "system",
+					Content: fmt.Sprintf("Here is a relevant finding from a web search:\n %v", c),
+				})
+			}
+		}
+
+		cc.Messages = append(cc.SearchResults, cc.Messages...)
+	}
 
 	return nil
 }

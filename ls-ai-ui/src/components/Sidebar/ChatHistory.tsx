@@ -1,17 +1,10 @@
-import { useEffect } from 'react';
 import { List, Typography, Box, useTheme } from '@mui/material';
 import ChatItem from './ChatItem';
 import { useChat } from '../../chat';
 
 const ChatHistory = () => {
-  const { conversations, fetchConversations } = useChat();
+  const { conversations } = useChat();
   const theme = useTheme();
-
-  useEffect(() => {
-    // Load conversations when component mounts
-    fetchConversations();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   return (
     <Box>
       <Typography variant="subtitle1" sx={{ mb: theme.spacing(1) }}>
@@ -19,7 +12,7 @@ const ChatHistory = () => {
       </Typography>
       
       {conversations?.length ? (
-        <List sx={{ overflow: 'auto', maxHeight: 'calc(100vh - 300px)' }}>
+        <List sx={{ overflow: 'auto' }}>
           {conversations.map((chat) => (
             <ChatItem
               key={chat.id}

@@ -3,11 +3,11 @@ package context
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"proxyllama/config"
 	"proxyllama/models"
 	"proxyllama/storage"
-	"runtime"
+
+	"proxyllama/util"
 
 	"github.com/sirupsen/logrus"
 )
@@ -18,7 +18,7 @@ import (
 func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Summary, error) {
 	usrCfg, err := GetUserConfig(cc.UserID)
 	if err != nil {
-		return models.Summary{}, fmt.Errorf("failed to get user config: %w", err)
+		return models.Summary{}, util.HandleError(fmt.Errorf("failed to get user config: %w", err))
 	}
 
 	if !usrCfg.Summarization.Enabled {
@@ -47,19 +47,19 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 
 	summaryProfile, err := storage.GetModelProfile(ctx, usrCfg.ModelProfiles.SummarizationProfileID)
 	if err != nil {
-		return models.Summary{}, fmt.Errorf("failed to get summarization profile: %w", err)
+		return models.Summary{}, util.HandleError(fmt.Errorf("failed to get summarization profile: %w", err))
 	}
 
 	// Generate the summary using the selected prompt
 	summaryContent, err := cc.generateSummarization(messagesToSummarizeContent, summaryProfile)
 	if err != nil {
-		return models.Summary{}, fmt.Errorf("failed to generate summary: %w", err)
+		return models.Summary{}, util.HandleError(fmt.Errorf("failed to generate summary: %w", err))
 	}
 
 	// Create a new summary record in the database
 	summaryID, err := storage.CreateSummary(ctx, cc.ConversationID, summaryContent, 1, messageIDsToSummarize)
 	if err != nil {
-		return models.Summary{}, fmt.Errorf("failed to store summary: %w", err)
+		return models.Summary{}, util.HandleError(fmt.Errorf("failed to store summary: %w", err))
 	}
 
 	// Add the summary to our context
@@ -76,12 +76,9 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 	// Check if we need to consolidate summaries at level 1
 	if cc.shouldConsolidateLevel(1) {
 		if err := cc.consolidateLevel(ctx, 1); err != nil {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
+			util.LogWarning("Failed to consolidate level 1 summaries", logrus.Fields{
 				"error": err,
-			}).Warn("Failed to consolidate level 1 summaries")
+			})
 		}
 	}
 
@@ -139,12 +136,9 @@ func (cc *ConversationContext) removeMessagesById(ids []int) {
 func (cc *ConversationContext) shouldConsolidateLevel(level int) bool {
 	usrCfg, err := GetUserConfig(cc.UserID)
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
+		util.LogWarning("Failed to get user config", logrus.Fields{
 			"error": err,
-		}).Warn("Failed to get user config")
+		})
 		return false
 	}
 	levelCount := countSummariesAtLevel(cc.Summaries, level)
@@ -177,13 +171,10 @@ func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) 
 		return nil // Not exactly the right number of summaries to consolidate
 	}
 
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":  line,
+	util.LogInfo("Consolidating summaries", map[string]interface{}{
 		"count": len(summariesToConsolidate),
 		"level": level,
-	}).Info("Consolidating summaries")
+	})
 
 	// Convert summaries to messages for the summary generator
 	var messagesToSummarize []models.Message
@@ -227,16 +218,13 @@ func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) 
 		return fmt.Errorf("failed to store level %d summary: %w", nextLevel, err)
 	}
 
-	_, file, line, _ = runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":       filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":       line,
+	util.LogInfo("Created new summary", map[string]interface{}{
 		"nextLevel":  nextLevel,
 		"summaryId":  summaryID,
 		"count":      len(summariesToConsolidate),
 		"level":      level,
 		"promptType": promptType,
-	}).Info("Created new summary")
+	})
 
 	// Add the new summary to our context
 	newSummary := models.Summary{
@@ -256,43 +244,31 @@ func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) 
 
 		// If we have exactly X summaries at max level, create/update master summary
 		if levelMaxCount == usrCfg.Summarization.SummariesBeforeConsolidation {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
+			util.LogInfo("Creating/updating master summary", logrus.Fields{
 				"count": levelMaxCount,
 				"level": maxSummaryLevel,
-			}).Info("Creating/updating master summary")
+			})
 
 			if cc.MasterSummary == nil {
 				if err := cc.createMasterSummary(ctx); err != nil {
-					_, file, line, _ := runtime.Caller(0)
-					logrus.WithFields(logrus.Fields{
-						"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-						"line":  line,
+					util.LogWarning("Failed to create master summary", logrus.Fields{
 						"error": err,
-					}).Warn("Failed to create master summary")
+					})
 				}
 			} else {
 				// Update the existing master summary
 				if err := cc.updateMasterSummary(ctx); err != nil {
-					_, file, line, _ := runtime.Caller(0)
-					logrus.WithFields(logrus.Fields{
-						"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-						"line":  line,
+					util.LogWarning("Failed to update master summary", logrus.Fields{
 						"error": err,
-					}).Warn("Failed to update master summary")
+					})
 				}
 			}
 		} else {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":         filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":         line,
+			util.LogInfo("Not enough summaries to create master summary yet", logrus.Fields{
 				"currentCount": levelMaxCount,
 				"targetCount":  usrCfg.Summarization.SummariesBeforeConsolidation,
 				"level":        maxSummaryLevel,
-			}).Info("Not enough summaries to create master summary yet")
+			})
 		}
 	}
 
@@ -351,13 +327,10 @@ func (cc *ConversationContext) createMasterSummary(ctx context.Context) error {
 		return fmt.Errorf("failed to store master summary: %w", err)
 	}
 
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":      line,
+	util.LogInfo("Created master summary", logrus.Fields{
 		"summaryId": masterSummaryID,
 		"count":     len(summaryIDs),
-	}).Info("Created master summary")
+	})
 
 	// Store the master summary in our context
 	cc.MasterSummary = &models.Summary{
@@ -390,11 +363,7 @@ func (cc *ConversationContext) updateMasterSummary(ctx context.Context) error {
 
 	// Skip if no new summaries to integrate
 	if len(newSummaryMessages) == 0 {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Info("No new summaries to integrate into master summary")
+		util.LogInfo("No new summaries to integrate into master summary", logrus.Fields{})
 		return nil
 	}
 
@@ -432,13 +401,10 @@ func (cc *ConversationContext) updateMasterSummary(ctx context.Context) error {
 		return fmt.Errorf("failed to store updated master summary: %w", err)
 	}
 
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":      line,
+	util.LogInfo("Updated master summary", logrus.Fields{
 		"summaryId": masterSummaryID,
 		"profile":   masterSummaryProfile.Name,
-	}).Info("Updated master summary")
+	})
 
 	// Update the master summary in our context
 	cc.MasterSummary = &models.Summary{
@@ -496,12 +462,9 @@ func (cc *ConversationContext) prepareMasterSummaryMessages(cfg *config.UserConf
 func (cc *ConversationContext) getNewSummariesForMasterUpdate(ctx context.Context) []models.Message {
 	usrCfg, err := GetUserConfig(cc.UserID)
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
+		util.LogWarning("Failed to get user config", logrus.Fields{
 			"error": err,
-		}).Warn("Failed to get user config")
+		})
 		return nil
 	}
 

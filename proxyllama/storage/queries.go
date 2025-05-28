@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
-	"path/filepath"
-	"runtime"
 	"strings"
+
+	"proxyllama/util" // Adjust the import path according to your project structure
 
 	"github.com/sirupsen/logrus"
 )
@@ -20,11 +20,7 @@ var queryCache = make(map[string]string)
 
 // LoadQueries loads all SQL queries from the embedded filesystem
 func LoadQueries() {
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Loading SQL queries...")
+	util.LogInfo("Loading SQL queries...")
 
 	// Walk through the embedded filesystem
 	err := fs.WalkDir(queriesFS, "queries", func(filePath string, d fs.DirEntry, err error) error {
@@ -61,20 +57,9 @@ func LoadQueries() {
 	})
 
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Fatal("Failed to load SQL queries")
+		util.HandleFatalError(err, logrus.Fields{"context": "loading SQL queries"})
 	}
-
-	_, file, line, _ = runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":  line,
-		"count": len(queryCache),
-	}).Info("Successfully loaded SQL queries")
+	util.LogInfo(fmt.Sprintf("Loaded %d SQL queries", len(queryCache)))
 }
 
 // GetQuery returns a cached SQL query by its key
@@ -82,12 +67,7 @@ func LoadQueries() {
 func GetQuery(key string) string {
 	query, exists := queryCache[key]
 	if !exists {
-		_, file, line, _ := runtime.Caller(1)
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-			"key":  key,
-		}).Warn("Query not found")
+		util.LogWarning(fmt.Sprintf("Query not found: %s", key))
 		return ""
 	}
 	return query

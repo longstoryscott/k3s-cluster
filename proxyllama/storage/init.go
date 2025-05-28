@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"proxyllama/config"
 	"proxyllama/models"
-	"runtime"
+	"proxyllama/util"
 	"sync"
 	"time"
 
@@ -33,12 +32,8 @@ func InitDB(connStr string) error {
 	connString = connStr
 
 	initOnce.Do(func() {
-		_, file, line, _ := runtime.Caller(0)
 		LoadQueries()
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Info("Initializing PostgreSQL database connection...")
+		util.LogInfo("Initializing PostgreSQL database connection...")
 
 		config, err = pgxpool.ParseConfig(connStr)
 		if err != nil {
@@ -71,10 +66,7 @@ func InitDB(connStr string) error {
 			err = fmt.Errorf("failed to initialize tables: %w", err)
 			return
 		}
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Info("Successfully initialized tables")
+		util.LogInfo("Successfully initialized tables")
 
 		// Ensure research tables are created
 		err = EnsureResearchTables(ctx)
@@ -82,10 +74,7 @@ func InitDB(connStr string) error {
 			err = fmt.Errorf("failed to ensure research tables: %w", err)
 			return
 		}
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Info("Successfully ensured research tables")
+		util.LogInfo("Successfully ensured research tables")
 
 		// Create default model profiles
 		err = CreateDefaultProfiles(ctx)
@@ -94,10 +83,7 @@ func InitDB(connStr string) error {
 			return
 		}
 
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Info("Successfully connected to PostgreSQL")
+		util.LogInfo("Successfully connected to PostgreSQL")
 	})
 	return err
 }
@@ -105,11 +91,7 @@ func InitDB(connStr string) error {
 // EnsureDBConnection checks the database connection and attempts to reconnect if necessary
 func EnsureDBConnection(ctx context.Context) error {
 	if Pool == nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Info("Connection pool is nil, initializing database")
+		util.LogInfo("Connection pool is nil, initializing database")
 
 		if connString == "" {
 			return errors.New("connection string is empty, cannot reconnect")
@@ -119,12 +101,7 @@ func EnsureDBConnection(ctx context.Context) error {
 
 	// Check if the connection is still valid
 	if err := Pool.Ping(ctx); err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Database connection lost, attempting to reconnect")
+		util.LogWarning("Database connection lost, attempting to reconnect", logrus.Fields{"error": err})
 
 		// Close the old pool
 		Pool.Close()
@@ -192,23 +169,13 @@ func InitializeTables(ctx context.Context) error {
 	// Add compression policy for message_embeddings
 	_, err = Pool.Exec(ctx, GetQuery("message.message_embeddings_compression_policy"))
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Warning: Failed to add message embeddings compression policy")
+		util.LogWarning("Warning: Failed to add message embeddings compression policy", logrus.Fields{"error": err})
 	}
 
 	// Add retention policy for message_embeddings
 	_, err = Pool.Exec(ctx, GetQuery("message.message_embeddings_retention_policy"))
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Warning: Failed to add message embeddings retention policy")
+		util.LogWarning("Warning: Failed to add message embeddings retention policy", logrus.Fields{"error": err})
 	}
 
 	// Create summaries table
@@ -310,67 +277,37 @@ func InitializeTables(ctx context.Context) error {
 	// Add compression policy for messages
 	_, err = Pool.Exec(ctx, GetQuery("message.messages_compression_policy"))
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Warning: Failed to add messages compression policy")
+		util.LogWarning("Warning: Failed to add messages compression policy", logrus.Fields{"error": err})
 	}
 
 	// Add compression policy for conversations
 	_, err = Pool.Exec(ctx, GetQuery("conversation.conversations_compression_policy"))
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Warning: Failed to add conversations compression policy")
+		util.LogWarning("Warning: Failed to add conversations compression policy", logrus.Fields{"error": err})
 	}
 
 	// Add compression policy for summaries
 	_, err = Pool.Exec(ctx, GetQuery("summary.summaries_compression_policy"))
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Warning: Failed to add summaries compression policy")
+		util.LogWarning("Warning: Failed to add summaries compression policy", logrus.Fields{"error": err})
 	}
 
 	// Add retention policy for conversations
 	_, err = Pool.Exec(ctx, GetQuery("conversation.conversations_retention_policy"))
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Warning: Failed to add conversations retention policy")
+		util.LogWarning("Warning: Failed to add conversations retention policy", logrus.Fields{"error": err})
 	}
 
 	// Add retention policy for messages
 	_, err = Pool.Exec(ctx, GetQuery("message.messages_retention_policy"))
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Warning: Failed to add messages retention policy")
+		util.LogWarning("Warning: Failed to add messages retention policy", logrus.Fields{"error": err})
 	}
 
 	// Add retention policy for summaries
 	_, err = Pool.Exec(ctx, GetQuery("summary.summaries_retention_policy"))
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Warning: Failed to add summaries retention policy")
+		util.LogWarning("Warning: Failed to add summaries retention policy", logrus.Fields{"error": err})
 	}
 
 	// Initialize memory schema
@@ -414,6 +351,7 @@ func CreateDefaultProfiles(ctx context.Context) error {
 		config.DefaultResearchConsolidationProfile,
 		config.DefaultResearchAnalysisProfile,
 		config.DefaultEmbeddingProfile,
+		config.DefaultFormattingProfile,
 	}
 
 	tx, err := Pool.Begin(ctx)
@@ -425,13 +363,10 @@ func CreateDefaultProfiles(ctx context.Context) error {
 	// Insert each default profile
 	systemUserID := "0"
 	for _, profile := range defaultProfiles {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":        filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":        line,
+		util.LogInfo("Inserting default profile", logrus.Fields{
 			"profileName": profile.Name,
 			"profileId":   profile.ID,
-		}).Info("Inserting default profile")
+		})
 
 		_, err = tx.Exec(ctx,
 			GetQuery("modelprofile.create_default_profile"),
@@ -455,21 +390,14 @@ func CreateDefaultProfiles(ctx context.Context) error {
 
 // PerformDatabaseMaintenance runs optimization and maintenance tasks for the database
 func PerformDatabaseMaintenance(ctx context.Context) error {
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Starting database maintenance tasks...")
+	util.LogInfo("Starting database maintenance tasks...")
 
 	// Vacuum analyze for better query planning
 	_, err := Pool.Exec(ctx, `VACUUM ANALYZE`)
 	if err != nil {
 		return fmt.Errorf("failed to vacuum analyze: %w", err)
 	}
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("VACUUM ANALYZE completed")
+	util.LogInfo("VACUUM ANALYZE completed")
 
 	// Reindex tables to optimize indexes
 	for _, table := range []string{"messages", "conversations", "summaries"} {
@@ -477,32 +405,18 @@ func PerformDatabaseMaintenance(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to reindex %s: %w", table, err)
 		}
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"table": table,
-		}).Info("REINDEX completed")
+		util.LogInfo("REINDEX completed", logrus.Fields{"table": table})
 	}
 
 	// Run TimescaleDB-specific maintenance
 	_, err = Pool.Exec(ctx, `SELECT run_job(j.id) FROM timescaledb_information.jobs j WHERE j.proc_name = 'policy_refresh'`)
 	if err != nil {
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Info("Note: TimescaleDB policy refresh failed (may be normal if no jobs)")
+		util.LogWarning("Note: TimescaleDB policy refresh failed (may be normal if no jobs)", logrus.Fields{"error": err})
 	} else {
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Info("TimescaleDB policy refresh completed")
+		util.LogInfo("TimescaleDB policy refresh completed")
 	}
 
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Database maintenance tasks completed successfully")
+	util.LogInfo("Database maintenance tasks completed successfully")
 	return nil
 }
 

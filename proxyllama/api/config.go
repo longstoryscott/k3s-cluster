@@ -1,11 +1,10 @@
 package api
 
 import (
-	"path/filepath"
 	"proxyllama/auth"
 	"proxyllama/config"
 	"proxyllama/context"
-	"runtime"
+	"proxyllama/util"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
@@ -43,13 +42,6 @@ func UpdateUserConfig(c *fiber.Ctx) error {
 	// Get current user config to ensure we don't lose existing settings
 	currentConfig, err := context.GetUserConfig(userID)
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":   line,
-			"userId": userID,
-			"error":  err,
-		}).Warn("Failed to retrieve current user config")
 		// If we can't get current config, we'll just use what was provided
 		currentConfig = &config.UserConfig{UserID: userID}
 	}
@@ -59,21 +51,11 @@ func UpdateUserConfig(c *fiber.Ctx) error {
 
 	// Special handling for ModelProfiles to ensure they aren't lost if partial update
 	if newUserConfig.ModelProfiles != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":   line,
-			"userId": userID,
-		}).Info("Updating model profiles for user")
+		// Updating model profiles for user
 	} else if currentConfig.ModelProfiles != nil {
 		// If the request doesn't include model profiles but we have existing ones, preserve them
 		newUserConfig.ModelProfiles = currentConfig.ModelProfiles
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":   line,
-			"userId": userID,
-		}).Info("Preserving existing model profiles for user")
+		// Preserving existing model profiles for user
 	}
 
 	// Use context package cache-aware function to update
@@ -81,12 +63,7 @@ func UpdateUserConfig(c *fiber.Ctx) error {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to update user configuration")
 	}
 
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":   line,
-		"userId": userID,
-	}).Info("User configuration updated successfully")
+	util.LogInfo("User configuration updated", logrus.Fields{"userID": userID})
 
 	// Return the new config
 	return c.JSON(newUserConfig)

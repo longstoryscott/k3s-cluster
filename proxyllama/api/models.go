@@ -1,12 +1,12 @@
 package api
 
 import (
-	"path/filepath"
 	"proxyllama/auth"
 	"proxyllama/config"
 	"proxyllama/models"
 	"proxyllama/storage"
-	"runtime"
+
+	"proxyllama/util"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -46,19 +46,17 @@ func ListModelProfiles(c *fiber.Ctx) error {
 		config.DefaultResearchConsolidationProfile,
 		config.DefaultResearchAnalysisProfile,
 		config.DefaultEmbeddingProfile,
+		config.DefaultFormattingProfile,
 	}
 	// Convert to pointer slice for consistency
 	for _, def := range defaultProfiles {
 		profiles = append(profiles, &def)
 	}
 
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":         filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":         line,
+	util.LogInfo("User model profiles retrieved", logrus.Fields{
 		"userId":       userID,
 		"profileCount": len(profiles),
-	}).Info("User model profiles retrieved")
+	})
 
 	return c.JSON(profiles)
 }

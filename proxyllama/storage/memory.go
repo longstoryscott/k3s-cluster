@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"path/filepath"
-	"runtime"
+	"proxyllama/util"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/sirupsen/logrus"
 )
 
@@ -23,118 +23,80 @@ type Memory struct {
 
 // InitMemorySchema initializes the database schema for memory storage
 func InitMemorySchema(ctx context.Context) error {
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Initializing memory schema...")
+	util.LogInfo("Initializing memory schema...")
 
 	// Create memories table and hypertable
 	_, err := Pool.Exec(ctx, GetQuery("memory.init_memory_schema"))
 	if err != nil {
 		return fmt.Errorf("failed to create memories table: %w", err)
 	}
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Created memories table")
+	util.LogInfo("Created memories table")
 
 	// Create indexes for memories
 	_, err = Pool.Exec(ctx, GetQuery("memory.create_memory_indexes"))
 	if err != nil {
 		return fmt.Errorf("failed to create memory indexes: %w", err)
 	}
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Created memory indexes")
+	util.LogInfo("Created memory indexes")
 
 	// Enable compression on memories
 	_, err = Pool.Exec(ctx, GetQuery("memory.enable_memories_compression"))
 	if err != nil {
 		return fmt.Errorf("failed to enable memories compression: %w", err)
 	}
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Enabled memories compression")
+	util.LogInfo("Enabled memories compression")
 
 	// Add compression policy for memories
 	_, err = Pool.Exec(ctx, GetQuery("memory.memories_compression_policy"))
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Failed to add memories compression policy")
+		util.LogWarning("Failed to add memories compression policy", logrus.Fields{"error": err})
 	}
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Added memories compression policy")
+	util.LogInfo("Added memories compression policy")
 
 	// Add retention policy for memories
 	_, err = Pool.Exec(ctx, GetQuery("memory.memories_retention_policy"))
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Failed to add memories retention policy")
+		util.LogWarning("Failed to add memories retention policy", logrus.Fields{"error": err})
 	}
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Added memories retention policy")
+	util.LogInfo("Added memories retention policy")
 
-	_, file, line, _ = runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Memory schema initialized successfully")
+	_, err = Pool.Exec(ctx, GetQuery("memory.create_memory_cascade_delete_trigger"))
+	if err != nil {
+		util.LogWarning("Failed to create memory cascade delete trigger", logrus.Fields{"error": err})
+	} else {
+		util.LogInfo("Memory cascade delete trigger created successfully")
+	}
+
+	util.LogInfo("Memory schema initialized successfully")
 	return nil
 }
 
 // StoreMemory stores a memory with embedding for a user
 func StoreMemory(ctx context.Context, userID, source string, sourceID int, embedding []float32) error {
-	_, err := Pool.Exec(ctx, GetQuery("memory.store_memory"),
-		userID, sourceID, source, embedding)
+	tx, err := Pool.Begin(ctx)
+	if err != nil {
+		return util.HandleError(fmt.Errorf("failed to begin transaction: %w", err))
+	}
+	if err := StoreMemoryWithTx(ctx, userID, source, sourceID, embedding, tx); err != nil {
+		tx.Rollback(ctx) // rollback on error
+		return util.HandleError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return util.HandleError(fmt.Errorf("failed to commit transaction: %w", err))
+	}
+	return nil
+}
 
+// StoreMemoryWithTx stores a memory with embedding for a user within a transaction
+func StoreMemoryWithTx(ctx context.Context, userID, source string, sourceID int, embedding []float32, tx pgx.Tx) error {
+	pe, _ := processEmbedding(embedding)
+	embeddingStr := formatEmbeddingForPgVector(pe)
+	_, err := tx.Exec(ctx, GetQuery("memory.store_memory"), userID, sourceID, source, embeddingStr)
 	if err != nil {
 		return fmt.Errorf("failed to store memory: %w", err)
 	}
 
 	return nil
-}
-
-// SearchMemories searches for memories based on semantic similarity
-func SearchMemories(ctx context.Context, userID, query string, limit int) ([]Memory, error) {
-	// Generate embedding for the query
-	embedding, err := generateEmbedding(query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate embedding for query: %w", err)
-	}
-
-	rows, err := Pool.Query(ctx, GetQuery("memory.search_memories"),
-		userID, embedding, limit)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to search memories: %w", err)
-	}
-	defer rows.Close()
-
-	var memories []Memory
-	for rows.Next() {
-		var memory Memory
-		if err := rows.Scan(&memory.ID, &memory.UserID, &memory.Content, &memory.Source, &memory.CreatedAt); err != nil {
-			return nil, fmt.Errorf("failed to scan memory: %w", err)
-		}
-		memories = append(memories, memory)
-	}
-
-	return memories, nil
 }
 
 // DeleteMemory deletes a memory by ID
@@ -157,21 +119,6 @@ func DeleteAllUserMemories(ctx context.Context, userID string) error {
 	}
 
 	return nil
-}
-
-// generateEmbedding generates an embedding for a text using the embedding model
-func generateEmbedding(text string) ([]float32, error) {
-	// TODO: Implement embedding generation using a proper embedding model
-	// For now, return a placeholder embedding
-	// In a real implementation, this would call an embedding API like OpenAI's
-
-	// Creating placeholder embedding with 1536 dimensions (OpenAI's standard)
-	placeholder := make([]float32, 1536)
-	for i := range placeholder {
-		placeholder[i] = 0.0
-	}
-
-	return placeholder, nil
 }
 
 // Vector processing utilities (migrated from embedding.go)
@@ -247,38 +194,15 @@ func normalizeVector(vec []float32) []float32 {
 	return result
 }
 
-// GetSimilarMemories finds semantically similar memories for a user
-func GetSimilarMemories(ctx context.Context, userID string, queryEmbedding []float32, similarityThreshold float32, limit int) ([]Memory, error) {
-	processedEmbedding, _ := processEmbedding(queryEmbedding)
-	rows, err := Pool.Query(ctx, GetQuery("memory.similar_memories"), userID, processedEmbedding, similarityThreshold, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query similar memories: %w", err)
-	}
-	defer rows.Close()
-	var memories []Memory
-	for rows.Next() {
-		var memory Memory
-		var similarity float32
-		if err := rows.Scan(&memory.ID, &memory.UserID, &memory.Content, &memory.Source, &memory.CreatedAt, &similarity); err != nil {
-			return nil, fmt.Errorf("failed to scan memory row: %w", err)
-		}
-		memories = append(memories, memory)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating memory rows: %w", err)
-	}
-	return memories, nil
-}
-
 // GetSimilarMessages finds semantically similar messages based on vector similarity
 func GetSimilarMessages(ctx context.Context, queryEmbedding []float32, similarityThreshold float32, limit int) ([]Message, error) {
 	// Ensure the query embedding is 768 dimensions
 	processedEmbedding, _ := processEmbedding(queryEmbedding)
 	embeddingStr := formatEmbeddingForPgVector(processedEmbedding)
 
-	rows, err := Pool.Query(ctx, GetQuery("memory.similar_messages"), embeddingStr, similarityThreshold, limit)
+	rows, err := Pool.Query(ctx, GetQuery("memory.similar_messages"), embeddingStr, similarityThreshold, limit, "messages")
 	if err != nil {
-		return nil, fmt.Errorf("failed to query similar messages: %w", err)
+		return nil, util.HandleError(fmt.Errorf("failed to query similar messages: %w", err))
 	}
 	defer rows.Close()
 
@@ -288,7 +212,7 @@ func GetSimilarMessages(ctx context.Context, queryEmbedding []float32, similarit
 		var similarity float32
 
 		if err := rows.Scan(&msg.ID, &msg.ConversationID, &msg.Role, &msg.Content, &msg.CreatedAt, &similarity); err != nil {
-			return nil, fmt.Errorf("failed to scan message row: %w", err)
+			return nil, util.HandleError(fmt.Errorf("failed to scan message row: %w", err))
 		}
 
 		messages = append(messages, msg)

@@ -1,25 +1,25 @@
-import { useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef } from 'react';
 import { ChatState, ChatActions } from './useChatState';
 import { useAuth } from '../../auth';
 import { chat, getManyConversations, getMessages, removeConversation, startConversation, updateConversationTitle, ChatUserMessage, getModels, getToken } from '../../api';
-import { useWebSearch } from './useWebSearch';
+// import { useWebSearch } from './useWebSearch';
 
 export const useChatOperations = (state: ChatState, actions: ChatActions) => {
   const auth = useAuth();
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const abortController = useRef<AbortController | null>(null);
-  const {
-    detectWebSearchIntent,
-    performWebSearch,
-    formatSearchResultsForLLM,
-    isWebSearchEnabled,
-    isSearching
-  } = useWebSearch({ autoSearch: true });
+  // const {
+  //   detectWebSearchIntent,
+  //   performWebSearch,
+  //   formatSearchResultsForLLM,
+  //   isWebSearchEnabled,
+  //   isSearching
+  // } = useWebSearch({ autoSearch: true });
 
   // Sync isSearching state from useWebSearch hook to ChatState
-  useEffect(() => {
-    actions.setIsSearching(isSearching);
-  }, [isSearching, actions]);
+  // useEffect(() => {
+  //   actions.setIsSearching(isSearching);
+  // }, [isSearching, actions]);
 
   // Fetch models
   const fetchModels = useCallback(async () => {
@@ -146,37 +146,37 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
       actions.setResponse('');
 
       // Check if we should do a web search based on the prompt
-      let finalMessage = { ...message };
+      const finalMessage = { ...message };
 
-      if (isWebSearchEnabled) {
-        try {
-          const needsSearch = await detectWebSearchIntent(message.content);
+      // if (isWebSearchEnabled) {
+      //   try {
+      //     const needsSearch = await detectWebSearchIntent(message.content);
 
-          if (needsSearch) {
-            actions.setResponse('Searching the web for information...');
-            // We don't need to explicitly set isSearching here as it's handled by the useWebSearch hook
-            // and synced via the useEffect above
+      //     if (needsSearch) {
+      //       actions.setResponse('Searching the web for information...');
+      //       // We don't need to explicitly set isSearching here as it's handled by the useWebSearch hook
+      //       // and synced via the useEffect above
 
-            const searchResults = await performWebSearch(message.content);
-            if (searchResults && !searchResults.error) {
-              // Format the search results for the LLM
-              const formattedResults = formatSearchResultsForLLM(searchResults);
+      //       const searchResults = await performWebSearch(message.content);
+      //       if (searchResults && !searchResults.error) {
+      //         // Format the search results for the LLM
+      //         const formattedResults = formatSearchResultsForLLM(searchResults);
 
-              // Add search results to the prompt
-              finalMessage = {
-                ...message,
-                content: `${formattedResults}\n\nBased on the above web search results, please respond to: ${message.content}`
-              };
+      //         // Add search results to the prompt
+      //         finalMessage = {
+      //           ...message,
+      //           content: `${formattedResults}\n\nBased on the above web search results, please respond to: ${message.content}`
+      //         };
 
-              // Add a system note about the search
-              actions.setResponse('Web search complete. Processing your request...');
-            }
-          }
-        } catch (searchError) {
-          console.error('Error during web search:', searchError);
-          // Continue with original message if search fails
-        }
-      }
+      //         // Add a system note about the search
+      //         actions.setResponse('Web search complete. Processing your request...');
+      //       }
+      //     }
+      //   } catch (searchError) {
+      //     console.error('Error during web search:', searchError);
+      //     // Continue with original message if search fails
+      //   }
+      // }
 
       // Update UI immediately with the user message
       actions.addMessage(messageWithStatus);
@@ -201,11 +201,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     fetchMessages,
     auth.user,
     startNewConversation,
-    actions,
-    isWebSearchEnabled,
-    detectWebSearchIntent,
-    performWebSearch,
-    formatSearchResultsForLLM
+    actions
   ]);
 
   // Retry a failed message
@@ -318,7 +314,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     fetchModels,
     response: state.response,
     isTyping: state.isTyping,
-    isSearching, // Expose isSearching to components using this hook
+    // isSearching, // Expose isSearching to components using this hook
     resetResponse,
     abortGeneration: useCallback(() => {
       if (abortController.current) {

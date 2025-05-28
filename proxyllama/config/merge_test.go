@@ -6,7 +6,7 @@ import (
 )
 
 func TestMergeWithDefaultConfig_UserConfigPreferred(t *testing.T) {
-	base := GetConfig()
+	base := GetConfig(nil)
 	user := UserConfig{
 		Summarization: &SummarizationConfig{Enabled: true},
 		Retrieval:     &RetrievalConfig{Enabled: true},
@@ -29,7 +29,7 @@ func TestMergeWithDefaultConfig_UserConfigPreferred(t *testing.T) {
 }
 
 func TestMergeWithDefaultConfig_DefaultsUsedIfNil(t *testing.T) {
-	base := GetConfig()
+	base := GetConfig(nil)
 	user := UserConfig{
 		UserID:        "test_user",
 		Summarization: nil,

@@ -106,7 +106,7 @@ spec:
             - name: POSTGRESQL_CLIENT_MIN_MESSAGES
               value: "error"
             - name: POSTGRESQL_SHARED_PRELOAD_LIBRARIES
-              value: "pgaudit,timescaledb"
+              value: "pgaudit,timescaledb,pg_stat_statements"
           ports:
             - name: tcp-postgresql
               containerPort: 5432

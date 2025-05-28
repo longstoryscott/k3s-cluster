@@ -11,7 +11,7 @@ var DefaultPrimaryProfile = models.ModelProfile{
 	Name:        "Primary (Default)",
 	Type:        models.ModelProfileTypePrimary,
 	Description: "Primary model profile for general chat and reasoning.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "qwen3:30b-a3b",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -32,7 +32,7 @@ var DefaultSummarizationProfile = models.ModelProfile{
 	Name:        "Summarization (Default)",
 	Type:        models.ModelProfileTypePrimarySummary,
 	Description: "Default profile for conversation summarization.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "phi4-reasoning:plus",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -53,7 +53,7 @@ var DefaultMasterSummaryProfile = models.ModelProfile{
 	Name:        "Master Summary (Default)",
 	Type:        models.ModelProfileTypeMasterSummary,
 	Description: "Profile for generating master summaries.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "phi4-reasoning:plus",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -74,7 +74,7 @@ var DefaultBriefSummaryProfile = models.ModelProfile{
 	Name:        "Brief Summary (Default)",
 	Type:        models.ModelProfileTypeBriefSummary,
 	Description: "Profile for generating brief summaries.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "phi4-reasoning:plus",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -95,7 +95,7 @@ var DefaultKeyPointsProfile = models.ModelProfile{
 	Name:        "Key Points (Default)",
 	Type:        models.ModelProfileTypeKeyPoints,
 	Description: "Profile for extracting key points from messages.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "phi4-reasoning:plus",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -116,7 +116,7 @@ var DefaultSelfCritiqueProfile = models.ModelProfile{
 	Name:        "Self Critique (Default)",
 	Type:        models.ModelProfileTypeSelfCritique,
 	Description: "Profile for self-critique and response evaluation.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "mistral:latest",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -142,7 +142,7 @@ var DefaultImprovementProfile = models.ModelProfile{
 	Name:        "Improvement (Default)",
 	Type:        models.ModelProfileTypeImprovement,
 	Description: "Profile for improving and refining responses.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "mistral:latest",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -165,7 +165,7 @@ var DefaultMemoryRetrievalProfile = models.ModelProfile{
 	Name:        "Memory Retrieval (Default)",
 	Type:        models.ModelProfileTypeMemoryRetrieval,
 	Description: "Profile for retrieving and summarizing memory/context.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "cogito:8b",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -186,7 +186,7 @@ var DefaultAnalysisProfile = models.ModelProfile{
 	Name:        "Analysis (Default)",
 	Type:        models.ModelProfileTypeAnalysis,
 	Description: "Profile for analyzing and synthesizing information.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "phi4-reasoning:plus",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -210,7 +210,7 @@ var DefaultResearchTaskProfile = models.ModelProfile{
 	Name:        "Research Task (Default)",
 	Type:        models.ModelProfileTypeResearchTask,
 	Description: "Profile for conducting research tasks.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "phi4-reasoning:plus",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -236,7 +236,7 @@ var DefaultResearchPlanProfile = models.ModelProfile{
 	Name:        "Research Plan (Default)",
 	Type:        models.ModelProfileTypeResearchPlan,
 	Description: "Profile for creating research plans.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "phi4-reasoning:plus",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -260,7 +260,7 @@ var DefaultResearchConsolidationProfile = models.ModelProfile{
 	Name:        "Research Consolidation (Default)",
 	Type:        models.ModelProfileTypeResearchConsolidation,
 	Description: "Profile for consolidating research findings.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "phi4-reasoning:plus",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -286,7 +286,7 @@ var DefaultResearchAnalysisProfile = models.ModelProfile{
 	Name:        "Research Analysis (Default)",
 	Type:        models.ModelProfileTypeResearchAnalysis,
 	Description: "Profile for analyzing research findings.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "phi4-reasoning:plus",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -309,7 +309,7 @@ var DefaultEmbeddingProfile = models.ModelProfile{
 	Name:        "Embedding (Default)",
 	Type:        models.ModelProfileTypeEmbedding,
 	Description: "Profile for generating embeddings.",
-	ModelName:   "llama3.2:latest",
+	ModelName:   "nomic-embed-text:latest",
 	Parameters: models.ModelParameters{
 		NumCtx:        2048,
 		RepeatLastN:   64,
@@ -323,4 +323,25 @@ var DefaultEmbeddingProfile = models.ModelProfile{
 		MinP:          0.0,
 	},
 	SystemPrompt: "Generate a vector embedding for the provided text. The embedding should be a fixed-size vector of 768 dimensions.",
+}
+
+var DefaultFormattingProfile = models.ModelProfile{
+	ID:          uuid.MustParse("00000000-0000-0000-0000-000000000015"),
+	Name:        "Formatting (Default)",
+	Type:        models.ModelProfileTypeFormatting,
+	Description: "Profile for formatting text.",
+	ModelName:   "cogito:8b",
+	Parameters: models.ModelParameters{
+		NumCtx:        2048,
+		RepeatLastN:   64,
+		RepeatPenalty: 1.1,
+		Temperature:   0.0,
+		Seed:          0,
+		Stop:          "",
+		NumPredict:    -1,
+		TopK:          40,
+		TopP:          0.9,
+		MinP:          0.0,
+	},
+	SystemPrompt: "Format the provided text according to the specified style. Ensure that the formatting is consistent and adheres to the guidelines.",
 }

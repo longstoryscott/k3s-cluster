@@ -76,6 +76,8 @@ export interface ModelProfilesConfig {
   researchConsolidationProfileId?: string;
   researchAnalysisProfileId?: string;
   embeddingProfileId?: string; // Added missing field for embedding profile ID
+  formattingProfileId?: string; // Added missing field for formatting profile ID
+  
 }
 export interface Config {
   summarization?: SummarizationConfig;

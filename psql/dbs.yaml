@@ -31,6 +31,7 @@ data:
     # Add TimescaleDB extension to required databases
     echo "Creating TimescaleDB extension in ollama database..."
     psql -v ON_ERROR_STOP=0 --username "lsm" --dbname "ollama" -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+    psql -v ON_ERROR_STOP=0 --username "lsm" --dbname "ollama" -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
 
     # List all databases to confirm
     echo "Listing all databases:"

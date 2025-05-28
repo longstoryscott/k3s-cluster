@@ -4,28 +4,21 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"proxyllama/auth"
 	"proxyllama/config"
 	"proxyllama/context"
 	"proxyllama/storage"
-	"runtime"
+	"proxyllama/util"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/sirupsen/logrus"
 )
 
 // handleError is a helper function that logs the error and returns a fiber error
 // to standardize error handling across API endpoints
 func handleError(err error, status int, message string) error {
-	_, file, line, _ := runtime.Caller(1) // Get the caller of this function
-	logrus.WithFields(logrus.Fields{
-		"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":  line,
-		"error": err,
-	}).Error(message)
+	util.HandleErrorAtCallLevel(err, 2)
 	return fiber.NewError(status, message)
 }
 
@@ -180,7 +173,7 @@ func CreateConversation(c *fiber.Ctx) error {
 
 // GetModels returns the available models
 func GetModels(c *fiber.Ctx) error {
-	conf := config.GetConfig()
+	conf := config.GetConfig(nil)
 	ollamaURL := conf.Ollama.BaseURL
 	targetURL := fmt.Sprintf("%s/api/tags", strings.TrimSuffix(ollamaURL, "/"))
 
@@ -219,12 +212,7 @@ func GetModels(c *fiber.Ctx) error {
 
 	// If Ollama returns an error, pass it through
 	if resp.StatusCode >= 400 {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":       filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":       line,
-			"statusCode": resp.StatusCode,
-		}).Error("Ollama error response: " + string(body))
+		util.HandleError(fmt.Errorf("Ollama error response: Status Code: %d, Body: %s", resp.StatusCode, string(body)))
 		return c.Status(resp.StatusCode).Send(body)
 	}
 

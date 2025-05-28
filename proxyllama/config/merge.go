@@ -1,7 +1,7 @@
 package config
 
 func MergeWithDefaultConfig(userConfig *UserConfig) {
-	base := GetConfig()
+	base := GetConfig(nil)
 
 	// Fill in nil fields in userConfig from base config
 	if userConfig.ModelProfiles == nil {

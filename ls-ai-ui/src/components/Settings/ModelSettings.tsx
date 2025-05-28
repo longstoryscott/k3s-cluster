@@ -20,7 +20,8 @@ const TASKS: { key: keyof ModelProfilesConfig; label: string; }[] = [
   { key: 'researchPlanProfileId', label: 'Research Plan' },
   { key: 'researchConsolidationProfileId', label: 'Research Consolidation' },
   { key: 'researchAnalysisProfileId', label: 'Research Analysis' },
-  { key: 'embeddingProfileId', label: 'Embeddings' }
+  { key: 'embeddingProfileId', label: 'Embeddings' },
+  { key: 'formattingProfileId', label: 'Formatting' }
 ];
 
 const ModelSettings = () => {

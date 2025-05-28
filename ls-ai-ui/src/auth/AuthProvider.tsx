@@ -5,9 +5,9 @@ import {
   useEffect
 } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import config from '../config';
 import { AuthContext } from './useAuth';
 import { UserManager, Log, User } from 'oidc-client-ts';
+import { userManager, logoutSession } from './userManager';
 Log.setLogger(console);
 export interface AuthContextType {
     isAuthenticated: boolean;
@@ -17,8 +17,6 @@ export interface AuthContextType {
     logout: () => Promise<void>;
 }
 
-const userManager = new UserManager(config.auth.oidc);
-
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isAuthenticated] = useState(true);
   const [evaluating, setEvaluating] = useState(true);
@@ -27,14 +25,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const navigate = useNavigate();
 
   const logout = async () => {
-    try {
-      await userManager.removeUser()
-      setUser(undefined);
-      setEvaluating(true);
-      window.location.href = config.auth.oidc.post_logout_redirect_uri;
-    } catch (error) {
-      console.error('Error during logout:', error);
-    }
+    await logoutSession();
+    setUser(undefined);
+    setEvaluating(true);
   };
 
   useEffect(() => {

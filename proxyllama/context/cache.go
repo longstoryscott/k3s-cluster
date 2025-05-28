@@ -3,12 +3,10 @@ package context
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"runtime"
 	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"proxyllama/util"
 )
 
 type cacheEntry struct {
@@ -48,14 +46,7 @@ func InitCache(ttl time.Duration) CacheProvider {
 	if ttl == 0 {
 		ttl = defaultTTL
 	}
-
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-		"ttl":  ttl,
-	}).Info("Initializing in-memory cache")
-
+	util.LogInfo("Initializing in-memory cache", map[string]interface{}{"ttl": ttl})
 	cache := NewInMemoryCache(ttl)
 	Cache = cache
 	return cache
@@ -172,7 +163,7 @@ func GetCachedConversation(userID string, conversationID int) (*ConversationCont
 		return cachedContext, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	conversationIDPtr := &conversationID
 	convContext, err := GetOrCreateConversation(ctx, userID, conversationIDPtr)

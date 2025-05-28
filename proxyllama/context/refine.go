@@ -4,15 +4,13 @@ package context
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"proxyllama/models"
 	"proxyllama/proxy"
 	"proxyllama/storage"
-	"runtime"
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"proxyllama/util"
 )
 
 // getCritiqueForResponse sends a response to Ollama for critique
@@ -27,7 +25,7 @@ func (cc *ConversationContext) GetCritiqueForResponse(ctx context.Context, respo
 		return "", fmt.Errorf("failed to get self-critique profile: %w", err)
 	}
 
-	msgs := []models.OllamaMessage{
+	msgs := []models.OllamaChatMessage{
 		{
 			Role:    "system",
 			Content: critiqueProfile.SystemPrompt,
@@ -40,7 +38,7 @@ func (cc *ConversationContext) GetCritiqueForResponse(ctx context.Context, respo
 
 	// Ensure the last message is a user message with the critique instruction
 	if len(msgs) == 0 || msgs[len(msgs)-1].Role != "user" {
-		msgs = append(msgs, models.OllamaMessage{
+		msgs = append(msgs, models.OllamaChatMessage{
 			Role:    "user",
 			Content: "Please critique the above AI response.",
 		})
@@ -51,7 +49,7 @@ func (cc *ConversationContext) GetCritiqueForResponse(ctx context.Context, respo
 	defer cancel()
 
 	// Send the request to Ollama
-	resp, err := proxy.StreamOllamaRequest(timeoutCtx, critiqueProfile.ModelName, msgs, "/api/generate")
+	resp, err := proxy.StreamOllamaChatRequest(timeoutCtx, critiqueProfile.ModelName, msgs)
 	if err != nil {
 		return "", fmt.Errorf("failed to get critique: %w", err)
 	}
@@ -75,7 +73,7 @@ func (cc *ConversationContext) ImproveResponseWithCritique(ctx context.Context, 
 	}
 
 	// Build the request
-	msgs := []models.OllamaMessage{
+	msgs := []models.OllamaChatMessage{
 		{
 			Role:    "system",
 			Content: improvementProfile.SystemPrompt,
@@ -92,7 +90,7 @@ func (cc *ConversationContext) ImproveResponseWithCritique(ctx context.Context, 
 	defer cancel()
 
 	// Send the request to Ollama
-	resp, err := proxy.StreamOllamaRequest(timeoutCtx, improvementProfile.ModelName, msgs, "/api/generate")
+	resp, err := proxy.StreamOllamaChatRequest(timeoutCtx, improvementProfile.ModelName, msgs)
 	if err != nil {
 		return "", fmt.Errorf("failed to improve response: %w", err)
 	}
@@ -125,26 +123,10 @@ func FilterResponseText(text string) string {
 	return result
 }
 
-func RefineResponse(response, userMessage, userID string, conversationID int) string {
+func (cc *ConversationContext) RefineResponse(response, userMessage, userID string, conversationID int) string {
 	cfg, err := GetUserConfig(userID)
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Error("Failed to get user config for response refinement")
-		return ""
-	}
-
-	cc, err := GetCachedConversation(userID, conversationID)
-	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Error("Failed to get cached conversation for response refinement")
+		util.HandleError(err)
 		return ""
 	}
 	// Create a new background context for this goroutine
@@ -162,75 +144,28 @@ func RefineResponse(response, userMessage, userID string, conversationID int) st
 
 	// Step 2: Apply self-critique if enabled
 	if cfg.Summarization.EnableResponseCritique {
-		// Use the fresh background context and conversation context
 		critique, err := cc.GetCritiqueForResponse(ctx, refinedRes)
 		if err == nil && critique != "" {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":   line,
-				"length": len(critique),
-			}).Info("Got critique for response")
+			util.LogInfo("Got critique for response", map[string]interface{}{"length": len(critique)})
 			improvedRes, err := cc.ImproveResponseWithCritique(ctx, userMessage, refinedRes, critique)
 			if err != nil {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":  line,
-					"error": err,
-				}).Error("Failed to improve response with critique")
+				util.HandleError(err)
 			} else if improvedRes != "" {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line": line,
-				}).Info("Applied critique improvements to response")
+				util.LogInfo("Applied critique improvements to response")
 				refinedRes = improvedRes
 			}
 		} else if err != nil {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
-				"error": err,
-			}).Error("Failed to get critique")
+			util.HandleError(err)
 		}
 	}
 
 	// Store the refined response
 	var finalRes string
 	if refinedRes != response {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line": line,
-		}).Info("Response was refined/improved before storing")
+		util.LogInfo("Response was refined/improved before storing")
 		finalRes = refinedRes
 	} else {
 		finalRes = response
-	}
-
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":   filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":   line,
-		"length": len(finalRes),
-	}).Info("Storing assistant response")
-
-	if err := cc.AddAssistantMessage(ctx, finalRes); err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Error("Error storing assistant response")
-	} else {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":           filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":           line,
-			"conversationId": cc.ConversationID,
-		}).Info("Successfully stored assistant message in conversation")
 	}
 
 	return finalRes

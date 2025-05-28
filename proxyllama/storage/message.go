@@ -2,13 +2,12 @@ package storage
 
 import (
 	"context"
-	"path/filepath"
+	"fmt"
 	"proxyllama/config"
+	"proxyllama/models"
 	"proxyllama/proxy"
-	"runtime"
+	"proxyllama/util"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 type Message struct {
@@ -20,11 +19,16 @@ type Message struct {
 }
 
 // AddMessage adds a message to a conversation
-func AddMessage(ctx context.Context, conversationID int, role, content string, usrCfg *config.UserConfig) (int, error) {
+func AddMessage(ctx context.Context, conversationID int, role, content string, usrCfg *config.UserConfig) (int, []float32, error) {
+	// Check if Pool is initialized
+	if Pool == nil {
+		return 0, nil, util.HandleError(fmt.Errorf("database connection pool is not initialized (Pool is nil)"))
+	}
+
 	// Start a transaction for atomicity
 	tx, err := Pool.Begin(ctx)
 	if err != nil {
-		return 0, err
+		return 0, nil, util.HandleError(err)
 	}
 	// Use defer with a named error return to ensure we correctly handle transaction state
 	defer func() {
@@ -34,25 +38,39 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 	}()
 
 	var messageID int
+	var profile *models.ModelProfile
+	var embedding []float32
 	// Use the SQL query from our loader
 	err = tx.QueryRow(ctx, GetQuery("message.add_message"), conversationID, role, content).Scan(&messageID)
 	if err != nil {
-		return 0, err
+		return 0, nil, util.HandleError(err)
 	}
 
 	// Update the conversation's updated_at timestamp
-	_, err = tx.Exec(ctx, `
-        UPDATE conversations 
-        SET updated_at = NOW() 
-        WHERE id = $1
-    `, conversationID)
+	_, err = tx.Exec(ctx, GetQuery("conversation.update_conversation"), conversationID)
 	if err != nil {
-		return 0, err
+		return 0, nil, util.HandleError(err)
+	}
+
+	profile, err = GetModelProfileWithTx(ctx, usrCfg.ModelProfiles.EmbeddingProfileID, tx)
+	if err != nil {
+		util.LogWarning("Failed to get model profile for embedding", nil)
+		return messageID, nil, nil // Proceed without embedding if profile retrieval fails
+	}
+
+	embedding, err = proxy.GetOllamaEmbedding(ctx, content, profile.ModelName)
+	if err != nil {
+		return 0, nil, util.HandleError(err)
+	}
+
+	memErr := StoreMemoryWithTx(ctx, usrCfg.UserID, "message", messageID, embedding, tx)
+	if memErr != nil {
+		util.HandleError(memErr)
 	}
 
 	// Commit the transaction
 	if err = tx.Commit(ctx); err != nil {
-		return 0, err
+		return 0, nil, util.HandleError(err)
 	}
 
 	// Create message object for caching
@@ -64,86 +82,17 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 		CreatedAt:      time.Now(), // Approximate time until we fetch from DB
 	}
 
+	// Invalidate the conversation's message cache
+	InvalidateConversationMessagesCache(ctx, conversationID)
+
 	// Cache the new message
 	if err := CacheMessage(ctx, message); err != nil {
 		// Log but don't fail on cache error
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":      line,
-			"messageId": messageID,
-			"error":     err,
-		}).Warn("Warning: Failed to cache message")
+		util.LogWarning("Failed to cache message", nil)
 		// We'll just have a cache miss next time
 	}
 
-	// Invalidate the conversation message list cache
-	InvalidateConversationMessagesCache(ctx, conversationID)
-
-	profile, err := GetModelProfile(ctx, usrCfg.ModelProfiles.EmbeddingProfileID)
-	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Warn("Warning: Failed to get model profile for embedding")
-		return messageID, nil // Proceed without embedding if profile retrieval fails
-	}
-
-	// After successful commit and getting messageID, generate and store embedding in the background
-	if usrCfg.Summarization.EnableRAG {
-		go func(mID int, mContent, modelName, userID string) {
-			bgCtx := context.Background()
-			ctx, cancel := context.WithTimeout(bgCtx, 30*time.Second)
-			defer cancel()
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":      line,
-				"messageId": mID,
-			}).Info("Generating embedding for message (memory API)")
-			embedding, err := proxy.GetEmbedding(ctx, mContent, modelName)
-			if err != nil {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":      line,
-					"messageId": mID,
-					"error":     err,
-				}).Error("Error generating embedding for message (memory API)")
-				return
-			}
-			if len(embedding) == 0 {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":      line,
-					"messageId": mID,
-				}).Warn("Warning: Got empty embedding for message (memory API)")
-				return
-			}
-			_, file, line, _ = runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":       filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":       line,
-				"messageId":  mID,
-				"vectorSize": len(embedding),
-			}).Info("Storing embedding for message in memories table")
-			err = StoreMemory(ctx, userID, "message", messageID, embedding)
-			if err != nil {
-				_, file, line, _ := runtime.Caller(0)
-				logrus.WithFields(logrus.Fields{
-					"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-					"line":      line,
-					"messageId": mID,
-					"error":     err,
-				}).Error("Error storing memory embedding for message")
-			}
-		}(messageID, content, profile.ModelName, usrCfg.UserID)
-	}
-
-	return messageID, nil
+	return messageID, embedding, nil
 }
 
 // GetMessage gets a single message by ID
@@ -164,13 +113,7 @@ func GetMessage(ctx context.Context, messageID int) (*Message, error) {
 	// Cache for future use
 	if err := CacheMessage(ctx, &msg); err != nil {
 		// Just log, don't fail on cache error
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":      filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":      line,
-			"messageId": msg.ID,
-			"error":     err,
-		}).Warn("Warning: Failed to cache message")
+		util.LogWarning("Failed to cache message", nil)
 	}
 
 	return &msg, nil
@@ -179,7 +122,8 @@ func GetMessage(ctx context.Context, messageID int) (*Message, error) {
 // GetConversationHistory retrieves all messages for a conversation
 func GetConversationHistory(ctx context.Context, conversationID int) ([]Message, error) {
 	// Try to get from cache first
-	if messages, found := GetMessagesByConversationIDFromCache(ctx, conversationID); found {
+	if messages, found := GetMessagesByConversationIDFromCache(ctx, conversationID); found && len(messages) > 0 {
+		util.LogDebug("Cache hit for conversation messages", nil)
 		return messages, nil
 	}
 
@@ -207,13 +151,7 @@ func GetConversationHistory(ctx context.Context, conversationID int) ([]Message,
 	// Cache the message list
 	if err := CacheMessagesByConversationID(ctx, conversationID, messages); err != nil {
 		// Just log, don't fail on cache error
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":           filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":           line,
-			"conversationId": conversationID,
-			"error":          err,
-		}).Warn("Failed to cache messages for conversation")
+		util.LogWarning("Failed to cache messages for conversation", nil)
 	}
 
 	return messages, nil

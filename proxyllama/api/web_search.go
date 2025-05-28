@@ -2,10 +2,9 @@ package api
 
 import (
 	"fmt"
-	"path/filepath"
 	"proxyllama/context"
 	"proxyllama/recherche"
-	"runtime"
+	"proxyllama/util"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
@@ -14,46 +13,6 @@ import (
 // RegisterWebSearchRoutes adds web search endpoints
 func RegisterWebSearchRoutes(app *fiber.App) {
 	app.Post("/api/websearch", PerformWebSearch)
-	app.Post("/api/websearch/detect", DetectWebSearchIntent)
-}
-
-// DetectWebSearchIntent determines if a query likely needs a web search
-func DetectWebSearchIntent(c *fiber.Ctx) error {
-	var req struct {
-		Query     string      `json:"query"`
-		UserID    string      `json:"user_id,omitempty"`
-		OllamaReq interface{} `json:"ollama_req,omitempty"`
-	}
-
-	if err := c.BodyParser(&req); err != nil {
-		return handleError(err, fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	if req.Query == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Query is required")
-	}
-
-	needsWebSearch := recherche.DetectSearchIntent(req.Query, nil)
-
-	// Check user config if available
-	if req.UserID != "" {
-		cfg, err := context.GetUserConfig(req.UserID)
-		if err == nil && cfg.WebSearch != nil {
-			// Only enable auto-detect if web search is enabled
-			if !cfg.WebSearch.Enabled {
-				needsWebSearch = false
-			} else {
-				// Only auto-detect if that feature is enabled
-				if !cfg.WebSearch.AutoDetect {
-					needsWebSearch = false
-				}
-			}
-		}
-	}
-
-	return c.JSON(fiber.Map{
-		"needs_web_search": needsWebSearch,
-	})
 }
 
 // PerformWebSearch handles a web search request
@@ -101,14 +60,11 @@ func PerformWebSearch(c *fiber.Ctx) error {
 	}
 
 	// Log the search request
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file":           filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line":           line,
+	util.LogInfo("Web search request", logrus.Fields{
 		"query":          req.Query,
 		"maxResults":     maxResults,
 		"includeContent": includeContent,
-	}).Info("Web search request")
+	})
 
 	// Perform the web search
 	results, err := recherche.QuickSearch(c.Context(), req.Query, maxResults, includeContent)

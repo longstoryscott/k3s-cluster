@@ -4,29 +4,42 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"proxyllama/config"
 	"proxyllama/models"
-	"runtime"
+	"proxyllama/util"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
 )
 
+// contextKey is a custom type for context keys to avoid collisions
+type ContextKey string
+type ContextHeaders map[string]string
+
+// Context keys
+const (
+	ReqHeadersKey ContextKey    = "reqHeaders"
+	StreamTimeout time.Duration = 10 * time.Minute // Timeout for streaming responses
+)
+
+func GetHeadersFromContext(ctx context.Context) ContextHeaders {
+	headers, ok := ctx.Value(ReqHeadersKey).(ContextHeaders)
+	if !ok {
+		return nil
+	}
+	return headers
+}
+
 // GetProxyHandler handles streaming responses from Ollama and collects the full assistant response
 // It properly streams to the client while also returning the accumulated content
-func GetProxyHandler(ctx context.Context, reqBody []byte, path, method string, stream bool) (func(w *bufio.Writer) (string, error), int, error) {
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-		"url":  path,
-	}).Info("Proxying request")
-	conf := config.GetConfig()
+func GetProxyHandler[T models.OllamaResponse](ctx context.Context, reqBody []byte, path, method string, stream bool, newT func() T) (func(w *bufio.Writer) (string, error), int, error) {
+	util.LogInfo("Proxying request to Ollama", logrus.Fields{"url": path})
+	conf := config.GetConfig(nil)
 	url := conf.Ollama.BaseURL + path
 
 	// Create a response content builder
@@ -40,6 +53,17 @@ func GetProxyHandler(ctx context.Context, reqBody []byte, path, method string, s
 
 	// Create HTTP client
 	client := createHTTPClient()
+
+	req.Header.Set("User-Agent", "ProxyLlama/1.0")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if stream {
+		req.Header.Set("Accept-Encoding", "identity") // Disable compression for streaming
+		req.Header.Set("X-Stream", "true")            // Custom header to indicate streaming
+	} else {
+		req.Header.Set("Accept-Encoding", "gzip, deflate") // Enable compression for non-streaming
+		req.Header.Set("X-Stream", "false")                // Custom header to indicate non-streaming
+	}
 
 	// Make the request to Ollama
 	resp, err := client.Do(req)
@@ -58,42 +82,58 @@ func GetProxyHandler(ctx context.Context, reqBody []byte, path, method string, s
 	// Handle error responses from Ollama
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":       filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":       line,
-			"statusCode": resp.StatusCode,
-		}).Error("Ollama error response: ", string(body))
+		errMsg := fmt.Errorf("ollama error response: Status Code: %d, Body: %s", resp.StatusCode, string(body))
+		util.HandleError(errMsg, logrus.Fields{"statusCode": resp.StatusCode, "body": string(body)})
 		return nil, resp.StatusCode, fiber.NewError(resp.StatusCode, string(body))
 	}
 
 	// Use a buffered channel to wait for streaming to complete
 	return func(w *bufio.Writer) (string, error) {
 		if stream {
-			return streamHandler(w, resp, &responseContent)
+			return streamHandler(w, resp, &responseContent, newT)
 		}
 		return resHandler(w, resp)
 	}, resp.StatusCode, nil
 }
 
-func streamHandler(w *bufio.Writer, resp *http.Response, responseContent *strings.Builder) (string, error) {
+func streamHandler[T models.OllamaResponse](w *bufio.Writer, resp *http.Response, responseContent *strings.Builder, newT func() T) (string, error) {
 	defer resp.Body.Close() // Ensure connection is closed when done
 	proxyToClient := true
-
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Starting to stream chat response (line-by-line)")
+	util.LogInfo("Streaming response from Ollama")
 
 	scanner := bufio.NewScanner(resp.Body)
+
+	// Use a channel to detect context cancellation or client disconnection
+	ctx, cancel := context.WithTimeout(context.Background(), StreamTimeout) // Or pass the context from the handler
+	defer cancel()
+	// Set up a done channel to handle timeouts or context cancellation
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			close(done)
+		case <-time.After(StreamTimeout): // Fallback timeout
+			close(done)
+		}
+	}()
+
 	for scanner.Scan() {
+		select {
+		case <-done:
+			return responseContent.String(), util.HandleError(fmt.Errorf("operation canceled or timed out"))
+		default:
+			// Proceed with processing the line
+		}
+
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
 		}
+
 		// Extract content from the JSON chunk
-		content := extractContent(line)
+		respObj := newT()
+		respObj.UnmarshalJSON(line)
+		content := respObj.GetChunkContent()
 		if content != "" {
 			responseContent.WriteString(content)
 		}
@@ -101,7 +141,7 @@ func streamHandler(w *bufio.Writer, resp *http.Response, responseContent *string
 		if !proxyToClient {
 			// If proxyToClient is false, we don't want to write to the client
 			// but we still want to accumulate the response content
-			if isDone(line) {
+			if respObj.IsDone() {
 				break
 			}
 			continue
@@ -110,122 +150,60 @@ func streamHandler(w *bufio.Writer, resp *http.Response, responseContent *string
 		// Write the complete JSON line to the client preserving the newline
 		res := append(line, "\n"...)
 		if _, writeErr := w.Write(res); writeErr != nil {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
-				"error": writeErr,
-			}).Error("Error writing to response")
+			util.HandleError(writeErr)
 			proxyToClient = false
 		}
 		if flushErr := w.Flush(); flushErr != nil {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
-				"error": flushErr,
-			}).Error("Error flushing response")
+			util.HandleError(flushErr)
 			proxyToClient = false
 		}
 
 		// Check if this is the last chunk (done=true)
-		if isDone(line) {
+		if respObj.IsDone() {
 			break
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Error("Scanner error during streaming")
+		util.HandleError(err)
 	}
 	if flushErr := w.Flush(); flushErr != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": flushErr,
-		}).Error("Error flushing response")
+		util.HandleError(flushErr)
 	}
+
+	if !proxyToClient {
+		return responseContent.String(), util.HandleError(fmt.Errorf("connection closed by client"))
+	}
+
 	return responseContent.String(), nil
 }
 
 func resHandler(w *bufio.Writer, resp *http.Response) (string, error) {
 	defer resp.Body.Close() // Ensure connection is closed when done
-
-	_, file, line, _ := runtime.Caller(0)
-	logrus.WithFields(logrus.Fields{
-		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-		"line": line,
-	}).Info("Starting to stream chat response")
+	util.LogInfo("Reading response from Ollama")
 
 	res, err := io.ReadAll(resp.Body)
 	if err != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": err,
-		}).Error("Error reading from Ollama")
-		return "", err
+		return "", util.HandleError(err)
 	}
 	if len(res) == 0 {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": "empty response",
-		}).Error("Error reading from Ollama")
-		return "", err
+		return "", util.HandleError(fmt.Errorf("empty response from Ollama"))
 	}
 	// Write to response
 	if _, writeErr := w.Write(res); writeErr != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": writeErr,
-		}).Error("Error writing to response")
-		return "", writeErr
+		return "", util.HandleError(writeErr)
 	}
 	// Flush frequently to avoid client timeouts
 	if flushErr := w.Flush(); flushErr != nil {
-		_, file, line, _ := runtime.Caller(0)
-		logrus.WithFields(logrus.Fields{
-			"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-			"line":  line,
-			"error": flushErr,
-		}).Error("Error flushing response")
-		return "", flushErr
+		return "", util.HandleError(flushErr)
+
 	}
 	return string(res), nil
-}
-
-// extractContent parses Ollama message content from the response
-func extractContent(data []byte) string {
-	// Try to parse the JSON data
-	var chunkData models.ChunkData
-	if err := json.Unmarshal(data, &chunkData); err == nil {
-		return chunkData.Message.Content
-	}
-	return ""
-}
-
-// isDone checks if a chunk indicates the end of the stream
-func isDone(data []byte) bool {
-	var chunkData models.ChunkData
-	if err := json.Unmarshal(data, &chunkData); err == nil {
-		return chunkData.Done
-	}
-	return false
 }
 
 // createHTTPClient returns a configured HTTP client optimized for streaming responses
 func createHTTPClient() *http.Client {
 	return &http.Client{
-		Timeout: 0, // No timeout for streaming
+		Timeout: StreamTimeout, // Long timeout for streaming requests
 		Transport: &http.Transport{
 			IdleConnTimeout:       0,
 			MaxIdleConns:          100,

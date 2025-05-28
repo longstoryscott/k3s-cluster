@@ -3,11 +3,11 @@ package config
 
 import (
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"proxyllama/util" // Adjust the import path as necessary
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -143,6 +143,7 @@ type ModelProfileConfig struct {
 	ResearchConsolidationProfileID uuid.UUID `json:"researchConsolidationProfileId,omitempty" mapstructure:"research_consolidation_profile_id"`
 	ResearchAnalysisProfileID      uuid.UUID `json:"researchAnalysisProfileId,omitempty" mapstructure:"research_analysis_profile_id"`
 	EmbeddingProfileID             uuid.UUID `json:"embeddingProfileId,omitempty" mapstructure:"embedding_profile_id"`
+	FormattingProfileID            uuid.UUID `json:"formattingProfileId,omitempty" mapstructure:"formatting_profile_id"`
 }
 
 var (
@@ -163,24 +164,24 @@ var (
 		ResearchConsolidationProfileID: DefaultResearchConsolidationProfile.ID,
 		ResearchAnalysisProfileID:      DefaultResearchAnalysisProfile.ID,
 		EmbeddingProfileID:             DefaultEmbeddingProfile.ID,
+		FormattingProfileID:            DefaultFormattingProfile.ID,
 	}
 )
 
 // GetConfig loads configuration from config.yaml with environment variable overrides
-func GetConfig() Config {
+func GetConfig(configFile *string) Config {
 	configOnce.Do(func() {
 		// Use viper for all config loading and merging
 		var filePath string
-		if os.Getenv("LOCAL") == "true" {
+		if configFile != nil {
+			filePath = *configFile
+		} else if os.Getenv("LOCAL") == "true" {
 			filePath = ".config.local.yaml"
 		} else {
 			filePath = ".config.yaml"
 		}
 		v := viper.New()
 		v.SetConfigFile(filePath)
-
-		// Set all defaults using viper
-		setViperDefaults(v)
 
 		// Enable env var overrides (e.g. SERVER_HOST, DATABASE_PORT, etc)
 		v.AutomaticEnv()
@@ -191,73 +192,12 @@ func GetConfig() Config {
 
 		// Unmarshal into config struct
 		if err := v.Unmarshal(&config); err != nil {
-			_, file, line, _ := runtime.Caller(0)
-			logrus.WithFields(logrus.Fields{
-				"file":  filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
-				"line":  line,
-				"error": err,
-			}).Warn("Warning: could not unmarshal config")
+			util.LogWarning("Warning: could not unmarshal config", logrus.Fields{"error": err})
 		}
 
 		config.ModelProfiles = defaultModelProfileConfig
 	})
 	return config
-}
-
-// setViperDefaults sets all config defaults in viper
-func setViperDefaults(v *viper.Viper) {
-	v.SetDefault("server.host", "0.0.0.0")
-	v.SetDefault("server.port", 8080)
-	v.SetDefault("server.base_url", "")
-	v.SetDefault("database.host", "localhost")
-	v.SetDefault("database.port", 5432)
-	v.SetDefault("database.user", "postgres")
-	v.SetDefault("database.password", "postgres")
-	v.SetDefault("database.dbname", "proxyllama")
-	v.SetDefault("database.sslmode", "disable")
-	v.SetDefault("ollama.base_url", "http://localhost:11434")
-	v.SetDefault("redis.host", "localhost")
-	v.SetDefault("redis.port", 6379)
-	v.SetDefault("redis.password", "")
-	v.SetDefault("redis.db", 0)
-	v.SetDefault("redis.enabled", true)
-	v.SetDefault("redis.conversation_ttl", "30m")
-	v.SetDefault("redis.message_ttl", "1h")
-	v.SetDefault("redis.summary_ttl", "2h")
-	v.SetDefault("redis.pool_size", 10)
-	v.SetDefault("redis.min_idle_connections", 3)
-	v.SetDefault("redis.connect_timeout", "5s")
-	v.SetDefault("auth.jwks_uri", "http://localhost:9091/dex/keys")
-	v.SetDefault("summarization.messages_before_summary", 10)
-	v.SetDefault("summarization.summaries_before_consolidation", 5)
-	v.SetDefault("summarization.summary_model", "qwen3:0.6b")
-	v.SetDefault("summarization.critique_model", "qwen3:0.6b")
-	v.SetDefault("summarization.embedding_model", "qwen3:0.6b")
-	v.SetDefault("summarization.embedding_dimension", 768)
-	v.SetDefault("summarization.enable_rag", false)
-	v.SetDefault("summarization.system_prompt", "Summarize the conversation so far in a concise paragraph. Include key points and conclusions, but omit redundant details. The summary will be used as context for future interaction. It should be as small as possible and does not need to be human readable.")
-	v.SetDefault("summarization.brief_system_prompt", "Create a very concise summary of these short messages. Focus only on essential information and be extremely brief.")
-	v.SetDefault("summarization.key_points_system_prompt", "Extract and list the key points from these detailed messages. Identify the main ideas and important details, organizing them in a clear structure.")
-	v.SetDefault("summarization.max_summary_levels", 3)
-	v.SetDefault("summarization.summary_weight_coefficient", 0.7)
-	v.SetDefault("summarization.master_summary_prompt", "Create a comprehensive summary of the conversation, giving most weight to the most recent points and gradually less weight to older information. This is a master summary that will be used for long-term context. It should be as small as possible and does not need to be human readable.")
-	v.SetDefault("summarization.enable_response_filtering", true)
-	v.SetDefault("summarization.enable_response_critique", false)
-	v.SetDefault("retrieval.enabled", true)
-	v.SetDefault("retrieval.limit", 5)
-	v.SetDefault("retrieval.enable_cross_conversation", false)
-	v.SetDefault("retrieval.similarity_threshold", 0.7)
-	v.SetDefault("retrieval.always_retrieve", false)
-	v.SetDefault("web_search.enabled", false)
-	v.SetDefault("web_search.auto_detect", true)
-	v.SetDefault("web_search.max_results", 3)
-	v.SetDefault("web_search.include_results", true)
-	v.SetDefault("preferences.default_model", "qwen3:0.6b")
-	v.SetDefault("preferences.theme", "light")
-	v.SetDefault("preferences.font_size", 14)
-	v.SetDefault("preferences.notifications_on", true)
-	v.SetDefault("preferences.language", "en")
-	v.SetDefault("log_level", "info")
 }
 
 // LoadConfig loads the configuration from a file

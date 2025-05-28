@@ -21,46 +21,49 @@ type Summary struct {
 	ID      int    `json:"-"` // Internal use only, not sent to LLM
 }
 
-// OllamaMessage represents a message in the format expected by Ollama API
-type OllamaMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+// OllamaChatMessage represents a message in the format expected by Ollama API
+type OllamaChatMessage struct {
+	Role      string   `json:"role"`
+	Content   string   `json:"content"`
+	Images    []string `json:"images,omitempty"`     // Optional images associated with the message
+	ToolCalls []any    `json:"tool_calls,omitempty"` // Optional tool calls associated with the message
 }
 
-// OllamaReq represents a request to the Ollama API
-type OllamaReq struct {
-	Model          string          `json:"model"`
-	Messages       []OllamaMessage `json:"messages"`
-	Stream         bool            `json:"stream"`
-	Format         any             `json:"format"`
-	ConversationId *int            `json:"conversationId,omitempty"` // ui sends camelCase
+// OllamaChatReq represents a request to the Ollama API
+type OllamaChatReq struct {
+	Model          string              `json:"model"`
+	Messages       []OllamaChatMessage `json:"messages"`
+	Stream         bool                `json:"stream"`
+	Format         any                 `json:"format"`
+	ConversationId *int                `json:"conversationId,omitempty"` // ui sends camelCase
+	KeepAlive      string              `json:"keep_alive,omitempty"`     // controls how long the model will stay loaded into memory
+	Options        map[string]any      `json:"options,omitempty"`        // additional model parameters listed in the documentation for the Modelfile such as temperature
+	Tools          []any               `json:"tools,omitempty"`          // tools to use for the request, if any
 }
 
-// OllamaResp represents a response from the Ollama API
-type OllamaResp struct {
-	Model              string        `json:"model"`
-	CreatedAt          string        `json:"created_at"`
-	Message            OllamaMessage `json:"message"`
-	Done               bool          `json:"done"`
-	TotalDuration      float64       `json:"total_duration"`
-	LoadDuration       float64       `json:"load_duration"`
-	PromptEvalCount    int           `json:"prompt_eval_count"`
-	PromptEvalDuration float64       `json:"prompt_eval_duration"`
-	EvalCount          int           `json:"eval_count"`
-	EvalDuration       float64       `json:"eval_duration"`
+// OllamaGenerateReq represents a request to the Ollama embeddings API
+type OllamaGenerateReq struct {
+	Model     string         `json:"model"`
+	Prompt    string         `json:"prompt"`
+	Suffix    string         `json:"suffix,omitempty"`
+	Images    []string       `json:"images,omitempty"`
+	Format    any            `json:"format,omitempty"`     // the format to return a response in. Format can be json or a JSON schema
+	Options   map[string]any `json:"options,omitempty"`    // additional model parameters listed in the documentation for the Modelfile such as temperature
+	System    string         `json:"system,omitempty"`     // system message to (overrides what is defined in the Modelfile)
+	Template  string         `json:"template,omitempty"`   // the prompt template to use (overrides what is defined in the Modelfile)
+	Stream    bool           `json:"stream,omitempty"`     // if false the response will be returned as a single response object
+	Raw       bool           `json:"raw,omitempty"`        // if true no formatting will be applied to the prompt
+	KeepAlive string         `json:"keep_alive,omitempty"` // controls how long the model will stay loaded into memory
+	Context   string         `json:"context,omitempty"`    // (deprecated): the context parameter returned from a previous request
 }
 
-// ChunkData represents the structure of a streaming chunk response
-type ChunkData struct {
-	Message            OllamaMessage `json:"message"`
-	Done               bool          `json:"done"`
-	DoneReason         string        `json:"done_reason"`
-	TotalDuration      float64       `json:"total_duration"`
-	LoadDuration       float64       `json:"load_duration"`
-	PromptEvalCount    int           `json:"prompt_eval_count"`
-	PromptEvalDuration float64       `json:"prompt_eval_duration"`
-	EvalCount          int           `json:"eval_count"`
-	EvalDuration       float64       `json:"eval_duration"`
+// OllamaEmbeddingReq represents a request to the Ollama embeddings API
+type OllamaEmbeddingReq struct {
+	Model     string         `json:"model"`
+	Input     []string       `json:"input"`
+	Truncate  bool           `json:"truncate,omitempty"`   // whether to truncate the input to the model's maximum length
+	Options   map[string]any `json:"options,omitempty"`    // additional model parameters listed in the documentation for the Modelfile such as temperature
+	KeepAlive string         `json:"keep_alive,omitempty"` // controls how long the model will stay loaded into memory
 }
 
 type ModelParameters struct {
@@ -121,6 +124,8 @@ const (
 	ModelProfileTypeResearchAnalysis
 	// ModelProfileTypeEmbedding represents an embedding model profile type
 	ModelProfileTypeEmbedding
+	// ModelProfileTypeFormatting represents a format model profile type
+	ModelProfileTypeFormatting
 )
 
 // ResearchTaskStatus represents the current state of a research task

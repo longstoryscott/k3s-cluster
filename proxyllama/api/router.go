@@ -31,6 +31,7 @@ func RegisterAllRoutes(app *fiber.App) {
 	RegisterWebSearchRoutes(app)
 	RegisterConfigRoutes(app)
 	RegisterModelProfileRoutes(app)
+	RegisterWebSearchRoutes(app)
 
 	// Setup reverse proxy handler with chunk processing
 	app.All("/*", ReverseProxyHandler)
