@@ -26,7 +26,6 @@ func RegisterAllRoutes(app *fiber.App) {
 	}).Use(auth.WithAuth)
 
 	RegisterConversationRoutes(app)
-	RegisterOllamaRoutes(app)
 	RegisterResearchRoutes(app)
 	RegisterWebSearchRoutes(app)
 	RegisterConfigRoutes(app)

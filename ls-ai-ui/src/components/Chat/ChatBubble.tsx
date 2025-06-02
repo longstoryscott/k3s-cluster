@@ -1,28 +1,25 @@
 import React, { memo } from 'react';
-import { Box, Paper, Button, Fade, useTheme } from '@mui/material';
+import { Box, Paper, Button, Fade } from '@mui/material';
 import { ChatMessage, ChatUserMessage } from '../../api/types';
 import { useChat } from '../../chat';
 import ReplayIcon from '@mui/icons-material/Replay';
 import MarkdownRenderer from '../Shared/MarkdownRenderer';
-import 'katex/dist/katex.min.css';
 import ThinkSection from './ThinkSection';
 import ErrorMessage from './ErrorMessage';
 import { sanitizeForLaTeX, parseResponse } from './utils';
 
 interface ChatBubbleProps {
   message: ChatMessage;
-  inProgress?: boolean;
 }
 
-const ChatBubble: React.FC<ChatBubbleProps> = memo(({ message, inProgress = false }) => {
+const ChatBubble: React.FC<ChatBubbleProps> = memo(({ message }) => {
+  const { retryMessage, isLoading, isTyping } = useChat();
+  const inProgress = isLoading || isTyping;
+  const { think, rest } = parseResponse(message.content, isTyping);
   const isUser = message.role === 'user';
   const isError = message.status === 'error';
-  const theme = useTheme();
-  const { retryMessage } = useChat();
-  const { think, rest } = parseResponse(message.content);
-
+  
   const handleRetry = () => {
-    // Only retry if this is an error message from the user that has a conversation ID
     if (isError && isUser && 'conversationId' in message) {
       retryMessage(message as ChatUserMessage);
     }
@@ -33,33 +30,32 @@ const ChatBubble: React.FC<ChatBubbleProps> = memo(({ message, inProgress = fals
       sx={{
         display: 'flex',
         justifyContent: isUser ? 'flex-end' : 'flex-start',
-        mb: theme.spacing(2)
+        mb: 2
       }}
     >
       <Fade in={true} timeout={1500}>
         <Paper
-          elevation={1}
           sx={{
-            p: { xs: theme.spacing(1.5), sm: theme.spacing(2) }, // Responsive padding
-            width: { xs:  '100%', sm: isUser ? '80%' : '90%'  }, // Wider bubbles on mobile
-            backgroundColor: isUser ? theme.palette.primary.light : theme.palette.background.paper,
-            color: isUser ? theme.palette.primary.contrastText : theme.palette.text.primary,
-            borderRadius: theme.shape.borderRadius * 2,
-            opacity: inProgress ? 0.85 : 1,
-            borderLeft: `${theme.spacing(0.5)} solid`,
-            borderLeftColor: isUser ? theme.palette.secondary.main : isError ? theme.palette.error.main : theme.palette.primary.main,
-            textAlign: 'left',
-            wordBreak: 'break-word', // Prevent text overflow on small screens
-            overflowWrap: 'break-word' // Handle long words
+            p: { xs: 1.5, sm: 2 },
+            width: { xs: '100%', sm: isUser ? '80%' : '90%' },
+            backgroundColor: isUser ? 'primary.light' : 'background.paper',
+            color: isUser ? 'primary.contrastText' : 'text.primary',
+            borderRadius: 2,
+            opacity: inProgress ? 0.75 : 1,
+            borderLeft: `0.5px solid`,
+            borderLeftColor: isUser ? 'secondary.main' : isError ? 'error.main' : 'primary.main',
+            wordBreak: 'break-word',
+            overflowWrap: 'break-word',
+            minHeight: 100
           }}
         >
-          <ThinkSection think={think || ""} />
+          {!isUser && (think || inProgress) && <ThinkSection think={think || ""} inProgress={inProgress} />}
           <Box sx={{ 
             display: 'flex', 
             justifyContent: 'space-between', 
             alignItems: 'center', 
-            mb: { xs: theme.spacing(0.5), sm: theme.spacing(1) },
-            flexWrap: 'wrap' // Allow wrapping on very small screens
+            mb: 0.5,
+            flexWrap: 'wrap'
           }}>
             {isError && isUser && (
               <Button
@@ -69,9 +65,9 @@ const ChatBubble: React.FC<ChatBubbleProps> = memo(({ message, inProgress = fals
                 onClick={handleRetry}
                 variant="outlined"
                 sx={{ 
-                  ml: theme.spacing(1),
-                  minHeight: '36px', // Touch-friendly height
-                  mt: { xs: theme.spacing(0.5), sm: 0 } // Add spacing if wrapped
+                  ml: 1,
+                  minHeight: 36,
+                  mt: { xs: 0.5, sm: 0 }
                 }}
               >
                 Retry
@@ -83,7 +79,6 @@ const ChatBubble: React.FC<ChatBubbleProps> = memo(({ message, inProgress = fals
             <ErrorMessage message="Failed to send. Click retry to try again." />
           )}
 
-          {/* Use MarkdownRenderer for markdown rendering */}
           <MarkdownRenderer sanitizeForLaTeX={sanitizeForLaTeX}>
             {rest}
           </MarkdownRenderer>

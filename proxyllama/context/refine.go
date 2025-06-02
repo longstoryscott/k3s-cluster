@@ -132,7 +132,7 @@ func (cc *ConversationContext) RefineResponse(response, userMessage, userID stri
 	// Create a new background context for this goroutine
 	// This is crucial to avoid using the request context which may be canceled
 	bgCtx := context.Background()
-	ctx, cancel := context.WithTimeout(bgCtx, time.Minute*10)
+	ctx, cancel := context.WithTimeout(bgCtx, time.Minute*120)
 	defer cancel()
 
 	refinedRes := response // Start with the original response

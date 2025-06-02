@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
-
 	"proxyllama/models"
 	"proxyllama/storage"
 )
@@ -19,24 +17,9 @@ type CreateResearchRequest struct {
 }
 
 // StartResearchTask starts a new research task
-func StartResearchTask(ctx context.Context, userID, query, model string, conversationID *int) (*models.ResearchTask, error) {
-	// Generate a unique ID for the task
-	taskID := uuid.New().String()
-
-	// Create the research task
-	task := models.ResearchTask{
-		ID:             taskID,
-		UserID:         userID,
-		Query:          query,
-		Model:          model,
-		Status:         models.ResearchTaskStatusPending,
-		ConversationID: conversationID,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
-	}
-
+func StartResearchTask(ctx context.Context, userID, query, model string, conversationID *int) (*int, error) {
 	// Save the task to the database
-	err := storage.SaveResearchTask(ctx, task)
+	taskID, err := storage.SaveResearchTask(ctx, userID, query, conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save research task: %w", err)
 	}
@@ -44,11 +27,11 @@ func StartResearchTask(ctx context.Context, userID, query, model string, convers
 	// Start the research process asynchronously using the deep research orchestrator
 	go PerformDeepResearch(context.Background(), taskID, userID, query, conversationID)
 
-	return &task, nil
+	return &taskID, nil
 }
 
 // GetResearchTask gets a research task by ID
-func GetResearchTask(ctx context.Context, taskID string) (*models.ResearchTask, error) {
+func GetResearchTask(ctx context.Context, taskID int) (*models.ResearchTask, error) {
 	return storage.GetTaskByID(ctx, taskID)
 }
 
@@ -80,7 +63,7 @@ func GetUserResearchTasks(ctx context.Context, userID string) ([]*models.Researc
 }
 
 // CancelResearchTask cancels a research task
-func CancelResearchTask(ctx context.Context, taskID string) error {
+func CancelResearchTask(ctx context.Context, taskID int) error {
 	// Get the task first to verify ownership
 	task, err := storage.GetTaskByID(ctx, taskID)
 	if err != nil {

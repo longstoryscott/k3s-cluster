@@ -1,25 +1,14 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { ChatState, ChatActions } from './useChatState';
 import { useAuth } from '../../auth';
-import { chat, getManyConversations, getMessages, removeConversation, startConversation, updateConversationTitle, ChatUserMessage, getModels, getToken } from '../../api';
+import { chat, getManyConversations, getMessages, removeConversation, startConversation, updateConversationTitle, ChatUserMessage, getModels, getToken, getUserConversations, getLllabUsers } from '../../api';
 // import { useWebSearch } from './useWebSearch';
 
 export const useChatOperations = (state: ChatState, actions: ChatActions) => {
   const auth = useAuth();
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const abortController = useRef<AbortController | null>(null);
-  // const {
-  //   detectWebSearchIntent,
-  //   performWebSearch,
-  //   formatSearchResultsForLLM,
-  //   isWebSearchEnabled,
-  //   isSearching
-  // } = useWebSearch({ autoSearch: true });
-
-  // Sync isSearching state from useWebSearch hook to ChatState
-  // useEffect(() => {
-  //   actions.setIsSearching(isSearching);
-  // }, [isSearching, actions]);
+  const currentUserId = useMemo(() => auth.user?.profile?.preferred_username ?? '', [auth.user]);
 
   // Fetch models
   const fetchModels = useCallback(async () => {
@@ -42,15 +31,29 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     actions.setError(null);
 
     try {
-      const conversationsData = await getManyConversations(getToken(auth.user));
-      actions.setConversations(conversationsData);
+      if (auth.isAdmin) {
+        const allUsers = await getLllabUsers();
+        for (const user of allUsers) {
+          const conversationsData = await getUserConversations(getToken(auth.user), user.id);
+          actions.setConversations(prev => ({
+            ...prev,
+            [user.username ?? user.id]: conversationsData
+          }));
+        }
+      } else {
+        const currentUserConversationData = await getManyConversations(getToken(auth.user));
+        actions.setConversations(prev => ({
+          ...prev,
+          [currentUserId]: currentUserConversationData
+        }));
+      }
     } catch (err: unknown) {
       actions.setError((err as Error).message);
       console.error("Error fetching conversations:", err);
     } finally {
       actions.setIsLoading(false);
     }
-  }, [actions, auth.user]);
+  }, [actions, auth.user, currentUserId, auth.isAdmin]);
 
   // Fetch messages for a specific conversation
   const fetchMessages = useCallback(async (conversationId: number) => {
@@ -63,14 +66,14 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
       const fetchedMessages = await getMessages(getToken(auth.user), conversationId);
       actions.setMessages(msgs => [...(msgs ?? []), ...(fetchedMessages ?? []).filter(m => !msgs.find(msg => msg.id === m.id))]);
       // Find and set the current conversation
-      const conversation = state.conversations.find(c => c.id === conversationId);
+      const conversation = Object.values(state.conversations).flat().find(c => c.id === conversationId);
       if (conversation) {
         actions.setCurrentConversation(conversation);
       } else {
         // If not in our list, fetch all conversations
         const conversationsData = await getManyConversations(getToken(auth.user));
         // Update the full conversations list
-        actions.setConversations(conversationsData);
+        fetchConversations();
 
         // Find and set the current conversation from the fetched data
         const foundConversation = conversationsData.find(c => c.id === conversationId);
@@ -84,7 +87,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
     } finally {
       actions.setIsLoading(false);
     }
-  }, [actions, auth.user, state.conversations]);
+  }, [actions, auth.user, state.conversations, fetchConversations]);
 
   // Start a new conversation
   const startNewConversation = useCallback(async (model?: string) => {
@@ -145,44 +148,11 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
       await fetchMessages(conversationId ?? -1);
       actions.setResponse('');
 
-      // Check if we should do a web search based on the prompt
-      const finalMessage = { ...message };
-
-      // if (isWebSearchEnabled) {
-      //   try {
-      //     const needsSearch = await detectWebSearchIntent(message.content);
-
-      //     if (needsSearch) {
-      //       actions.setResponse('Searching the web for information...');
-      //       // We don't need to explicitly set isSearching here as it's handled by the useWebSearch hook
-      //       // and synced via the useEffect above
-
-      //       const searchResults = await performWebSearch(message.content);
-      //       if (searchResults && !searchResults.error) {
-      //         // Format the search results for the LLM
-      //         const formattedResults = formatSearchResultsForLLM(searchResults);
-
-      //         // Add search results to the prompt
-      //         finalMessage = {
-      //           ...message,
-      //           content: `${formattedResults}\n\nBased on the above web search results, please respond to: ${message.content}`
-      //         };
-
-      //         // Add a system note about the search
-      //         actions.setResponse('Web search complete. Processing your request...');
-      //       }
-      //     }
-      //   } catch (searchError) {
-      //     console.error('Error during web search:', searchError);
-      //     // Continue with original message if search fails
-      //   }
-      // }
-
       // Update UI immediately with the user message
       actions.addMessage(messageWithStatus);
 
       // Stream the assistant's response
-      for await (const chunk of chat(getToken(auth.user), state.messages, finalMessage)) {
+      for await (const chunk of chat(getToken(auth.user), state.messages, message)) {
         // Use functional update to ensure we're always working with the latest state
         actions.setResponse(r => r + chunk);
       }

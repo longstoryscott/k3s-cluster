@@ -26,17 +26,18 @@ func CreateSummary(ctx context.Context, conversationID int, content string, leve
 	if err != nil {
 		return 0, util.HandleError(fmt.Errorf("failed to marshal source IDs: %w", err))
 	}
+	sanitizedContent := util.RemoveThinkTags(content)
 
 	util.LogDebug("Creating summary for conversation", logrus.Fields{
 		"conversation_id": conversationID,
-		"content":         content,
+		"content":         sanitizedContent,
 		"level":           level,
 		"source_ids":      sourceIDs,
 	})
 
 	var summaryID int
 	err = Pool.QueryRow(ctx, GetQuery("summary.create_summary"),
-		conversationID, content, level, sourceIDsJSON).Scan(&summaryID)
+		conversationID, sanitizedContent, level, sourceIDsJSON).Scan(&summaryID)
 	if err != nil {
 		return 0, util.HandleError(fmt.Errorf("failed to create summary: %w", err))
 	}

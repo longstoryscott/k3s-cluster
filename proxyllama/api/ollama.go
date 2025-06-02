@@ -15,11 +15,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// RegisterOllamaRoutes adds Ollama-related endpoints to the app
-func RegisterOllamaRoutes(app *fiber.App) {
-	app.Post("/api/chat", ReverseProxyHandler)
-}
-
 // ReverseProxyHandler forwards the request to Ollama and streams the response back to the client
 func ReverseProxyHandler(c *fiber.Ctx) error {
 	// Parse the incoming request
@@ -37,17 +32,6 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to process conversation")
 	}
-
-	headers := proxy.ContextHeaders{}
-	c.Request().Header.VisitAll(func(key, value []byte) {
-		keyStr := string(key)
-		valueStr := string(value)
-		if keyStr != "Host" && keyStr != "Connection" {
-			headers[keyStr] = valueStr
-		}
-	})
-
-	c.Context().SetUserValue(proxy.ReqHeadersKey, headers)
 
 	ollamaReqBody, err := cc.PrepareOllamaRequest(c.Context(), chatReq)
 	if err != nil {
@@ -79,7 +63,7 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 			// }(res, cc.UserID, cc.ConversationID)
 
 			go func(r string, cctx *pxcx.ConversationContext) {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
+				ctx, cancel := context.WithTimeout(context.Background(), time.Minute*60)
 				defer cancel()
 				_, err := cc.AddAssistantMessage(ctx, res)
 				if err != nil {

@@ -13,16 +13,49 @@ spec:
       labels:
         app: dex
     spec:
+      initContainers:
+        - name: render-config
+          image: alpine:latest
+          command:
+            [
+              "sh",
+              "-c",
+              "apk add --no-cache gettext && envsubst < /config-in/config.yaml > /config-out/config.yaml",
+            ]
+          env:
+            - name: DEX_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: client-secret
+                  key: client-secret
+            - name: LDAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: openldap-admin-secret
+                  key: LDAP_ADMIN_PASSWORD
+          volumeMounts:
+            - name: config-in
+              mountPath: /config-in
+              readOnly: true
+            - name: config-out
+              mountPath: /config-out
       containers:
         - name: dex
-          image: ghcr.io/dexidp/dex:v2.42.1
+          image: ghcr.io/dexidp/dex:v2.43.1
+          securityContext:
+            runAsUser: 0 # 0 is the root user
+            allowPrivilegeEscalation: true
           volumeMounts:
-            - name: config
+            - name: config-out
               mountPath: /etc/dex
-            # Mount the entire templates directory structure at once
-            # Important: This should completely replace the built-in templates
-            - name: dex-templates-dir
-              mountPath: /etc/dex/custom-templates
+            - name: dex-web
+              mountPath: /etc/dex/dex-templates
+            - name: dex-static
+              mountPath: /etc/dex/dex-templates/static
+            - name: dex-themes
+              mountPath: /etc/dex/dex-templates/themes
+            - name: dex-templates
+              mountPath: /etc/dex/dex-templates/templates
           ports:
             - containerPort: 5556
           args:
@@ -37,69 +70,31 @@ spec:
               memory: "256Mi"
               cpu: "500m"
           env:
-            - name: DEXFRONTEND_DIR
-              value: /etc/dex/custom-templates/
-      initContainers:
-        - name: setup-templates
-          image: busybox
-          command:
-            - sh
-            - -c
-            - |
-              echo "Setting up template directory structure..."
-              mkdir -p /templates/templates /templates/static /templates/themes
-
-              # Process template files
-              for file in $(ls -1 /cm-data | grep templates_); do
-                filename=$(echo $file | sed 's/templates_//')
-                echo "Processing template file: $filename"
-                cp /cm-data/$file /templates/templates/$filename
-              done
-
-              # Process static files
-              for file in $(ls -1 /cm-data | grep static_); do
-                filename=$(echo $file | sed 's/static_//')
-                echo "Processing static file: $filename"
-                cp /cm-data/$file /templates/static/$filename
-              done
-
-              # Process theme files
-              for file in $(ls -1 /cm-data | grep themes_); do
-                filename=$(echo $file | sed 's/themes_//')
-                echo "Processing theme file: $filename"
-                cp /cm-data/$file /templates/themes/$filename
-              done
-
-              # Process root files
-              if [ -f "/cm-data/robots.txt" ]; then
-                echo "Copying robots.txt"
-                cp /cm-data/robots.txt /templates/robots.txt
-              fi
-
-              if [ -f "/cm-data/web.go" ]; then
-                echo "Copying web.go"
-                cp /cm-data/web.go /templates/web.go
-              fi
-
-              echo "Template setup complete"
-              ls -la /templates
-              ls -la /templates/templates
-          volumeMounts:
-            - name: dex-templates
-              mountPath: /cm-data
-            - name: dex-templates-dir
-              mountPath: /templates
+            - name: DEX_LOG_LEVEL
+              value: "debug"
+            - name: LDAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: openldap-admin-secret
+                  key: LDAP_ADMIN_PASSWORD
       volumes:
-        - name: config
-          projected:
-            sources:
-              - configMap:
-                  name: config
-        - name: dex-templates-dir
+        - name: config-in
+          configMap:
+            name: config
+        - name: config-out
           emptyDir: {}
         - name: dex-templates
           configMap:
             name: dex-templates
+        - name: dex-static
+          configMap:
+            name: dex-static
+        - name: dex-themes
+          configMap:
+            name: dex-themes
+        - name: dex-web
+          configMap:
+            name: dex-web
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -158,11 +153,75 @@ spec:
               mountPath: /ldif-seed
       volumes:
         - name: ldap-data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: ldap-pvc
         - name: ldap-config
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: ldap-config-pvc
         - name: openldap-seed-ldif
           configMap:
             name: openldap-seed-ldif
         - name: openldap-seed-ldif-writable
           emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: usrmgr
+  namespace: auth
+  labels:
+    app: usrmgr
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: usrmgr
+  template:
+    metadata:
+      labels:
+        app: usrmgr
+    spec:
+      containers:
+        - name: usrmgr
+          image: 192.168.0.71:31500/usrmgr:latest
+          imagePullPolicy: Always
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          env:
+            - name: USRMGR_LOG_LEVEL
+              value: "debug"
+            - name: USRMGR_LDAP_URL
+              value: "ldap://openldap.auth.svc.cluster.local:389"
+            - name: USRMGR_LDAP_BIND_DN
+              value: "cn=admin,dc=longstorymedia,dc=com"
+            - name: USRMGR_BASE_DN
+              value: "dc=longstorymedia,dc=com"
+            - name: USRMGR_LDAP_BIND_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: openldap-admin-secret
+                  key: LDAP_ADMIN_PASSWORD
+            - name: USRMGR_JWKS_URI
+              value: https://auth.longstorymedia.com/keys
+            - name: USRMGR_OAUTH_CLIENT_ID
+              value: lsm-client
+            - name: USRMGR_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: client-secret
+                  key: client-secret
+          ports:
+            - containerPort: 3333
+              name: usrmgr
+      # Add image pull secret for private registry
+      imagePullSecrets:
+        - name: registry-credentials

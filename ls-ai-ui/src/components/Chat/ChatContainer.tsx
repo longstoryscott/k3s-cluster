@@ -1,18 +1,34 @@
+import { Box } from '@mui/material';
 import { memo } from 'react';
-import ChatInput from './ChatInput';
-import { Box, useTheme } from '@mui/material';
+import useScrollContainerRef from '../../hooks/useScrollContainerRef';
 
-const ChatContainer = memo(({children}: React.PropsWithChildren<unknown>) => {
-  const theme = useTheme();
+interface ChatContainerProps {
+  children: React.ReactNode;
+}
 
+const ChatContainer: React.FC<ChatContainerProps> = memo(({ children }) => {
+  const scrollContainerRef = useScrollContainerRef();
   return (
-    <>
-      <Box sx={{ flex: 1, p: theme.spacing(2), overflow: 'auto' }}>
-        {/* Children will contain the messages displayed by ChatPage */}
+    <Box 
+      sx={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        height: '100%',
+        overflow: 'hidden'
+      }} 
+    >
+      <Box 
+        sx={{ 
+          flex: 1, 
+          p: 2, 
+          overflowY: 'auto',
+          pb: 8 // Account for input area
+        }}
+        ref={scrollContainerRef}
+      >
         {children}
       </Box>
-      <ChatInput />
-    </>
+    </Box>
   );
 });
 

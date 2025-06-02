@@ -1,7 +1,9 @@
-import { AppBar, Toolbar, Typography, Button, useTheme, IconButton } from '@mui/material';
+import { AppBar, Toolbar, Typography, Button, useTheme, IconButton, Box } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import { useAuth } from '../../auth';
-import Icon from '../Shared/Stamp';
+import Icon from '../Shared/Icon';
+import Title from '../Shared/Title';
+
 
 const TopBar = ({ onMenuClick }: { onMenuClick?: () => void }) => {
   const { user, logout } = useAuth();
@@ -20,10 +22,15 @@ const TopBar = ({ onMenuClick }: { onMenuClick?: () => void }) => {
             <MenuIcon />
           </IconButton>
         )}
-        <Icon size={80} />
-        <Typography variant="h6" sx={{ flexGrow: 1, display: 'flex', alignItems: 'center' }}>
-          AI Lab
-        </Typography>
+        <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'left' }}>
+          <img
+            src="/nurturebot2.png"
+            alt="Logo"
+            style={{ height: 80 }}
+          />
+          <Icon size={80}/>
+          <Title speed={15} size={100}/>
+        </Box>
         {user?.profile.name && (
           <Typography variant="body1" sx={{ mr: theme.spacing(2.5) }}>
             Welcome, {user.profile.name}

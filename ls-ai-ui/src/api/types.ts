@@ -1,3 +1,5 @@
+import { Config } from "../hooks/useConfig";
+
 export type BodyDeserialized = {
   model: string;
   messages: Array<{
@@ -14,6 +16,7 @@ export type RequestOptions = {
   signal?: AbortSignal;
   timeout?: number;
   requestKey?: string;
+  baseUrl?: string;
 };
 
 export type ChatConversation = {
@@ -83,4 +86,29 @@ export type Model = {
   size: number;
   digest: string;
   details: ModelDetails;
+}
+
+export type UserAttribute = {
+  Name: "uid" | "sn" | "cn" | "mail" | "dn";
+  Values: [string];
+  ByteValues: [string];
+}
+
+export type UserInfo = {
+  DN: string,
+  Attributes: UserAttribute[];
+}
+
+export type NewUserReq = {
+  Username: string;
+  Password: string;
+  CN: string;
+  Mail: string;
+}
+
+export type LllabUser = {
+  id: string;
+  username: string;
+  config: Config;
+  createdAt: string;
 }

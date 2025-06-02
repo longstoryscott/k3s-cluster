@@ -20,6 +20,14 @@ export const startConversation = async (accessToken: string, model: string) => {
   });
 }
 
+export const getUserConversations = async (accessToken: string, userId: string) => {
+  return await req<ChatConversation[]>({
+    method: 'GET',
+    headers: getHeaders(accessToken),
+    path: `api/conversations/user/${userId}`
+  });
+}
+
 export const getManyConversations = async (accessToken: string) =>
   req<ChatConversation[]>({
     method: 'GET',

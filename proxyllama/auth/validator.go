@@ -4,9 +4,8 @@ import (
 	"context"
 	"net/http"
 	"proxyllama/config"
-	"strings"
-
 	"proxyllama/util"
+	"strings"
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/gofiber/fiber/v2"
@@ -20,6 +19,8 @@ type contextKey string
 
 // Key for user ID in context
 const UserIDKey contextKey = "user_id"
+const TokenClaimsKey contextKey = "token_claims"
+const IsAdminKey contextKey = "is_admin"
 
 func NewValidator(ctx context.Context, jwksUri string) keyfunc.Keyfunc {
 	k, err := keyfunc.NewDefaultCtx(ctx, []string{jwksUri}) // Context is used to end the refresh goroutine.
@@ -63,9 +64,30 @@ func WithAuth(c *fiber.Ctx) error {
 			"error": "Unauthorized",
 		})
 	}
+	util.LogInfo("Token claims", logrus.Fields{
+		"claims": claims,
+		"userID": userID,
+	})
+
 	ctx := context.WithValue(c.Context(), UserIDKey, userID)
+	ctx = context.WithValue(ctx, TokenClaimsKey, claims)
+	groups, ok := claims["groups"]
+	if ok {
+		groupsInterface, ok := groups.([]any)
+		if ok {
+			for _, group := range groupsInterface {
+				if groupStr, ok := group.(string); ok && groupStr == "admins" {
+					ctx = context.WithValue(ctx, IsAdminKey, true)
+					break
+				}
+			}
+		}
+	}
+
 	c.SetUserContext(ctx)
-	c.Locals("user_id", userID)
+	c.Locals(UserIDKey, userID)
+	c.Locals(TokenClaimsKey, claims)
+	c.Locals(IsAdminKey, ctx.Value(IsAdminKey) != nil)
 	c.Set("X-User-ID", userID)
 
 	// Generate and set request ID
@@ -73,8 +95,12 @@ func WithAuth(c *fiber.Ctx) error {
 	c.Set("X-Request-ID", rid)
 	c.Locals("request_id", rid)
 	util.LogInfo("Request authorized", logrus.Fields{
-		"request_id": rid,
-		"user_id":    userID,
+		string(UserIDKey): userID,
 	})
 	return c.Next()
+}
+
+func CanAccess(c *fiber.Ctx, targetUserID string) bool {
+	userID := c.UserContext().Value(UserIDKey).(string)
+	return userID != targetUserID && c.UserContext().Value(IsAdminKey) == nil
 }

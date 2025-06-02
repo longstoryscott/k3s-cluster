@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgadmin
+  namespace: psql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgadmin
+  template:
+    metadata:
+      labels:
+        app: pgadmin
+    spec:
+      containers:
+        - name: pgadmin
+          image: dpage/pgadmin4:9.4
+          env:
+            - name: PGADMIN_DEFAULT_EMAIL
+              value: "longstoryscott@gmail.com"
+            - name: PGADMIN_DEFAULT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: psqlpw
+            - name: PGADMIN_CONFIG_SERVER_MODE
+              value: "False"
+            - name: PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED
+              value: "False"
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: pgadmin-data
+              mountPath: /var/lib/pgadmin
+            - name: pgadmin-servers
+              mountPath: /pgadmin4/servers.json
+              subPath: servers.json
+            - name: pgpass
+              mountPath: /pgadmin4/.pgpass
+              subPath: .pgpass
+      volumes:
+        - name: pgadmin-data
+          emptyDir: {}
+        - name: pgadmin-servers
+          configMap:
+            name: pgadmin-servers
+        - name: pgpass
+          secret:
+            secretName: secrets
+            items:
+              - key: psqlpw
+                path: .pgpass
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgadmin
+  namespace: psql
+spec:
+  selector:
+    app: pgadmin
+  ports:
+    - name: http
+      port: 8084
+      targetPort: 80
+  type: ClusterIP

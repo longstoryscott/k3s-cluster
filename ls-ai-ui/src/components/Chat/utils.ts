@@ -1,3 +1,4 @@
+
 // Utility function to replace Unicode characters that cause LaTeX compatibility issues
 export const sanitizeForLaTeX = (text: string): string => {
   if (!text) {
@@ -19,12 +20,13 @@ export const sanitizeForLaTeX = (text: string): string => {
   );
 };
 
-export const parseResponse = (content: string) => {
+export const parseResponse = (content: string, inProgress: boolean) => {
   const startIdx = content.indexOf('<think>');
-  if (startIdx === -1) {
+  const endIdx = content.indexOf('</think>', startIdx);
+  if (startIdx === -1 || (endIdx === -1 && !inProgress)) {
+    // If <think> tag is not found or inProgress is false and </think> is not found
     return { think: null, rest: content };
   }
-  const endIdx = content.indexOf('</think>', startIdx);
   if (endIdx !== -1) {
     const thinkContent = content.substring(startIdx + 7, endIdx).trim();
     const beforeThink = content.substring(0, startIdx).trim();

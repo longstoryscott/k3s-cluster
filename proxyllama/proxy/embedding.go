@@ -28,7 +28,7 @@ func splitTextIntoChunks(text string, maxChunkSize int) []string {
 }
 
 // GetOllamaEmbedding retrieves a vector embedding for the provided text from Ollama
-func GetOllamaEmbedding(ctx context.Context, textToEmbed string, modelName string) ([]float32, error) {
+func GetOllamaEmbedding(ctx context.Context, textToEmbed string, modelName string) ([][]float32, error) {
 	// Sanitize the input text before embedding
 	cleanText := util.SanitizeText(textToEmbed)
 
@@ -73,14 +73,8 @@ func GetOllamaEmbedding(ctx context.Context, textToEmbed string, modelName strin
 
 	if len(embeddingResponse.Embeddings) == 0 {
 		util.LogWarning("Received empty embedding response from Ollama")
-		return []float32{}, nil // Return empty slice instead of error
+		return [][]float32{}, nil // Return empty slice instead of error
 	}
 
-	// Concatenate all embeddings if multiple chunks were sent
-	var joinedEmbedding []float32
-	for _, emb := range embeddingResponse.Embeddings {
-		joinedEmbedding = append(joinedEmbedding, emb...)
-	}
-
-	return joinedEmbedding, nil
+	return embeddingResponse.Embeddings, nil
 }

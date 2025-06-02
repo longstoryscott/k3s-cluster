@@ -20,6 +20,9 @@ kubectl apply -n psql -f "$(dirname "$0")/serviceaccount.yaml" --wait=true
 kubectl apply -n psql -f "$(dirname "$0")/dbs.yaml" --wait=true
 kubectl apply -n psql -f "$(dirname "$0")/statefulset.yaml" --wait=true
 kubectl apply -n psql -f "$(dirname "$0")/service.yaml" --wait=true
+kubectl apply -n psql -f "$(dirname "$0")/pgadmin-servers.yaml" --wait=true
+kubectl apply -n psql -f "$(dirname "$0")/pgadmin.yaml" --wait=true
+kubectl apply -n psql -f "$(dirname "$0")/referencegrant.yaml" --wait=true
 
 echo "Waiting for PostgreSQL StatefulSet to start..."
 kubectl rollout status statefulset/psql -n psql --timeout=2m || true

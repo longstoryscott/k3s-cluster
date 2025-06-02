@@ -9,16 +9,23 @@ import (
 
 // Message represents a single exchange in the conversation
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-	ID      int    `json:"-"` // Internal use only, not sent to LLM
+	Role           string    `json:"role"`
+	Content        string    `json:"content"`
+	Images         []string  `json:"images,omitempty"`     // Optional images associated with the message
+	ToolCalls      []any     `json:"tool_calls,omitempty"` // Optional tool calls associated with the message
+	ID             int       `json:"-"`                    // Internal use only, not sent to LLM
+	CreatedAt      time.Time `json:"-"`                    // Timestamp of when the message was created
+	ConversationID int       `json:"-"`                    // ID of the conversation this message belongs to
 }
 
 // Summary represents a consolidated summary of messages or other summaries
 type Summary struct {
-	Content string `json:"content"`
-	Level   int    `json:"-"` // Internal use only, not sent to LLM
-	ID      int    `json:"-"` // Internal use only, not sent to LLM
+	Content        string    `json:"content"`
+	Level          int       `json:"level"`
+	ID             int       `json:"id"`
+	ConversationID int       `json:"conversation_id"` // ID of the conversation this summary belongs to
+	SourceIDs      []int     `json:"source_ids"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // OllamaChatMessage represents a message in the format expected by Ollama API
@@ -144,7 +151,7 @@ const (
 
 // ResearchTask represents a deep research task
 type ResearchTask struct {
-	ID             string             `json:"id"`
+	ID             int                `json:"id"`
 	UserID         string             `json:"user_id"`
 	Query          string             `json:"query"`
 	Model          string             `json:"model"`
@@ -182,7 +189,7 @@ type CreateResearchRequest struct {
 // ResearchSubtask represents a subtask within a research task
 type ResearchSubtask struct {
 	ID                 int                `json:"id"`
-	TaskID             string             `json:"task_id"`
+	TaskID             int                `json:"task_id"`
 	QuestionID         int                `json:"question_id"`
 	Status             ResearchTaskStatus `json:"status"`
 	GatheredInfo       []string           `json:"gathered_info"`
@@ -200,4 +207,41 @@ type ResearchQuestionResult struct {
 	SynthesizedAnswer string `json:"synthesized_answer,omitempty"`
 	Error             error  `json:"-"`
 	ErrorMessage      string `json:"error_message,omitempty"`
+}
+
+// SearchResult represents a search result from a web query
+type SearchResult struct {
+	Query    string   `json:"query"`
+	Results  []string `json:"results,omitempty"`
+	Contents []string `json:"contents,omitempty"`
+	Error    string   `json:"error,omitempty"`
+}
+
+type User struct {
+	ID        string    `json:"id"`
+	Username  string    `json:"username"`
+	Uid       string    `json:"uid"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Message represents a message with its metadata for search results
+type Memory struct {
+	ID             int
+	Role           string
+	Content        string
+	ConversationID int
+	Similarity     float32 // Used for vector similarity search results
+	SourceType     string  // Indicates if this is a message, summary, or research result
+}
+
+// ConversationContext manages context for a conversation
+type ConversationContext struct {
+	UserID            string
+	ConversationID    int
+	Title             string
+	MasterSummary     *Summary
+	Summaries         []Summary
+	Messages          []Message
+	RetrievedMemories []Memory  // Memories retrieved using semantic or keyword search
+	SearchResults     []Message // Search results from web search
 }

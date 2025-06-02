@@ -21,7 +21,7 @@ func StreamOllamaChatRequest(ctx context.Context, model string, messages []model
 
 	reqBody, err := json.Marshal(requestBody)
 	if err != nil {
-		return "", fmt.Errorf("error marshaling request: %w", err)
+		return "", util.HandleError(fmt.Errorf("error marshaling request: %w", err))
 	}
 
 	util.LogInfo("Sending request to Ollama")
@@ -30,7 +30,7 @@ func StreamOllamaChatRequest(ctx context.Context, model string, messages []model
 		return &models.OllamaChatResp{}
 	})
 	if err != nil {
-		return "", fmt.Errorf("error streaming request: %w", err)
+		return "", util.HandleError(fmt.Errorf("error streaming request: %w", err))
 	}
 
 	w := &bytes.Buffer{}
@@ -38,16 +38,16 @@ func StreamOllamaChatRequest(ctx context.Context, model string, messages []model
 
 	res, err := handler(wr)
 	if err != nil {
-		return "", fmt.Errorf("error handling response: %w", err)
+		return "", util.HandleError(fmt.Errorf("error handling response: %w", err))
 	}
 
 	if err := wr.Flush(); err != nil {
-		return "", fmt.Errorf("error flushing response: %w", err)
+		return "", util.HandleError(fmt.Errorf("error flushing response: %w", err))
 	}
 
 	// Check if the response is empty
 	if res == "" {
-		return "", fmt.Errorf("empty response from Ollama")
+		return "", util.HandleError(fmt.Errorf("empty response from Ollama"))
 	}
 
 	return res, nil

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"proxyllama/config"
+	"proxyllama/models"
 	"proxyllama/util"
 	"time"
 
@@ -120,7 +121,7 @@ func IsStorageCacheEnabled() bool {
 // ========== Message Cache Operations ==========
 
 // GetMessageFromCache attempts to retrieve a message from cache
-func GetMessageFromCache(ctx context.Context, messageID int) (*Message, bool) {
+func GetMessageFromCache(ctx context.Context, messageID int) (*models.Message, bool) {
 	if !IsStorageCacheEnabled() {
 		return nil, false
 	}
@@ -134,7 +135,7 @@ func GetMessageFromCache(ctx context.Context, messageID int) (*Message, bool) {
 		return nil, false
 	}
 
-	var message Message
+	var message models.Message
 	if err := json.Unmarshal(data, &message); err != nil {
 		logrus.Errorf("Error deserializing message from Redis: %v", err)
 		return nil, false
@@ -144,7 +145,7 @@ func GetMessageFromCache(ctx context.Context, messageID int) (*Message, bool) {
 }
 
 // CacheMessage stores a message in cache
-func CacheMessage(ctx context.Context, message *Message) error {
+func CacheMessage(ctx context.Context, message *models.Message) error {
 	if !IsStorageCacheEnabled() || message == nil {
 		return nil
 	}
@@ -199,7 +200,7 @@ func InvalidateConversationMessagesCache(ctx context.Context, conversationID int
 			continue
 		}
 
-		var msg Message
+		var msg models.Message
 		if err := json.Unmarshal(data, &msg); err != nil {
 			continue
 		}
@@ -211,7 +212,7 @@ func InvalidateConversationMessagesCache(ctx context.Context, conversationID int
 }
 
 // GetMessagesByConversationIDFromCache tries to get all messages for a conversation from cache
-func GetMessagesByConversationIDFromCache(ctx context.Context, conversationID int) ([]Message, bool) {
+func GetMessagesByConversationIDFromCache(ctx context.Context, conversationID int) ([]models.Message, bool) {
 	if !IsStorageCacheEnabled() {
 		return nil, false
 	}
@@ -220,7 +221,7 @@ func GetMessagesByConversationIDFromCache(ctx context.Context, conversationID in
 	messagesListKey := cacheKey(messagesListPrefix, conversationID)
 	data, err := redisClient.Get(ctx, messagesListKey).Bytes()
 	if err == nil {
-		var messages []Message
+		var messages []models.Message
 		if err := json.Unmarshal(data, &messages); err == nil {
 			return messages, true
 		}
@@ -241,7 +242,7 @@ func GetMessagesByConversationIDFromCache(ctx context.Context, conversationID in
 		}
 	}
 
-	var messages []Message
+	var messages []models.Message
 	for _, msgID := range messageIDs {
 		if msg, found := GetMessageFromCache(ctx, msgID); found {
 			messages = append(messages, *msg)
@@ -254,7 +255,7 @@ func GetMessagesByConversationIDFromCache(ctx context.Context, conversationID in
 }
 
 // CacheMessagesByConversationID caches all messages for a conversation
-func CacheMessagesByConversationID(ctx context.Context, conversationID int, messages []Message) error {
+func CacheMessagesByConversationID(ctx context.Context, conversationID int, messages []models.Message) error {
 	if !IsStorageCacheEnabled() || len(messages) == 0 {
 		return nil
 	}

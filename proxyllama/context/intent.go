@@ -53,7 +53,7 @@ func shouldSearchWeb(query string) bool {
 		"search", "google", "look up", "find information", "search for",
 		"what is the latest", "recent news", "current", "today's",
 		"latest update", "website", "webpage", "url", "link",
-		"http://", "https://", "www.",
+		"http://", "https://", "www.", "online", "internet",
 	}
 
 	for _, indicator := range explicitIndicators {
@@ -111,7 +111,7 @@ func shouldRetrieveMemories(query string) bool {
 	// Check if any memory trigger is in the query
 	for _, trigger := range memoryTriggers {
 		if strings.Contains(lowercaseQuery, trigger) {
-			util.LogInfo("Memory retrieval triggered by keyword", map[string]interface{}{"trigger": trigger})
+			util.LogInfo("Memory retrieval triggered by keyword", map[string]any{"trigger": trigger})
 			return true
 		}
 	}
@@ -128,7 +128,7 @@ func shouldRetrieveMemories(query string) bool {
 		if strings.Contains(lowercaseQuery, pattern) {
 			// Check if the question appears to be about past interactions
 			if strings.Contains(lowercaseQuery, "you") || strings.Contains(lowercaseQuery, "we") || strings.Contains(lowercaseQuery, "i") {
-				util.LogInfo("Memory retrieval triggered by question pattern", map[string]interface{}{"pattern": pattern})
+				util.LogInfo("Memory retrieval triggered by question pattern", map[string]any{"pattern": pattern})
 				return true
 			}
 		}

@@ -6,8 +6,8 @@ import (
 )
 
 func RemoveThinkTags(input string) string {
-	// Remove <think> tags and their content
-	thinkTagPattern := regexp.MustCompile(`<think>.*?</think>`)
+	// Remove <think> tags and their content, including newlines
+	thinkTagPattern := regexp.MustCompile(`(?s)<think>.*?</think>`) // (?s) makes . match newlines
 	return thinkTagPattern.ReplaceAllString(input, "")
 }
 

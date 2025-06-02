@@ -148,6 +148,7 @@ function findCompleteJsonEnd(str: string, startIndex: number): number {
 export async function req<T>(opts: RequestOptions): Promise<T> {
   const controller = new AbortController();
   opts.signal = controller.signal;
+  opts.baseUrl = opts.baseUrl || config.server.baseUrl;
 
   // Cancel previous requests with the same key if specified
   if (opts.requestKey && pendingRequests[opts.requestKey]) {
@@ -174,7 +175,7 @@ export async function req<T>(opts: RequestOptions): Promise<T> {
       }, opts.timeout);
     }
 
-    const response = await fetch(`${config.server.baseUrl}/${opts.path}`, opts);
+    const response = await fetch(`${opts.baseUrl}/${opts.path}`, opts);
 
     // Handle authentication errors
     if (response.status === 401 || response.status === 403) {
@@ -218,21 +219,6 @@ export const getHeaders = (accessToken: string) => ({
   Authorization: `Bearer ${accessToken}`,
   'Content-Type': 'application/json'
 });
-
-export const debounce = <T extends (...args: never[]) => unknown>(func: T, waitFor: number) => {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-
-  const debounced = (...args: Parameters<T>) => {
-    if (timeout !== null) {
-      clearTimeout(timeout);
-      timeout = null;
-    }
-    timeout = setTimeout(() => func(...args), waitFor);
-  };
-
-  return debounced as (...args: Parameters<T>) => void;
-}
-
 
 // Track pending requests
 const pendingRequests: Record<string, AbortController> = {};

@@ -3,10 +3,10 @@ storage:
   type: memory
 web:
   http: 0.0.0.0:5556
-  templates: /etc/dex/custom-templates/templates
 frontend:
-  # dir: /etc/dex/custom-templates
+  # dir: /etc/dex/dex-templates
   issuer: Long Story Media
+  logo: ../../etc/dex/dex-templates/static/logo.png
   extra:
     custom_message: "Welcome to Long Story Media"
 logger:
@@ -18,19 +18,14 @@ staticClients:
     redirectURIs:
       - "https://ai.longstorymedia.com/callback"
       - "http://localhost:5173/callback"
-  - id: private-client
-    secret: app-secret
-    name: "Private Client"
+  - id: lsm-client
+    public: false
+    secret: ${DEX_CLIENT_SECRET}
+    name: "Long Story Media"
     redirectURIs:
       - "https://ai.longstorymedia.com/callback"
+      - "https://auth.longstorymedia.com/callback"
       - "http://localhost:5173/callback"
-# Set up an test user
-# staticPasswords:
-#   - email: "longstoryscott@gmail.com"
-#     # bcrypt hash of the string "password": $(echo password | htpasswd -BinC 10 admin | cut -d: -f2)
-#     hash: "$2y$10$JgJIIygki8q6wPQqMYbFNOVNkYse9bC2RNAp.1ARNopVcvA8Zm5Oq"
-#     username: "lsm"
-#     userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
 
 connectors:
   - type: ldap
@@ -40,7 +35,8 @@ connectors:
       host: openldap.auth.svc.cluster.local:389
       insecureNoSSL: true
       bindDN: "cn=admin,dc=longstorymedia,dc=com"
-      bindPW: "6u!tar00!QAZ"
+      bindPW: ${LDAP_ADMIN_PASSWORD}
+      baseDN: "dc=longstorymedia,dc=com"
       userSearch:
         baseDN: "dc=longstorymedia,dc=com"
         filter: "(objectClass=person)"
@@ -48,6 +44,8 @@ connectors:
         idAttr: "uid"
         emailAttr: "mail"
         nameAttr: "cn"
+        preferredUsernameAttr: uid
+        attributes: ["uid", "cn"]
       groupSearch:
         baseDN: "dc=longstorymedia,dc=com"
         filter: "(objectClass=groupOfNames)"
@@ -55,6 +53,10 @@ connectors:
           - userAttr: "dn"
             groupAttr: "member"
         nameAttr: "cn"
+      # Updated claims mapping to include both uid and groups
+      claims:
+        uid: ["uid"]
+        groups: ["cn"]
 
 # Enable local users
 # enablePasswordDB: true

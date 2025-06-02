@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"proxyllama/config"
+	"proxyllama/models"
 	"proxyllama/util"
 	"strings"
 	"time"
@@ -54,8 +55,11 @@ func cacheUserConfig(ctx context.Context, userID string, cfg *config.UserConfig)
 
 // GetUserConfig retrieves user configuration from database
 func GetUserConfig(ctx context.Context, userID string) (*config.UserConfig, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	// Ensure user exists
 	if err := EnsureUser(ctx, userID); err != nil {
+		util.HandleError(err)
 		return nil, err
 	}
 
@@ -68,8 +72,9 @@ func GetUserConfig(ctx context.Context, userID string) (*config.UserConfig, erro
 	// Parse JSON into config struct
 	var usrConfig config.UserConfig
 	err := Pool.QueryRow(ctx, GetQuery("user.get_config"), userID).Scan(&usrConfig)
-
 	if err != nil {
+		util.HandleError(err)
+
 		if err == sql.ErrNoRows || strings.Contains(err.Error(), "cannot scan NULL into *config.UserConfig") {
 			// No rows found, or empty config
 			util.LogWarning("No user config found, setting to default", map[string]interface{}{
@@ -117,9 +122,27 @@ func UpdateUserConfig(ctx context.Context, userID string, cfg *config.UserConfig
 	return nil
 }
 
-// GetUserConfigWithTimeout is a wrapper that adds a timeout to GetUserConfig
-func GetUserConfigWithTimeout(userID string) (*config.UserConfig, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// GetAllUsers retrieves all users from the database
+func GetAllUsers(ctx context.Context) ([]models.User, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	return GetUserConfig(ctx, userID)
+
+	rows, err := Pool.Query(ctx, "SELECT id, created_at, username FROM users")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []models.User
+	for rows.Next() {
+		var u models.User
+		if err := rows.Scan(&u.ID, &u.CreatedAt, &u.Username); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return users, nil
 }

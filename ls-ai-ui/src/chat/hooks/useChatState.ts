@@ -1,9 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { ChatConversation, Model, ChatMessage } from '../../api/types';
+import { useAuth } from '../../auth';
 
 export interface ChatState {
   messages: ChatMessage[];
-  conversations: ChatConversation[];
+  conversations: { [key: string]: ChatConversation[] };
   currentConversation: ChatConversation | null;
   isLoading: boolean;
   error: string | null;
@@ -16,7 +17,7 @@ export interface ChatState {
 
 export interface ChatActions {
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
-  setConversations: (conversations: ChatConversation[]) => void;
+  setConversations: React.Dispatch<React.SetStateAction<{ [key: string]: ChatConversation[] }>>;
   setCurrentConversation: (conversation: ChatConversation | null) => void;
   setIsLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -33,7 +34,7 @@ export interface ChatActions {
 
 export const useChatState = (): [ChatState, ChatActions] => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [conversations, setConversations] = useState<ChatConversation[]>([]);
+  const [conversations, setConversations] = useState<{ [key: string]: ChatConversation[] }>({});
   const [currentConversation, setCurrentConversation] = useState<ChatConversation | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +45,8 @@ export const useChatState = (): [ChatState, ChatActions] => {
   });
   const [models, setModelsState] = useState<Model[]>([]);
   const [isSearching, setIsSearching] = useState(false); // Initialize isSearching state
+  const { user } = useAuth(); // Assuming useAuth is a custom hook to get user info
+  const currentUserId = useMemo(() => user?.profile?.preferred_username ?? '', [user]);
 
   const setModels = useCallback((models: Model[]) => {
     setModelsState(models);
@@ -59,26 +62,44 @@ export const useChatState = (): [ChatState, ChatActions] => {
   }, []);
 
   const addConversation = useCallback((conversation: ChatConversation) => {
-    setConversations(prev => [conversation, ...(prev ?? [])]);
-  }, []);
+    if (!currentUserId) {
+      return;
+    }
+    setConversations(prev => ({
+      ...prev,
+      [currentUserId]: [conversation, ...(prev[currentUserId] || [])]
+    }));
+  }, [currentUserId]);
 
   const updateConversationInList = useCallback((id: number, updates: Partial<ChatConversation>) => {
-    setConversations(prev =>
-      prev.map(c => c.id === id ? { ...c, ...updates } : c)
-    );
+    if (!currentUserId) {
+      return;
+    }
+    setConversations(prev => ({
+      ...prev,
+      [currentUserId]: prev[currentUserId].map(c => c.id === id ? { ...c, ...updates } : c)
+    }));
 
     setCurrentConversation(prev =>
       prev?.id === id ? { ...prev, ...updates } : prev
     );
-  }, []);
+  }, [currentUserId]);
 
   const removeConversationFromList = useCallback((id: number) => {
-    setConversations(prev => prev.filter(c => c.id !== id));
+    if (!currentUserId) {
+      return;
+    }
+
+    setConversations(prev => ({
+      ...prev,
+      [currentUserId]: prev[currentUserId].filter(c => c.id !== id)
+    }));
+
 
     setCurrentConversation(prev =>
       prev?.id === id ? null : prev
     );
-  }, []);
+  }, [currentUserId]);
 
   const state: ChatState = {
     messages,

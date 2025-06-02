@@ -57,7 +57,7 @@ func Test_EmbeddingRequest(t *testing.T) {
 	// Create a sample embedding request
 	req := models.OllamaEmbeddingReq{
 		Model: config.DefaultEmbeddingProfile.ModelName,
-		Input: []string{"What is the capital of France?"},
+		Input: []string{"Can I get and example of splitting a model accross multiple gpus in code?"},
 	}
 
 	// Marshal the request to JSON

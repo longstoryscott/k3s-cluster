@@ -24,3 +24,17 @@ spec:
     - name: ldap
       port: 389
       targetPort: 389
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: usrmgr
+  namespace: auth
+spec:
+  selector:
+    app: usrmgr
+  ports:
+    - name: usrmgr
+      protocol: TCP
+      port: 3333
+      targetPort: 3333

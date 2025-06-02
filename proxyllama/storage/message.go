@@ -7,19 +7,10 @@ import (
 	"proxyllama/models"
 	"proxyllama/proxy"
 	"proxyllama/util"
-	"time"
 )
 
-type Message struct {
-	ID             int       `json:"id"`
-	ConversationID int       `json:"conversation_id"`
-	Role           string    `json:"role"` // "user" or "assistant"
-	Content        string    `json:"content"`
-	CreatedAt      time.Time `json:"created_at"`
-}
-
 // AddMessage adds a message to a conversation
-func AddMessage(ctx context.Context, conversationID int, role, content string, usrCfg *config.UserConfig) (int, []float32, error) {
+func AddMessage(ctx context.Context, conversationID int, role, content string, usrCfg *config.UserConfig) (int, [][]float32, error) {
 	// Check if Pool is initialized
 	if Pool == nil {
 		return 0, nil, util.HandleError(fmt.Errorf("database connection pool is not initialized (Pool is nil)"))
@@ -39,7 +30,7 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 
 	var messageID int
 	var profile *models.ModelProfile
-	var embedding []float32
+	var embeddings [][]float32
 	// Use the SQL query from our loader
 	err = tx.QueryRow(ctx, GetQuery("message.add_message"), conversationID, role, content).Scan(&messageID)
 	if err != nil {
@@ -58,13 +49,12 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 		return messageID, nil, nil // Proceed without embedding if profile retrieval fails
 	}
 
-	embedding, err = proxy.GetOllamaEmbedding(ctx, content, profile.ModelName)
+	embeddings, err = proxy.GetOllamaEmbedding(ctx, content, profile.ModelName)
 	if err != nil {
 		return 0, nil, util.HandleError(err)
 	}
 
-	memErr := StoreMemoryWithTx(ctx, usrCfg.UserID, "message", messageID, embedding, tx)
-	if memErr != nil {
+	if memErr := StoreMemoryWithTx(ctx, usrCfg.UserID, "message", messageID, embeddings, tx); memErr != nil {
 		util.HandleError(memErr)
 	}
 
@@ -74,12 +64,11 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 	}
 
 	// Create message object for caching
-	message := &Message{
+	message := &models.Message{
 		ID:             messageID,
 		ConversationID: conversationID,
 		Role:           role,
 		Content:        content,
-		CreatedAt:      time.Now(), // Approximate time until we fetch from DB
 	}
 
 	// Invalidate the conversation's message cache
@@ -92,18 +81,18 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 		// We'll just have a cache miss next time
 	}
 
-	return messageID, embedding, nil
+	return messageID, embeddings, nil
 }
 
 // GetMessage gets a single message by ID
-func GetMessage(ctx context.Context, messageID int) (*Message, error) {
+func GetMessage(ctx context.Context, messageID int) (*models.Message, error) {
 	// Try to get from cache first
 	if msg, found := GetMessageFromCache(ctx, messageID); found {
 		return msg, nil
 	}
 
 	// Not in cache, get from database using the query from our loader
-	var msg Message
+	var msg models.Message
 	err := Pool.QueryRow(ctx, GetQuery("message.get_message"), messageID).Scan(
 		&msg.ID, &msg.ConversationID, &msg.Role, &msg.Content, &msg.CreatedAt)
 	if err != nil {
@@ -120,7 +109,7 @@ func GetMessage(ctx context.Context, messageID int) (*Message, error) {
 }
 
 // GetConversationHistory retrieves all messages for a conversation
-func GetConversationHistory(ctx context.Context, conversationID int) ([]Message, error) {
+func GetConversationHistory(ctx context.Context, conversationID int) ([]models.Message, error) {
 	// Try to get from cache first
 	if messages, found := GetMessagesByConversationIDFromCache(ctx, conversationID); found && len(messages) > 0 {
 		util.LogDebug("Cache hit for conversation messages", nil)
@@ -134,9 +123,9 @@ func GetConversationHistory(ctx context.Context, conversationID int) ([]Message,
 	}
 	defer rows.Close()
 
-	var messages []Message
+	var messages []models.Message
 	for rows.Next() {
-		var msg Message
+		var msg models.Message
 		if err := rows.Scan(&msg.ID, &msg.ConversationID, &msg.Role, &msg.Content, &msg.CreatedAt); err != nil {
 			return nil, err
 		}

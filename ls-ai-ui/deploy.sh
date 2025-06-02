@@ -1,11 +1,16 @@
 #!/bin/bash
 
 cd "$(dirname "$0")" || exit 1
-# Save the original VITE_BASE_URL
-# ORIGINAL_BASE_URL=$(grep '^VITE_BASE_URL=' "$(dirname "$0")/.env")
 
-# Set to production URL
-# sed -i '' "s|^VITE_BASE_URL=.*|VITE_BASE_URL='https://ai.longstorymedia.com'|" "$(dirname "$0")/.env"
+cat .env.prod >.env
+
+# Source the .env file to load environment variables
+if [[ -f .env ]]; then
+  echo "Loading environment variables from .env.prod file"
+  set -a # Automatically export all variables
+  source .env
+  set +a # Turn off auto-export
+fi
 
 npm run build
 # npm run test
@@ -18,9 +23,13 @@ ssh root@longstorymedia.com "ln -s /etc/nginx/sites-available/ai.longstorymedia.
 ssh root@longstorymedia.com "chown -R www-data:www-data /var/www/ai.longstorymedia.com" || true
 ssh root@longstorymedia.com "systemctl restart nginx" || true
 
-# Restore the original VITE_BASE_URL
-# if [ -n "$ORIGINAL_BASE_URL" ]; then
-#   sed -i '' "s|^VITE_BASE_URL=.*|$ORIGINAL_BASE_URL|" "$(dirname "$0")/.env"
-# fi
+cat .env.local >.env
+# Source the .env file to load environment variables
+if [[ -f .env ]]; then
+  echo "Loading environment variables from .env.local file"
+  set -a # Automatically export all variables
+  source .env
+  set +a # Turn off auto-export
+fi
 
 cd || exit 1

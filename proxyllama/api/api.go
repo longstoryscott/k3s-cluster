@@ -26,12 +26,14 @@ func handleError(err error, status int, message string) error {
 func RegisterConversationRoutes(app *fiber.App) {
 	app.Get("/api/conversations", GetUserConversations)
 	app.Get("/api/conversations/:id", GetConversation)
+	app.Get("/api/conversations/user/:id", GetConversationsForUser)
 	app.Get("/api/conversations/:id/messages", GetConversationMessages)
 	app.Delete("/api/conversations/:id", DeleteConversation)
 	app.Put("/api/conversations/:id", UpdateConversation)
 	app.Post("/api/conversations", CreateConversation)
 	app.Get("/api/models", GetModels)
 	app.Get("/api/conversations/:id/summarize", SummarizeMessages)
+	app.Get("/api/users", GetUsers) // Added for user-specific conversations
 }
 
 // GetUserConversations returns all conversations for the authenticated user
@@ -46,9 +48,24 @@ func GetUserConversations(c *fiber.Ctx) error {
 	return c.JSON(conversations)
 }
 
+// GetConversationsForUser returns all conversations for a specific user
+func GetConversationsForUser(c *fiber.Ctx) error {
+	targetUserID := c.Params("id")
+
+	if auth.CanAccess(c, targetUserID) {
+		return fiber.NewError(fiber.StatusForbidden, "Access denied")
+	}
+
+	conversations, err := storage.GetUserConversations(c.Context(), targetUserID)
+	if err != nil {
+		return handleError(err, fiber.StatusInternalServerError, "Failed to retrieve conversations for user")
+	}
+
+	return c.JSON(conversations)
+}
+
 // GetConversation returns a specific conversation
 func GetConversation(c *fiber.Ctx) error {
-	userID := c.UserContext().Value(auth.UserIDKey).(string)
 	conversationID, err := c.ParamsInt("id")
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid conversation ID")
@@ -59,8 +76,7 @@ func GetConversation(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Conversation not found")
 	}
 
-	// Verify ownership
-	if conversation.UserID != userID {
+	if auth.CanAccess(c, conversation.UserID) {
 		return fiber.NewError(fiber.StatusForbidden, "Access denied")
 	}
 
@@ -69,7 +85,6 @@ func GetConversation(c *fiber.Ctx) error {
 
 // GetConversationMessages returns all messages in a conversation
 func GetConversationMessages(c *fiber.Ctx) error {
-	userID := c.UserContext().Value(auth.UserIDKey).(string)
 	conversationID, err := c.ParamsInt("id")
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid conversation ID")
@@ -80,7 +95,8 @@ func GetConversationMessages(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Conversation not found")
 	}
-	if conversation.UserID != userID {
+
+	if auth.CanAccess(c, conversation.UserID) {
 		return fiber.NewError(fiber.StatusForbidden, "Access denied")
 	}
 
@@ -212,7 +228,7 @@ func GetModels(c *fiber.Ctx) error {
 
 	// If Ollama returns an error, pass it through
 	if resp.StatusCode >= 400 {
-		util.HandleError(fmt.Errorf("Ollama error response: Status Code: %d, Body: %s", resp.StatusCode, string(body)))
+		util.HandleError(fmt.Errorf("ollama error response: Status Code: %d, Body: %s", resp.StatusCode, string(body)))
 		return c.Status(resp.StatusCode).Send(body)
 	}
 
@@ -249,4 +265,13 @@ func SummarizeMessages(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(summary)
+}
+
+func GetUsers(c *fiber.Ctx) error {
+	users, err := storage.GetAllUsers(c.Context())
+	if err != nil {
+		return handleError(err, fiber.StatusInternalServerError, "Failed to retrieve users")
+	}
+
+	return c.JSON(users)
 }

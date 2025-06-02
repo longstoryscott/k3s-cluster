@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { TextField, Button, Box, Typography, useTheme, Switch, FormControlLabel, CircularProgress, Tooltip } from '@mui/material';
+import { TextField, Button, Box, Typography, useTheme, Switch, FormControlLabel } from '@mui/material';
 import { useChat } from '../../chat';
 import { useConfigContext } from '../../context/ConfigContext';
-import ModelProfileSelector from '../ModelSelector/ModelProfileSelector';
 import SearchIndicator from './SearchIndicator';
 
 const ChatInput = () => {
@@ -139,12 +138,6 @@ const ChatInput = () => {
           }
           label="Web Search"
         />
-        <Tooltip title="Select a model profile for the current conversation. Model profiles for other tasks can be selected in settings. The profiles themselves can be configured on the Model Profiles page.)">
-          <Box sx={{ minWidth: 180 }}>
-            <ModelProfileSelector task={{ key: 'primaryProfileId', label: 'Primary Model Profile' }} />
-          </Box>
-        </Tooltip>
-        {isLoading && <CircularProgress size={20} sx={{ ml: 1 }} />}
       </Box>
       {!hasConversation && (
         <Typography 

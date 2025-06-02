@@ -175,6 +175,14 @@ service:
       targetPort: 8083
       protocol: TCP
       name: proxyllama
+    - port: 3333
+      targetPort: 3333
+      protocol: TCP
+      name: usrmgr
+    - port: 8084
+      targetPort: 8084
+      protocol: TCP
+      name: pgadmin
 
 metrics:
   ## Enable exposing metrics in the Prometheus format.

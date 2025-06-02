@@ -72,12 +72,12 @@ func InitMemorySchema(ctx context.Context) error {
 }
 
 // StoreMemory stores a memory with embedding for a user
-func StoreMemory(ctx context.Context, userID, source string, sourceID int, embedding []float32) error {
+func StoreMemory(ctx context.Context, userID, source string, sourceID int, embeddings [][]float32) error {
 	tx, err := Pool.Begin(ctx)
 	if err != nil {
 		return util.HandleError(fmt.Errorf("failed to begin transaction: %w", err))
 	}
-	if err := StoreMemoryWithTx(ctx, userID, source, sourceID, embedding, tx); err != nil {
+	if err := StoreMemoryWithTx(ctx, userID, source, sourceID, embeddings, tx); err != nil {
 		tx.Rollback(ctx) // rollback on error
 		return util.HandleError(err)
 	}
@@ -88,12 +88,14 @@ func StoreMemory(ctx context.Context, userID, source string, sourceID int, embed
 }
 
 // StoreMemoryWithTx stores a memory with embedding for a user within a transaction
-func StoreMemoryWithTx(ctx context.Context, userID, source string, sourceID int, embedding []float32, tx pgx.Tx) error {
-	pe, _ := processEmbedding(embedding)
-	embeddingStr := formatEmbeddingForPgVector(pe)
-	_, err := tx.Exec(ctx, GetQuery("memory.store_memory"), userID, sourceID, source, embeddingStr)
-	if err != nil {
-		return fmt.Errorf("failed to store memory: %w", err)
+func StoreMemoryWithTx(ctx context.Context, userID, source string, sourceID int, embeddings [][]float32, tx pgx.Tx) error {
+	for _, embedding := range embeddings {
+		pe, _ := processEmbedding(embedding)
+		embeddingStr := formatEmbeddingForPgVector(pe)
+		_, err := tx.Exec(ctx, GetQuery("memory.store_memory"), userID, sourceID, source, embeddingStr)
+		if err != nil {
+			util.HandleError(fmt.Errorf("failed to store memory: %w", err))
+		}
 	}
 
 	return nil
@@ -157,12 +159,9 @@ func reduceVector(vec []float32, targetDimension int) []float32 {
 	originalDimension := len(vec)
 	result := make([]float32, targetDimension)
 	ratio := float64(originalDimension) / float64(targetDimension)
-	for i := 0; i < targetDimension; i++ {
+	for i := range targetDimension {
 		startIdx := int(math.Floor(float64(i) * ratio))
-		endIdx := int(math.Floor(float64(i+1) * ratio))
-		if endIdx > originalDimension {
-			endIdx = originalDimension
-		}
+		endIdx := min(int(math.Floor(float64(i+1)*ratio)), originalDimension)
 		if startIdx >= endIdx {
 			if i < originalDimension {
 				result[i] = vec[i]
@@ -195,32 +194,36 @@ func normalizeVector(vec []float32) []float32 {
 }
 
 // GetSimilarMessages finds semantically similar messages based on vector similarity
-func GetSimilarMessages(ctx context.Context, queryEmbedding []float32, similarityThreshold float32, limit int) ([]Message, error) {
-	// Ensure the query embedding is 768 dimensions
-	processedEmbedding, _ := processEmbedding(queryEmbedding)
-	embeddingStr := formatEmbeddingForPgVector(processedEmbedding)
+// func GetSimilarMessages(ctx context.Context, queryEmbedding []float32, similarityThreshold float32, limit int) ([]Message, error) {
+// 	// Ensure the query embedding is 768 dimensions
+// 	processedEmbedding, _ := processEmbedding(queryEmbedding)
+// 	embeddingStr := formatEmbeddingForPgVector(processedEmbedding)
 
-	rows, err := Pool.Query(ctx, GetQuery("memory.similar_messages"), embeddingStr, similarityThreshold, limit, "messages")
-	if err != nil {
-		return nil, util.HandleError(fmt.Errorf("failed to query similar messages: %w", err))
-	}
-	defer rows.Close()
+// 	rows, err := Pool.Query(ctx, GetQuery("memory.similar_messages"), embeddingStr, similarityThreshold, limit, "messages")
+// 	if err != nil {
+// 		return nil, util.HandleError(fmt.Errorf("failed to query similar messages: %w", err))
+// 	}
+// 	defer rows.Close()
 
-	var messages []Message
-	for rows.Next() {
-		var msg Message
-		var similarity float32
+// 	for _, r := range rows.RawValues() {
+// 		util.LogDebug("Raw Similar Message:", logrus.Fields{"row": string(r)})
+// 	}
 
-		if err := rows.Scan(&msg.ID, &msg.ConversationID, &msg.Role, &msg.Content, &msg.CreatedAt, &similarity); err != nil {
-			return nil, util.HandleError(fmt.Errorf("failed to scan message row: %w", err))
-		}
+// 	var messages []Message
+// 	for rows.Next() {
+// 		var msg Message
+// 		var similarity float32
 
-		messages = append(messages, msg)
-	}
+// 		if err := rows.Scan(&msg.ID, &msg.ConversationID, &msg.Role, &msg.Content, &msg.CreatedAt, &similarity); err != nil {
+// 			return nil, util.HandleError(fmt.Errorf("failed to scan message row: %w", err))
+// 		}
 
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating message rows: %w", err)
-	}
+// 		messages = append(messages, msg)
+// 	}
 
-	return messages, nil
-}
+// 	if err = rows.Err(); err != nil {
+// 		return nil, fmt.Errorf("error iterating message rows: %w", err)
+// 	}
+
+// 	return messages, nil
+// }

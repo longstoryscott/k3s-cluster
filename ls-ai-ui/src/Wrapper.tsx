@@ -5,7 +5,7 @@ import { ChatProvider } from './chat'
 import { ThemeProvider } from '@emotion/react'
 import useColorMode from './hooks/useColorMode'
 import config from './config/index'
-import { CssBaseline } from '@mui/material'
+import { CssBaseline, Box } from '@mui/material'
 import { ConfigProvider } from './context/ConfigContext'
 import MainLayout from './components/Layout/MainLayout'
 import ThemeToggle from './components/Shared/ThemeToggle'
@@ -25,7 +25,15 @@ const Wrapper:React.FC = () => {
       <CssBaseline />
       <ConfigProvider>
         {auth.evaluating ? (
-          <LoadingAnimation size={600} sx={{position: 'absolute', left: '50%', top: '50%'}} />
+          <Box sx={{ 
+            display: 'flex', 
+            justifyContent: 'center', 
+            alignItems: 'center', 
+            width: '100%', 
+            height: '100vh' 
+          }}>
+            <LoadingAnimation size={1000} />
+          </Box>
         ) : (
           <ChatProvider>
             <MainLayout>

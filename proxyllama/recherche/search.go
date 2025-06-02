@@ -11,19 +11,12 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 
+	"proxyllama/models"
 	"proxyllama/util"
 
 	customsearch "google.golang.org/api/customsearch/v1"
 	"google.golang.org/api/option"
 )
-
-// SearchResult represents a search result from a web query
-type SearchResult struct {
-	Query    string   `json:"query"`
-	Results  []string `json:"results,omitempty"`
-	Contents []string `json:"contents,omitempty"`
-	Error    string   `json:"error,omitempty"`
-}
 
 var googleSeachApiKey string = "AIzaSyB5RNu4WR24OapJug9rbzAgsPru7gbvFTk"
 var cx string = "0445a4af16a624cfe"
@@ -76,7 +69,7 @@ func ExtractTextFromURL(ctx context.Context, urlString string) (string, error) {
 	client := http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, "GET", urlString, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+		return "", util.HandleError(fmt.Errorf("failed to create request: %w", err))
 	}
 
 	// Add a user agent to simulate a browser
@@ -84,14 +77,12 @@ func ExtractTextFromURL(ctx context.Context, urlString string) (string, error) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		util.HandleError(fmt.Errorf("failed to fetch URL: %w", err))
-		return "", fmt.Errorf("failed to fetch URL: %w", err)
+		return "", util.HandleError(fmt.Errorf("failed to fetch URL: %w", err))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		util.HandleError(fmt.Errorf("failed with status %d", resp.StatusCode))
-		return "", fmt.Errorf("failed with status %d", resp.StatusCode)
+		return "", util.HandleError(fmt.Errorf("failed with status %d", resp.StatusCode))
 	}
 
 	// Use goquery to parse the HTML
@@ -103,7 +94,7 @@ func ExtractTextFromURL(ctx context.Context, urlString string) (string, error) {
 
 	// Extract text from relevant HTML elements
 	var textBuilder strings.Builder
-	doc.Find("p, h1, h2, h3, h4, h5, article, section").Each(func(i int, s *goquery.Selection) {
+	doc.Find("pre, p, h1, h2, h3, h4, h5, article, section").Each(func(i int, s *goquery.Selection) {
 		// Skip empty elements or elements with very little content
 		text := strings.TrimSpace(s.Text())
 		if len(text) > 15 { // Only include elements with meaningful content
@@ -137,42 +128,45 @@ func ExtractTextFromURL(ctx context.Context, urlString string) (string, error) {
 	return result, nil
 }
 
-// QuickSearch performs a complete search operation: search, extract content, and format results
-func QuickSearch(ctx context.Context, query string, maxResults int, includeContents bool) (*SearchResult, error) {
-	result := &SearchResult{
-		Query: query,
-	}
-
-	// Check for URL in query, if so just extract from that URL
+func ExtractUrlContentFromQuery(ctx context.Context, query string) (*models.SearchResult, error) {
+	// Check if the query contains a URL
 	if strings.Contains(query, "http://") || strings.Contains(query, "https://") {
-		// Extract URL from query
+		// Extract URLs from the query
 		words := strings.Fields(query)
-		var foundURL string
+		var urls []string
 		for _, word := range words {
 			if strings.HasPrefix(word, "http://") || strings.HasPrefix(word, "https://") {
 				// Basic URL validation by parsing
-				_, err := url.ParseRequestURI(word)
-				if err == nil {
-					foundURL = word
-					break
+				if _, err := url.ParseRequestURI(word); err == nil {
+					urls = append(urls, word)
 				}
 			}
 		}
 
-		if foundURL != "" {
-			// Just extract from this specific URL
-			result.Results = []string{foundURL}
+		if len(urls) > 0 {
+			util.LogInfo(fmt.Sprintf("Extracted URLs from query: %v", urls))
 
-			if includeContents {
-				content, err := ExtractTextFromURL(ctx, foundURL)
-				if err != nil {
-					result.Error = err.Error()
-					return result, err
-				}
-				result.Contents = []string{content}
+			// Extract content from the first URL
+			content, err := ExtractTextFromURL(ctx, urls[0])
+			if err != nil {
+				return nil, util.HandleError(fmt.Errorf("failed to extract content from URL: %w", err))
 			}
-			return result, nil
+
+			return &models.SearchResult{
+				Query:    query,
+				Results:  urls,
+				Contents: []string{content},
+			}, nil
 		}
+		util.LogInfo("No valid URLs found in query")
+	}
+	return nil, nil
+}
+
+// QuickSearch performs a complete search operation: search, extract content, and format results
+func QuickSearch(ctx context.Context, query string, maxResults int, includeContents bool) (*models.SearchResult, error) {
+	result := &models.SearchResult{
+		Query: query,
 	}
 
 	// If no URL found, perform web search

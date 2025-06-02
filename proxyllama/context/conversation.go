@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"proxyllama/models"
-	"proxyllama/proxy"
-	"proxyllama/recherche"
 	"proxyllama/storage"
 	"proxyllama/util"
 	"strings"
@@ -24,7 +22,7 @@ type ConversationContext struct {
 	MasterSummary     *models.Summary
 	Summaries         []models.Summary
 	Messages          []models.Message
-	RetrievedMemories []models.Message // Memories retrieved using semantic or keyword search
+	RetrievedMemories []models.Memory  // Memories retrieved using semantic or keyword search
 	SearchResults     []models.Message // Search results from web search
 }
 
@@ -161,7 +159,7 @@ func loadConversationSummaries(ctx context.Context, cc *ConversationContext) err
 }
 
 // AddUserMessage adds a user message to the conversation
-func (cc *ConversationContext) AddUserMessage(ctx context.Context, content string) ([]float32, error) {
+func (cc *ConversationContext) AddUserMessage(ctx context.Context, content string) ([][]float32, error) {
 	usrCfg, err := GetUserConfig(cc.UserID)
 	if err != nil {
 		return nil, util.HandleError(fmt.Errorf("failed to get user config: %w", err))
@@ -196,7 +194,7 @@ func (cc *ConversationContext) AddUserMessage(ctx context.Context, content strin
 }
 
 // AddAssistantMessage adds an assistant message to the conversation
-func (cc *ConversationContext) AddAssistantMessage(ctx context.Context, content string) ([]float32, error) {
+func (cc *ConversationContext) AddAssistantMessage(ctx context.Context, content string) ([][]float32, error) {
 	util.LogInfo("Storing assistant response", logrus.Fields{"length": len(content)})
 
 	usrCfg, err := GetUserConfig(cc.UserID)
@@ -220,7 +218,7 @@ func (cc *ConversationContext) AddAssistantMessage(ctx context.Context, content 
 	if cc.shouldSummarize() {
 		util.LogInfo("Summarizing messages for conversation")
 		go func() {
-			bgrndCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			bgrndCtx, cancel := context.WithTimeout(context.Background(), 120*time.Minute)
 			defer cancel()
 			if _, err := cc.SummarizeMessages(bgrndCtx); err != nil {
 				util.HandleError(fmt.Errorf("failed to summarize messages: %w", err))
@@ -243,12 +241,15 @@ func (cc *ConversationContext) AddAssistantMessage(ctx context.Context, content 
 func (cc *ConversationContext) ToJSON() ([]byte, error) {
 	usrCfg, err := GetUserConfig(cc.UserID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user config: %w", err)
+		return nil, util.HandleError(fmt.Errorf("failed to get user config: %w", err))
 	}
 
-	defaultModel, err := storage.GetModelProfile(context.Background(), usrCfg.ModelProfiles.PrimaryProfileID)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	defaultModel, err := storage.GetModelProfile(ctx, usrCfg.ModelProfiles.PrimaryProfileID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get default model profile: %w", err)
+		return nil, util.HandleError(fmt.Errorf("failed to get default model profile: %w", err))
 	}
 
 	req := models.OllamaChatReq{
@@ -324,7 +325,6 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 	}
 
 	// Apply RAG enhancement if enabled (adds relevant memories from previous conversations)
-	ctx := context.Background()
 	userConfig, err := GetUserConfig(cc.UserID)
 	if err != nil {
 		util.LogWarning("Could not load user configuration, using system defaults", logrus.Fields{"error": err})
@@ -332,10 +332,9 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 	}
 
 	if userConfig.Summarization.EnableRAG {
-		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
-		if err := cc.EnhanceRequestWithRAG(timeoutCtx, &req); err != nil {
+		if err := cc.EnhanceRequestWithRAG(ctx, &req); err != nil {
 			util.LogWarning("Failed to enhance request with RAG", logrus.Fields{"error": err})
 		}
 	}
@@ -395,16 +394,10 @@ func (cc *ConversationContext) addRecentMessagesToReq(req *models.OllamaChatReq)
 	}
 
 	// Include only N most recent messages (user or assistant)
-	messagesToInclude := userConfig.Summarization.MessagesBeforeSummary
-	if len(cc.Messages) < messagesToInclude {
-		messagesToInclude = len(cc.Messages)
-	}
+	messagesToInclude := min(len(cc.Messages), userConfig.Summarization.MessagesBeforeSummary)
 
 	// Calculate starting index for messages
-	startIndex := len(cc.Messages) - messagesToInclude
-	if startIndex < 0 {
-		startIndex = 0
-	}
+	startIndex := max(len(cc.Messages)-messagesToInclude, 0)
 
 	util.LogInfo("Including most recent messages in request to Ollama", logrus.Fields{
 		"count": messagesToInclude,
@@ -460,76 +453,6 @@ func truncateForLog(content string) string {
 	return content[:maxLen] + "..."
 }
 
-// RetrieveAndInjectMemories retrieves relevant memories based on the current user query
-func (cc *ConversationContext) RetrieveAndInjectMemories(ctx context.Context, queryEmbedding []float32) error {
-	// Clear any previous memories
-	cc.RetrievedMemories = nil
-
-	// Get user-specific configuration
-	userConfig, err := GetUserConfig(cc.UserID)
-	if err != nil {
-		return util.HandleError(err)
-	}
-
-	// Set a search limit from user config
-	limit := userConfig.Retrieval.Limit
-	if limit <= 0 {
-		limit = 5
-	}
-
-	// First try vector similarity search if RAG is enabled
-	if userConfig.Summarization.EnableRAG {
-		util.LogInfo("Performing semantic search for memories")
-		if err == nil && len(queryEmbedding) > 0 {
-			// Search in the current conversation first
-			similarMessages, err := storage.SearchMessagesBySimilarity(ctx, cc.ConversationID, queryEmbedding, limit)
-			if err == nil && len(similarMessages) > 0 {
-				util.LogInfo(fmt.Sprintf("Found %v semantically similar messages in current conversation", len(similarMessages)))
-				// Convert and add to retrieved memories
-				for _, msg := range similarMessages {
-					cc.RetrievedMemories = append(cc.RetrievedMemories, models.Message{
-						Role:    msg.Role,
-						Content: msg.Content,
-						ID:      msg.ID,
-					})
-				}
-				return nil
-			}
-
-			// If cross-conversation memory retrieval is enabled, try that
-			if userConfig.Retrieval.EnableCrossConversation {
-				// Search across all conversations with similarity threshold
-				threshold := userConfig.Retrieval.SimilarityThreshold
-				if threshold <= 0 {
-					threshold = 0.7 // Default threshold
-				}
-
-				similarMessages, err = storage.SearchAllMessagesBySimilarity(ctx, queryEmbedding, threshold, limit)
-				if err == nil && len(similarMessages) > 0 {
-					util.LogInfo(fmt.Sprintf("Found %v semantically similar messages across conversation", len(similarMessages)))
-					// Convert and add to retrieved memories
-					for _, msg := range similarMessages {
-						formattedContent := fmt.Sprintf(
-							"From conversation #%d (%s): %s",
-							msg.ConversationID,
-							msg.Role,
-							msg.Content,
-						)
-						cc.RetrievedMemories = append(cc.RetrievedMemories, models.Message{
-							Role:    "system", // Treat cross-conversation memories as system context
-							Content: formattedContent,
-							ID:      msg.ID,
-						})
-					}
-					return nil
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
 // shouldSummarize determines if the conversation needs to be summarized
 func (cc *ConversationContext) shouldSummarize() bool {
 	// Load user-specific configuration
@@ -570,58 +493,4 @@ func (cc *ConversationContext) shouldSummarize() bool {
 
 	// Determine if we need to summarize
 	return messagesSinceLastSummary >= messageThreshold
-}
-
-func (cc *ConversationContext) SearchAndInjectResults(ctx context.Context, query string) error {
-	cfg, err := GetUserConfig(cc.UserID)
-	if err != nil {
-		util.LogWarning("Could not load user configuration, using system defaults")
-		return err
-	}
-
-	fmtProfile, err := storage.GetModelProfile(ctx, cfg.ModelProfiles.FormattingProfileID)
-	if err != nil {
-		return util.HandleError(err)
-	}
-
-	util.LogDebug("Formatting query for web search", logrus.Fields{
-		"query": query,
-		"model": fmtProfile.ModelName,
-	})
-
-	req := models.OllamaGenerateReq{
-		Model:  fmtProfile.ModelName,
-		Prompt: fmt.Sprintf("Please format the following query for web search without any extra explanation. Make sure it is concise and focuses on key words and the original intent.\n\n %s", query),
-	}
-
-	// Format the query for web search
-	fmtQ, err := proxy.StreamOllamaGenerateRequest(ctx, fmtProfile.ModelName, req)
-	if err != nil {
-		return util.HandleError(err)
-	}
-
-	util.LogDebug("Formatted query for web search", logrus.Fields{
-		"query": fmtQ,
-	})
-
-	// Attempt to perform a web search and inject results
-	searchResult, err := recherche.QuickSearch(ctx, fmtQ, cfg.WebSearch.MaxResults, true)
-	if err != nil {
-		util.LogWarning("Error performing web search")
-	}
-
-	if searchResult != nil {
-		for _, c := range searchResult.Contents {
-			if len(c) > 0 {
-				cc.SearchResults = append(cc.SearchResults, models.Message{
-					Role:    "system",
-					Content: fmt.Sprintf("Here is a relevant finding from a web search:\n %v", c),
-				})
-			}
-		}
-
-		cc.Messages = append(cc.SearchResults, cc.Messages...)
-	}
-
-	return nil
 }

@@ -83,6 +83,7 @@ type RedisConfig struct {
 // AuthConfig contains authentication configuration
 type AuthConfig struct {
 	JWKSUri      string `json:"jwksUri" mapstructure:"jwks_uri"`
+	Audience     string `json:"audience" mapstructure:"audience"`
 	ClientID     string `json:"clientId" mapstructure:"client_id"`
 	ClientSecret string `json:"clientSecret" mapstructure:"client_secret"`
 }

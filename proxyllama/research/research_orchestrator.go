@@ -39,7 +39,7 @@ var format map[string]any = map[string]any{
 }
 
 // PerformDeepResearch is the main orchestrator for research tasks
-func PerformDeepResearch(ctx context.Context, taskID, userID, originalQuery string, conversationID *int) {
+func PerformDeepResearch(ctx context.Context, taskID int, userID, originalQuery string, conversationID *int) {
 	util.LogInfo("Starting research task", logrus.Fields{
 		"taskID": taskID,
 		"query":  originalQuery,
@@ -120,7 +120,7 @@ func PerformDeepResearch(ctx context.Context, taskID, userID, originalQuery stri
 }
 
 // planResearchTask uses the LLM to decompose a query into sub-questions
-func planResearchTask(ctx context.Context, userID, taskID, query string) (*models.ResearchPlan, error) {
+func planResearchTask(ctx context.Context, userID string, taskID int, query string) (*models.ResearchPlan, error) {
 	// Call the model for the planning step
 	plan, err := CallLLMForResearchPlan(ctx, userID, query)
 	if err != nil {
@@ -154,7 +154,7 @@ func planResearchTask(ctx context.Context, userID, taskID, query string) (*model
 }
 
 // processSubQuestion handles the information gathering and synthesis for a single sub-question
-func processSubQuestion(ctx context.Context, userID, taskID string, subQ models.ResearchQuestion, resultChan chan<- models.ResearchQuestionResult) {
+func processSubQuestion(ctx context.Context, userID string, taskID int, subQ models.ResearchQuestion, resultChan chan<- models.ResearchQuestionResult) {
 	util.LogInfo("Starting sub-question", logrus.Fields{
 		"taskID":   taskID,
 		"subQID":   subQ.ID,
@@ -278,7 +278,7 @@ func processSubQuestion(ctx context.Context, userID, taskID string, subQ models.
 }
 
 // consolidateResearchResults creates a final coherent report from all sub-question results
-func consolidateResearchResults(ctx context.Context, userID, taskID, originalQuery string, plan *models.ResearchPlan, subResults []models.ResearchQuestionResult) (*models.ResearchQuestionResult, error) {
+func consolidateResearchResults(ctx context.Context, userID string, taskID int, originalQuery string, plan *models.ResearchPlan, subResults []models.ResearchQuestionResult) (*models.ResearchQuestionResult, error) {
 	util.LogInfo("Consolidating results from sub-questions", logrus.Fields{
 		"taskID":       taskID,
 		"subQuestions": len(subResults),
@@ -430,7 +430,7 @@ func doResearch[T any](ctx context.Context, profile *models.ModelProfile, ollama
 // Helper functions
 
 // updateTaskStatus updates the status of a research task in the database
-func updateTaskStatus(ctx context.Context, taskID string, status models.ResearchTaskStatus, errorMsg *string) {
+func updateTaskStatus(ctx context.Context, taskID int, status models.ResearchTaskStatus, errorMsg *string) {
 	_, err := storage.UpdateTaskStatus(ctx, taskID, string(status), errorMsg)
 	if err != nil {
 		util.LogWarning("Error updating task status", logrus.Fields{"taskID": taskID, "error": err})
@@ -438,7 +438,7 @@ func updateTaskStatus(ctx context.Context, taskID string, status models.Research
 }
 
 // updateSubtaskStatus updates the status of a research subtask in the database
-func updateSubtaskStatus(ctx context.Context, taskID string, questionID int, status models.ResearchTaskStatus, errorMsg *string) {
+func updateSubtaskStatus(ctx context.Context, taskID int, questionID int, status models.ResearchTaskStatus, errorMsg *string) {
 	_, _, err := storage.UpdateSubtaskStatus(ctx, taskID, questionID, string(status), errorMsg)
 	if err != nil {
 		util.LogWarning("Error updating subtask status", logrus.Fields{"taskID": taskID, "subQID": questionID, "error": err})

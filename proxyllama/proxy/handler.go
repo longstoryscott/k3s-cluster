@@ -24,7 +24,7 @@ type ContextHeaders map[string]string
 // Context keys
 const (
 	ReqHeadersKey ContextKey    = "reqHeaders"
-	StreamTimeout time.Duration = 10 * time.Minute // Timeout for streaming responses
+	StreamTimeout time.Duration = 60 * time.Minute // Timeout for streaming responses
 )
 
 func GetHeadersFromContext(ctx context.Context) ContextHeaders {

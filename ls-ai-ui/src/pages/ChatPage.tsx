@@ -4,11 +4,11 @@ import { useParams } from 'react-router-dom';
 import ChatContainer from '../components/Chat/ChatContainer';
 import ChatBubble from '../components/Chat/ChatBubble';
 import { useChat } from '../chat';
-import ThinkSection from '../components/Chat/ThinkSection';
 import { ChatMessage } from '../api';
+import ChatInput from '../components/Chat/ChatInput';
 
 const ChatPage = memo(() => {
-  const { messages, response, isTyping, isSearching, currentConversation, selectConversation } = useChat();
+  const { messages, response, isTyping, isLoading, currentConversation, selectConversation } = useChat();
   const { conversationId } = useParams();
   const containerRef = useRef<HTMLBodyElement>(document.body as HTMLBodyElement);
   const shouldScrollToBottom = useRef<boolean>(true);
@@ -24,9 +24,9 @@ const ChatPage = memo(() => {
   const handleScroll = () => {
     const now = Date.now();
     // Only process scroll events every 100ms
-    if (now - lastScrollTime.current > 100) {
+    if (now - lastScrollTime.current > 250) {
       // If user scrolls up more than 10px from bottom, disable auto-scrolling
-      const isAtBottom = containerRef.current.scrollHeight - (window.scrollY + window.innerHeight) < 100;
+      const isAtBottom = containerRef.current.scrollHeight - (window.scrollY + window.innerHeight) < 20;
       shouldScrollToBottom.current = isAtBottom;
       lastScrollTime.current = now;
     }
@@ -71,34 +71,21 @@ const ChatPage = memo(() => {
     // Additional scroll after a short delay to ensure content is rendered
     const timeoutId = setTimeout(() => {
       scrollToBottom();
-    }, 50);
+    }, 250);
     
     return () => clearTimeout(timeoutId);
   }, [messages, response, isTyping]);
 
   useEffect(() => {
+    // const handler = setTimeout(() => {
     setCurrentMessage(prev => ({
       ...prev,
       content: response
     }));
-  }, [response]);
+    //   }, 250); // Delay in milliseconds
 
-  // Get feedback type from response if it's a web search
-  const getSearchingFeedbackText = () => {
-    if (!isSearching) {
-      return '';
-    }
-    
-    if (response.includes('Searching the web')) {
-      return response;
-    }
-    
-    if (response.includes('Web search complete')) {
-      return response;
-    }
-    
-    return '';
-  };
+  //   return () => clearTimeout(handler);
+  }, [response]);
 
   return (
     <Box 
@@ -117,23 +104,15 @@ const ChatPage = memo(() => {
           />
         ))}
           
-        {/* Display searching or thinking status */}
-        {(isTyping || isSearching) && (
-          <ThinkSection
-            thinking={isTyping && !isSearching}
-            searching={isSearching}
-            text={getSearchingFeedbackText()}
-          />
-        )}
-          
         {/* Only display in-progress response if it's not already in messages */}
-        {currentMessage.content && !isSearching && (
+        {(isTyping || isLoading || response) && (
           <ChatBubble 
             key="streaming-response"
             message={currentMessage} 
-            inProgress={isTyping} 
           />
         )}
+
+        <ChatInput/>
       </ChatContainer>
     </Box>
   );

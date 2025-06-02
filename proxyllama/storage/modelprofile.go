@@ -55,20 +55,20 @@ func GetModelProfileFromCache(ctx context.Context, profileID uuid.UUID) (*models
 	if result.Err() != nil {
 		// Don't log regular cache misses as they're expected
 		if result.Err().Error() != "redis: nil" {
-			util.HandleError(fmt.Errorf("Redis error in GetModelProfileFromCache: %w", result.Err()))
+			util.HandleError(fmt.Errorf("redis error in GetModelProfileFromCache: %w", result.Err()))
 		}
 		return nil, false
 	}
 
 	data, err := result.Bytes()
 	if err != nil {
-		util.HandleError(fmt.Errorf("Error getting bytes from Redis for profile: %w", err))
+		util.HandleError(fmt.Errorf("error getting bytes from Redis for profile: %w", err))
 		return nil, false
 	}
 
 	var profile models.ModelProfile
 	if err := json.Unmarshal(data, &profile); err != nil {
-		util.HandleError(fmt.Errorf("Error unmarshaling profile data: %w", err))
+		util.HandleError(fmt.Errorf("error unmarshaling profile data: %w", err))
 		return nil, false
 	}
 

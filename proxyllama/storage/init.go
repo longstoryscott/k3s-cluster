@@ -14,11 +14,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type User struct {
-	ID        string    `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
 var (
 	Pool       *pgxpool.Pool
 	initOnce   sync.Once = sync.Once{}
