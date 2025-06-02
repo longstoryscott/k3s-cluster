@@ -149,7 +149,7 @@ func GetTaskByID(ctx context.Context, taskID int) (*models.ResearchTask, error) 
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("research task not found: %s", taskID)
+			return nil, fmt.Errorf("research task not found: %v", taskID)
 		}
 		return nil, err
 	}

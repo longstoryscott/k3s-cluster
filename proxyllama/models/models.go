@@ -74,16 +74,31 @@ type OllamaEmbeddingReq struct {
 }
 
 type ModelParameters struct {
-	NumCtx        int     `json:"num_ctx,omitempty"`
-	RepeatLastN   int     `json:"repeat_last_n,omitempty"`
-	RepeatPenalty float64 `json:"repeat_penalty,omitempty"`
-	Temperature   float64 `json:"temperature,omitempty"`
-	Seed          int     `json:"seed,omitempty"`
-	Stop          string  `json:"stop,omitempty"`
-	NumPredict    int     `json:"num_predict,omitempty"`
-	TopK          int     `json:"top_k,omitempty"`
-	TopP          float64 `json:"top_p,omitempty"`
-	MinP          float64 `json:"min_p,omitempty"`
+	NumCtx        int      `json:"num_ctx,omitempty"`
+	RepeatLastN   int      `json:"repeat_last_n,omitempty"`
+	RepeatPenalty float64  `json:"repeat_penalty,omitempty"`
+	Temperature   float64  `json:"temperature,omitempty"`
+	Seed          int      `json:"seed,omitempty"`
+	Stop          []string `json:"stop,omitempty"`
+	NumPredict    int      `json:"num_predict,omitempty"`
+	TopK          int      `json:"top_k,omitempty"`
+	TopP          float64  `json:"top_p,omitempty"`
+	MinP          float64  `json:"min_p,omitempty"`
+}
+
+func (p *ModelParameters) ToMap() map[string]any {
+	return map[string]any{
+		"num_ctx":        p.NumCtx,
+		"repeat_last_n":  p.RepeatLastN,
+		"repeat_penalty": p.RepeatPenalty,
+		"temperature":    p.Temperature,
+		"seed":           p.Seed,
+		"stop":           p.Stop,
+		"num_predict":    p.NumPredict,
+		"top_k":          p.TopK,
+		"top_p":          p.TopP,
+		"min_p":          p.MinP,
+	}
 }
 
 type ModelProfile struct {

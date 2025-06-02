@@ -253,8 +253,9 @@ func (cc *ConversationContext) ToJSON() ([]byte, error) {
 	}
 
 	req := models.OllamaChatReq{
-		Model:  defaultModel.ModelName,
-		Stream: true,
+		Model:   defaultModel.ModelName,
+		Stream:  true,
+		Options: defaultModel.Parameters.ToMap(),
 	}
 
 	// Add retrieved memories first if available

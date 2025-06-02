@@ -67,7 +67,7 @@ func LoadQueries() {
 func GetQuery(key string) string {
 	query, exists := queryCache[key]
 	if !exists {
-		util.LogWarning(fmt.Sprintf("Query not found: %s", key))
+		util.HandleErrorAtCallLevel(fmt.Errorf("query not found: %s", key), 2)
 		return ""
 	}
 	return query

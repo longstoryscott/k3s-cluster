@@ -44,7 +44,7 @@ func (cc *ConversationContext) generateSummarization(messages []models.Message, 
 	longCtx, cancel := context.WithTimeout(context.Background(), 120*time.Minute)
 	defer cancel()
 
-	resp, err := proxy.StreamOllamaChatRequest(longCtx, summaryModel.ModelName, ollamaMessages)
+	resp, err := proxy.StreamOllamaChatRequest(longCtx, summaryModel, ollamaMessages)
 	r := util.RemoveThinkTags(resp)
 	if err != nil {
 		return r, util.HandleError(err)

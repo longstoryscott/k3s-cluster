@@ -12,11 +12,12 @@ import (
 )
 
 // StreamOllamaChatRequest sends a request to the Ollama API and handles streaming the response
-func StreamOllamaChatRequest(ctx context.Context, model string, messages []models.OllamaChatMessage) (string, error) {
+func StreamOllamaChatRequest(ctx context.Context, modelProfile *models.ModelProfile, messages []models.OllamaChatMessage) (string, error) {
 	requestBody := models.OllamaChatReq{
-		Model:    model,
+		Model:    modelProfile.ModelName,
 		Messages: messages,
 		Stream:   true,
+		Options:  modelProfile.Parameters.ToMap(),
 	}
 
 	reqBody, err := json.Marshal(requestBody)

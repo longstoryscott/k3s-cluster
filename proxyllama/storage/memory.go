@@ -60,7 +60,7 @@ func InitMemorySchema(ctx context.Context) error {
 	}
 	util.LogInfo("Added memories retention policy")
 
-	_, err = Pool.Exec(ctx, GetQuery("memory.create_memory_cascade_delete_trigger"))
+	_, err = Pool.Exec(ctx, GetQuery("memory.create_memory_cascade_delete_triggers"))
 	if err != nil {
 		util.LogWarning("Failed to create memory cascade delete trigger", logrus.Fields{"error": err})
 	} else {
@@ -92,6 +92,13 @@ func StoreMemoryWithTx(ctx context.Context, userID, source string, sourceID int,
 	for _, embedding := range embeddings {
 		pe, _ := processEmbedding(embedding)
 		embeddingStr := formatEmbeddingForPgVector(pe)
+		util.LogDebug("Storing memory", logrus.Fields{
+			"user_id":          userID,
+			"source":           source,
+			"source_id":        sourceID,
+			"embedding_length": len(embedding),
+			"processed_length": len(pe),
+		})
 		_, err := tx.Exec(ctx, GetQuery("memory.store_memory"), userID, sourceID, source, embeddingStr)
 		if err != nil {
 			util.HandleError(fmt.Errorf("failed to store memory: %w", err))

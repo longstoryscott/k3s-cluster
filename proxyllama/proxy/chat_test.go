@@ -14,7 +14,7 @@ func Test_StreamOllamaChatRequest(t *testing.T) {
 	messages := []models.OllamaChatMessage{
 		{Role: "user", Content: "Why is the sky blue?"},
 	}
-	content, err := StreamOllamaChatRequest(context.Background(), config.DefaultPrimaryProfile.ModelName, messages)
+	content, err := StreamOllamaChatRequest(context.Background(), &config.DefaultPrimaryProfile, messages)
 	if err != nil {
 		t.Fatalf("Failed to get chat response: %v", err)
 	}

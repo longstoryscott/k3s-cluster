@@ -54,13 +54,13 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 		return 0, nil, util.HandleError(err)
 	}
 
-	if memErr := StoreMemoryWithTx(ctx, usrCfg.UserID, "message", messageID, embeddings, tx); memErr != nil {
-		util.HandleError(memErr)
-	}
-
 	// Commit the transaction
 	if err = tx.Commit(ctx); err != nil {
 		return 0, nil, util.HandleError(err)
+	}
+
+	if memErr := StoreMemory(ctx, usrCfg.UserID, "message", messageID, embeddings); memErr != nil {
+		util.HandleError(memErr)
 	}
 
 	// Create message object for caching
