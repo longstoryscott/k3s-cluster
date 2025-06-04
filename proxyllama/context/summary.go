@@ -64,9 +64,11 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 
 	// Add the summary to our context
 	summary := models.Summary{
-		Content: summaryContent,
-		Level:   1,
-		ID:      summaryID,
+		Content:        summaryContent,
+		Level:          1,
+		ID:             summaryID,
+		SourceIDs:      messageIDsToSummarize,
+		ConversationID: cc.ConversationID,
 	}
 	cc.Summaries = append(cc.Summaries, summary)
 
