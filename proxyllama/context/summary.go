@@ -45,7 +45,7 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 		messageIDsToSummarize = append(messageIDsToSummarize, messageIDs[i])
 	}
 
-	summaryProfile, err := storage.GetModelProfile(ctx, usrCfg.ModelProfiles.SummarizationProfileID)
+	summaryProfile, err := storage.ModelProfileStoreInstance.GetModelProfile(ctx, usrCfg.ModelProfiles.SummarizationProfileID)
 	if err != nil {
 		return models.Summary{}, util.HandleError(fmt.Errorf("failed to get summarization profile: %w", err))
 	}
@@ -57,7 +57,7 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 	}
 
 	// Create a new summary record in the database
-	summaryID, err := storage.CreateSummary(ctx, cc.ConversationID, summaryContent, 1, messageIDsToSummarize)
+	summaryID, err := storage.SummaryStoreInstance.CreateSummary(ctx, cc.ConversationID, summaryContent, 1, messageIDsToSummarize)
 	if err != nil {
 		return models.Summary{}, util.HandleError(fmt.Errorf("failed to store summary: %w", err))
 	}
@@ -69,6 +69,12 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 		ID:      summaryID,
 	}
 	cc.Summaries = append(cc.Summaries, summary)
+
+	if _, err := cc.createSummaryMemory(ctx, summary, usrCfg); err != nil {
+		util.LogWarning("Failed to create summary memory", logrus.Fields{
+			"error": err,
+		})
+	}
 
 	// Remove the summarized messages from our in-memory context
 	cc.removeMessagesById(messageIDsToSummarize)
@@ -91,7 +97,7 @@ func (cc *ConversationContext) getUnsummarizedMessages(ctx context.Context) ([]m
 	summarizedMessageIDs := make(map[int]bool)
 
 	// Get all summaries to determine which messages have already been summarized
-	summaries, err := storage.GetSummariesForConversation(ctx, cc.ConversationID)
+	summaries, err := storage.SummaryStoreInstance.GetSummariesForConversation(ctx, cc.ConversationID)
 	if err == nil {
 		// Collect all message IDs that have already been included in summaries
 		for _, summary := range summaries {
@@ -196,12 +202,12 @@ func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) 
 
 	// For higher-level summaries (level 2+), focus more on key points and structure
 	if level >= 2 {
-		profile, err = storage.GetModelProfile(ctx, usrCfg.ModelProfiles.KeyPointsProfileID)
+		profile, err = storage.ModelProfileStoreInstance.GetModelProfile(ctx, usrCfg.ModelProfiles.KeyPointsProfileID)
 		if err != nil {
 			return fmt.Errorf("failed to get master summary profile: %w", err)
 		}
 	} else {
-		profile, err = storage.GetModelProfile(ctx, usrCfg.ModelProfiles.SummarizationProfileID)
+		profile, err = storage.ModelProfileStoreInstance.GetModelProfile(ctx, usrCfg.ModelProfiles.SummarizationProfileID)
 		if err != nil {
 			return fmt.Errorf("failed to get summary profile: %w", err)
 		}
@@ -213,7 +219,7 @@ func (cc *ConversationContext) consolidateLevel(ctx context.Context, level int) 
 	}
 
 	// Store the new summary in the database
-	summaryID, err := storage.CreateSummary(ctx, cc.ConversationID, summaryContent, nextLevel, summaryIDs)
+	summaryID, err := storage.SummaryStoreInstance.CreateSummary(ctx, cc.ConversationID, summaryContent, nextLevel, summaryIDs)
 	if err != nil {
 		return fmt.Errorf("failed to store level %d summary: %w", nextLevel, err)
 	}
@@ -300,7 +306,7 @@ func (cc *ConversationContext) createMasterSummary(ctx context.Context) error {
 		return fmt.Errorf("failed to get user config: %w", err)
 	}
 
-	masterSummaryProfile, err := storage.GetModelProfile(ctx, usrCfg.ModelProfiles.MasterSummaryProfileID)
+	masterSummaryProfile, err := storage.ModelProfileStoreInstance.GetModelProfile(ctx, usrCfg.ModelProfiles.MasterSummaryProfileID)
 	if err != nil {
 		return fmt.Errorf("failed to get master summary profile: %w", err)
 	}
@@ -322,7 +328,7 @@ func (cc *ConversationContext) createMasterSummary(ctx context.Context) error {
 
 	// Store the master summary with a special level (0 for master)
 	masterLevel := 0 // Special level for master summary
-	masterSummaryID, err := storage.CreateSummary(ctx, cc.ConversationID, masterSummaryContent, masterLevel, summaryIDs)
+	masterSummaryID, err := storage.SummaryStoreInstance.CreateSummary(ctx, cc.ConversationID, masterSummaryContent, masterLevel, summaryIDs)
 	if err != nil {
 		return fmt.Errorf("failed to store master summary: %w", err)
 	}
@@ -375,7 +381,7 @@ func (cc *ConversationContext) updateMasterSummary(ctx context.Context) error {
 		return fmt.Errorf("failed to get user config: %w", err)
 	}
 
-	masterSummaryProfile, err := storage.GetModelProfile(ctx, usrCfg.ModelProfiles.MasterSummaryProfileID)
+	masterSummaryProfile, err := storage.ModelProfileStoreInstance.GetModelProfile(ctx, usrCfg.ModelProfiles.MasterSummaryProfileID)
 	if err != nil {
 		return fmt.Errorf("failed to get master summary profile: %w", err)
 	}
@@ -396,7 +402,7 @@ func (cc *ConversationContext) updateMasterSummary(ctx context.Context) error {
 
 	// Store the updated master summary
 	masterLevel := 0 // Special level for master summary
-	masterSummaryID, err := storage.CreateSummary(ctx, cc.ConversationID, masterSummaryContent, masterLevel, summaryIDs)
+	masterSummaryID, err := storage.SummaryStoreInstance.CreateSummary(ctx, cc.ConversationID, masterSummaryContent, masterLevel, summaryIDs)
 	if err != nil {
 		return fmt.Errorf("failed to store updated master summary: %w", err)
 	}
@@ -470,7 +476,7 @@ func (cc *ConversationContext) getNewSummariesForMasterUpdate(ctx context.Contex
 
 	// Get summary IDs already included in the master summary
 	masterSummaryIDs := make(map[int]bool)
-	masterSummary, err := storage.GetSummary(ctx, cc.MasterSummary.ID)
+	masterSummary, err := storage.SummaryStoreInstance.GetSummary(ctx, cc.MasterSummary.ID)
 	if err == nil {
 		for _, id := range masterSummary.SourceIDs {
 			masterSummaryIDs[id] = true

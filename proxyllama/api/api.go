@@ -40,7 +40,7 @@ func RegisterConversationRoutes(app *fiber.App) {
 func GetUserConversations(c *fiber.Ctx) error {
 	userID := c.UserContext().Value(auth.UserIDKey).(string)
 
-	conversations, err := storage.GetUserConversations(c.Context(), userID)
+	conversations, err := storage.ConversationStoreInstance.GetUserConversations(c.UserContext(), userID)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to retrieve conversations")
 	}
@@ -56,7 +56,7 @@ func GetConversationsForUser(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusForbidden, "Access denied")
 	}
 
-	conversations, err := storage.GetUserConversations(c.Context(), targetUserID)
+	conversations, err := storage.ConversationStoreInstance.GetUserConversations(c.UserContext(), targetUserID)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to retrieve conversations for user")
 	}
@@ -71,7 +71,7 @@ func GetConversation(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid conversation ID")
 	}
 
-	conversation, err := storage.GetConversation(c.Context(), conversationID)
+	conversation, err := storage.ConversationStoreInstance.GetConversation(c.UserContext(), conversationID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Conversation not found")
 	}
@@ -91,7 +91,7 @@ func GetConversationMessages(c *fiber.Ctx) error {
 	}
 
 	// Verify ownership
-	conversation, err := storage.GetConversation(c.Context(), conversationID)
+	conversation, err := storage.ConversationStoreInstance.GetConversation(c.UserContext(), conversationID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Conversation not found")
 	}
@@ -100,7 +100,7 @@ func GetConversationMessages(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusForbidden, "Access denied")
 	}
 
-	messages, err := storage.GetConversationHistory(c.Context(), conversationID)
+	messages, err := storage.MessageStoreInstance.GetConversationHistory(c.UserContext(), conversationID)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to retrieve messages")
 	}
@@ -117,7 +117,7 @@ func DeleteConversation(c *fiber.Ctx) error {
 	}
 
 	// Verify ownership
-	conversation, err := storage.GetConversation(c.Context(), conversationID)
+	conversation, err := storage.ConversationStoreInstance.GetConversation(c.UserContext(), conversationID)
 	if err != nil {
 		return handleError(err, fiber.StatusNotFound, "Conversation not found")
 	}
@@ -126,7 +126,7 @@ func DeleteConversation(c *fiber.Ctx) error {
 	}
 
 	// Add deletion function to storage package
-	err = storage.DeleteConversation(c.Context(), conversationID)
+	err = storage.ConversationStoreInstance.DeleteConversation(c.UserContext(), conversationID)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to delete conversation")
 	}
@@ -151,7 +151,7 @@ func UpdateConversation(c *fiber.Ctx) error {
 	}
 
 	// Verify ownership
-	conversation, err := storage.GetConversation(c.Context(), conversationID)
+	conversation, err := storage.ConversationStoreInstance.GetConversation(c.UserContext(), conversationID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Conversation not found")
 	}
@@ -160,7 +160,7 @@ func UpdateConversation(c *fiber.Ctx) error {
 	}
 
 	// Update the title
-	err = storage.UpdateConversationTitle(c.Context(), conversationID, req.Title)
+	err = storage.ConversationStoreInstance.UpdateConversationTitle(c.UserContext(), conversationID, req.Title)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to update conversation")
 	}
@@ -179,7 +179,7 @@ func CreateConversation(c *fiber.Ctx) error {
 		return handleError(err, fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	cc, err := context.GetOrCreateConversation(c.Context(), userID, nil)
+	cc, err := context.GetOrCreateConversation(c.UserContext(), userID, nil)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to create conversation context")
 	}
@@ -194,7 +194,7 @@ func GetModels(c *fiber.Ctx) error {
 	targetURL := fmt.Sprintf("%s/api/tags", strings.TrimSuffix(ollamaURL, "/"))
 
 	// Create a request to Ollama's /api/tags endpoint
-	req, err := http.NewRequestWithContext(c.Context(), "GET", targetURL, nil)
+	req, err := http.NewRequestWithContext(c.UserContext(), "GET", targetURL, nil)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to create proxy request")
 	}
@@ -251,7 +251,7 @@ func SummarizeMessages(c *fiber.Ctx) error {
 	}
 
 	// Verify ownership
-	conversation, err := storage.GetConversation(c.Context(), conversationID)
+	conversation, err := storage.ConversationStoreInstance.GetConversation(c.UserContext(), conversationID)
 	if err != nil {
 		return handleError(err, fiber.StatusNotFound, "Conversation not found")
 	}
@@ -259,7 +259,7 @@ func SummarizeMessages(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusForbidden, "Access denied")
 	}
 
-	summary, err := convCtx.SummarizeMessages(c.Context())
+	summary, err := convCtx.SummarizeMessages(c.UserContext())
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to summarize messages")
 	}
@@ -268,7 +268,7 @@ func SummarizeMessages(c *fiber.Ctx) error {
 }
 
 func GetUsers(c *fiber.Ctx) error {
-	users, err := storage.GetAllUsers(c.Context())
+	users, err := storage.UserConfigStoreInstance.GetAllUsers(c.UserContext())
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to retrieve users")
 	}

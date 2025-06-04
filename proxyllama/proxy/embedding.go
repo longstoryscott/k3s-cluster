@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"proxyllama/models"
 	"proxyllama/util"
+	"time"
 )
 
 const MAX_EMBEDDING_LENGTH = 2500 // Maximum length for text embeddings, adjust as needed
@@ -49,9 +50,7 @@ func GetOllamaEmbedding(ctx context.Context, textToEmbed string, modelName strin
 		return nil, util.HandleError(fmt.Errorf("failed to marshal embedding request: %w", err))
 	}
 
-	handler, _, err := GetProxyHandler(ctx, payloadBytes, "/api/embed", http.MethodPost, false, func() *models.OllamaEmbeddingResponse {
-		return &models.OllamaEmbeddingResponse{}
-	})
+	handler, _, err := GetProxyHandler[*models.OllamaEmbeddingResponse](ctx, payloadBytes, "/api/embed", http.MethodPost, false, time.Second*15)
 	if err != nil {
 		return nil, util.HandleError(fmt.Errorf("failed to get proxy handler for embedding request: %w", err))
 	}
@@ -63,7 +62,11 @@ func GetOllamaEmbedding(ctx context.Context, textToEmbed string, modelName strin
 
 	respStr, err := handler(wr)
 	if err != nil {
-		return nil, util.HandleError(fmt.Errorf("error handling embedding response: %w", err))
+		if IsIncompleteError(err) {
+			util.HandleError(err)
+		} else {
+			return nil, util.HandleError(fmt.Errorf("error handling embedding response: %w", err))
+		}
 	}
 
 	var embeddingResponse models.OllamaEmbeddingResponse

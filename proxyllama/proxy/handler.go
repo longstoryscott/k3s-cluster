@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"proxyllama/config"
 	"proxyllama/models"
 	"proxyllama/util"
@@ -20,11 +21,31 @@ import (
 // contextKey is a custom type for context keys to avoid collisions
 type ContextKey string
 type ContextHeaders map[string]string
+type IncompleteResponseError struct {
+	Message string
+}
+
+func (e *IncompleteResponseError) Error() string {
+	return fmt.Sprintf("incomplete response: %s", e.Message)
+}
+
+// IsIncompleteError checks if the given error is an IncompleteResponseError
+func IsIncompleteError(err error) bool {
+	if err == nil {
+		return false
+	}
+	_, ok := err.(*IncompleteResponseError)
+	return ok
+}
+
+func NewIncompleteResponseError(message string) *IncompleteResponseError {
+	return &IncompleteResponseError{Message: message}
+}
 
 // Context keys
 const (
 	ReqHeadersKey ContextKey    = "reqHeaders"
-	StreamTimeout time.Duration = 60 * time.Minute // Timeout for streaming responses
+	StreamTimeout time.Duration = 10 * time.Minute // Timeout for streaming responses
 )
 
 func GetHeadersFromContext(ctx context.Context) ContextHeaders {
@@ -37,13 +58,21 @@ func GetHeadersFromContext(ctx context.Context) ContextHeaders {
 
 // GetProxyHandler handles streaming responses from Ollama and collects the full assistant response
 // It properly streams to the client while also returning the accumulated content
-func GetProxyHandler[T models.OllamaResponse](ctx context.Context, reqBody []byte, path, method string, stream bool, newT func() T) (func(w *bufio.Writer) (string, error), int, error) {
+func GetProxyHandler[T models.OllamaResponse](ctx context.Context, reqBody []byte, path, method string, stream bool, timeout time.Duration) (func(w *bufio.Writer) (string, error), int, error) {
 	util.LogInfo("Proxying request to Ollama", logrus.Fields{"url": path})
 	conf := config.GetConfig(nil)
 	url := conf.Ollama.BaseURL + path
 
 	// Create a response content builder
 	var responseContent strings.Builder
+
+	util.LogDebug("Creating request to Ollama", logrus.Fields{
+		"url":     url,
+		"method":  method,
+		"stream":  stream,
+		"timeout": timeout,
+		"body":    string(reqBody),
+	})
 
 	// Create the request
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(reqBody))
@@ -90,21 +119,22 @@ func GetProxyHandler[T models.OllamaResponse](ctx context.Context, reqBody []byt
 	// Use a buffered channel to wait for streaming to complete
 	return func(w *bufio.Writer) (string, error) {
 		if stream {
-			return streamHandler(w, resp, &responseContent, newT)
+			return streamHandler[T](w, resp, &responseContent, timeout)
 		}
 		return resHandler(w, resp)
 	}, resp.StatusCode, nil
 }
 
-func streamHandler[T models.OllamaResponse](w *bufio.Writer, resp *http.Response, responseContent *strings.Builder, newT func() T) (string, error) {
+func streamHandler[T models.OllamaResponse](w *bufio.Writer, resp *http.Response, responseContent *strings.Builder, timeout time.Duration) (string, error) {
 	defer resp.Body.Close() // Ensure connection is closed when done
 	proxyToClient := true
+	completed := false
 	util.LogInfo("Streaming response from Ollama")
 
 	scanner := bufio.NewScanner(resp.Body)
 
 	// Use a channel to detect context cancellation or client disconnection
-	ctx, cancel := context.WithTimeout(context.Background(), StreamTimeout) // Or pass the context from the handler
+	ctx, cancel := context.WithTimeout(context.Background(), timeout) // Or pass the context from the handler
 	defer cancel()
 	// Set up a done channel to handle timeouts or context cancellation
 	done := make(chan struct{})
@@ -112,17 +142,18 @@ func streamHandler[T models.OllamaResponse](w *bufio.Writer, resp *http.Response
 		select {
 		case <-ctx.Done():
 			close(done)
-		case <-time.After(StreamTimeout): // Fallback timeout
+		case <-time.After(timeout): // Fallback timeout
 			close(done)
 		}
 	}()
 
+loopScan:
 	for scanner.Scan() {
 		select {
 		case <-done:
-			return responseContent.String(), util.HandleError(fmt.Errorf("operation canceled or timed out"))
+			break loopScan // Exit if context is done or timeout occurs
 		default:
-			// Proceed with processing the line
+			// Continue processing
 		}
 
 		line := scanner.Bytes()
@@ -131,10 +162,17 @@ func streamHandler[T models.OllamaResponse](w *bufio.Writer, resp *http.Response
 		}
 
 		// Extract content from the JSON chunk
-		respObj := newT()
+		respObj := models.NewResponse[T]()
 		respObj.UnmarshalJSON(line)
 		content := respObj.GetChunkContent()
 		if content != "" {
+			if filename := os.Getenv("TEST_OUTPUT_FILE"); filename != "" {
+				f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				if err == nil {
+					defer f.Close()
+					f.Write([]byte(content)) // or f.Write(res) for the full chunk
+				}
+			}
 			responseContent.WriteString(content)
 		}
 
@@ -142,14 +180,13 @@ func streamHandler[T models.OllamaResponse](w *bufio.Writer, resp *http.Response
 			// If proxyToClient is false, we don't want to write to the client
 			// but we still want to accumulate the response content
 			if respObj.IsDone() {
+				completed = true
 				break
 			}
 			continue
 		}
 
-		// Write the complete JSON line to the client preserving the newline
-		res := append(line, "\n"...)
-		if _, writeErr := w.Write(res); writeErr != nil {
+		if _, writeErr := w.Write(line); writeErr != nil {
 			util.HandleError(writeErr)
 			proxyToClient = false
 		}
@@ -160,6 +197,7 @@ func streamHandler[T models.OllamaResponse](w *bufio.Writer, resp *http.Response
 
 		// Check if this is the last chunk (done=true)
 		if respObj.IsDone() {
+			completed = true
 			break
 		}
 	}
@@ -170,11 +208,14 @@ func streamHandler[T models.OllamaResponse](w *bufio.Writer, resp *http.Response
 		util.HandleError(flushErr)
 	}
 
-	if !proxyToClient {
-		return responseContent.String(), util.HandleError(fmt.Errorf("connection closed by client"))
+	if completed {
+		if !proxyToClient {
+			return responseContent.String(), util.HandleError(fmt.Errorf("connection closed by client"))
+		}
+		return responseContent.String(), nil
+	} else {
+		return responseContent.String(), NewIncompleteResponseError("streaming incomplete, client disconnected or context canceled")
 	}
-
-	return responseContent.String(), nil
 }
 
 func resHandler(w *bufio.Writer, resp *http.Response) (string, error) {

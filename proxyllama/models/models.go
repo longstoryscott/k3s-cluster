@@ -7,6 +7,16 @@ import (
 	"github.com/google/uuid"
 )
 
+// Conversation represents a conversation between a user and the LLM
+type Conversation struct {
+	ID        int       `json:"id"`
+	UserID    string    `json:"user_id"`
+	Title     string    `json:"title"`
+	Model     string    `json:"model"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // Message represents a single exchange in the conversation
 type Message struct {
 	Role           string    `json:"role"`
@@ -38,10 +48,10 @@ type OllamaChatMessage struct {
 
 // OllamaChatReq represents a request to the Ollama API
 type OllamaChatReq struct {
-	Model          string              `json:"model"`
-	Messages       []OllamaChatMessage `json:"messages"`
-	Stream         bool                `json:"stream"`
-	Format         any                 `json:"format"`
+	Model          *string             `json:"model,omitempty"`          // model name, used internally only to set the model name in the request to ollama based on the profile
+	Messages       []OllamaChatMessage `json:"messages"`                 // messages to send to the model, each message is a struct with role and content
+	Stream         bool                `json:"stream"`                   // if true, the response will be streamed back as a series of events
+	Format         any                 `json:"format"`                   // the format to return a response in. Format can be json or a JSON schema
 	ConversationId *int                `json:"conversationId,omitempty"` // ui sends camelCase
 	KeepAlive      string              `json:"keep_alive,omitempty"`     // controls how long the model will stay loaded into memory
 	Options        map[string]any      `json:"options,omitempty"`        // additional model parameters listed in the documentation for the Modelfile such as temperature
@@ -224,12 +234,19 @@ type ResearchQuestionResult struct {
 	ErrorMessage      string `json:"error_message,omitempty"`
 }
 
+// SearchResultContent represents a content item from a web search result
+type SearchResultContent struct {
+	URL     string `json:"url"`     // URL of the content
+	Title   string `json:"title"`   // Title of the content
+	Content string `json:"content"` // Snippet or summary of the content
+}
+
 // SearchResult represents a search result from a web query
 type SearchResult struct {
-	Query    string   `json:"query"`
-	Results  []string `json:"results,omitempty"`
-	Contents []string `json:"contents,omitempty"`
-	Error    string   `json:"error,omitempty"`
+	IsFromUrlInUserQuery bool                  `json:"is_from_url_in_user_query"` // Indicates if this result is from a user query
+	Query                string                `json:"query"`
+	Contents             []SearchResultContent `json:"contents,omitempty"`
+	Error                string                `json:"error,omitempty"`
 }
 
 type User struct {
@@ -239,24 +256,26 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Message represents a message with its metadata for search results
-type Memory struct {
-	ID             int
-	Role           string
-	Content        string
-	ConversationID int
-	Similarity     float32 // Used for vector similarity search results
-	SourceType     string  // Indicates if this is a message, summary, or research result
+type MemorySource string
+
+const (
+	MemorySourceSummary MemorySource = "summary" // Memory type for conversation messages
+	MemorySourceMessage MemorySource = "message" // Memory type for document content
+)
+
+// MemoryFragment represents a content item that is similar to a user's query
+type MemoryFragment struct {
+	ID      int    `json:"id"`
+	Role    string `json:"role"`    // Role of the message (e.g., "user", "assistant")
+	Content string `json:"content"` // Content of the message
 }
 
-// ConversationContext manages context for a conversation
-type ConversationContext struct {
-	UserID            string
-	ConversationID    int
-	Title             string
-	MasterSummary     *Summary
-	Summaries         []Summary
-	Messages          []Message
-	RetrievedMemories []Memory  // Memories retrieved using semantic or keyword search
-	SearchResults     []Message // Search results from web search
+// Memory represents a grouped memory for a user, which can be a summary or a question-answer pair
+type Memory struct {
+	Fragments      []MemoryFragment `json:"fragments"`
+	Source         MemorySource     `json:"source"`
+	CreatedAt      time.Time        `json:"created_at"`
+	Similarity     float32          `json:"similarity"`                // Used for vector similarity search results
+	SourceID       int              `json:"source_id"`                 // ID of the source document or conversation
+	ConversationID int              `json:"conversation_id,omitempty"` // ID of the conversation this memory belongs to
 }

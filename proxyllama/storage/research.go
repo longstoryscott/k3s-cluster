@@ -31,8 +31,11 @@ const (
 	SubtaskStatusFailed    = "FAILED"
 )
 
+// researchTaskStore implements the ResearchTaskStore interface
+type researchTaskStore struct{}
+
 // SaveResearchTask inserts a new research task
-func SaveResearchTask(ctx context.Context, userID, query string, conversationID *int) (int, error) {
+func (rts *researchTaskStore) SaveResearchTask(ctx context.Context, userID, query string, conversationID *int) (int, error) {
 	var taskID int
 	err := Pool.QueryRow(ctx, GetQuery("research.save_research_task"),
 		userID, conversationID, query).Scan(&taskID)
@@ -43,7 +46,7 @@ func SaveResearchTask(ctx context.Context, userID, query string, conversationID 
 }
 
 // UpdateTaskStatus updates the status of a research task
-func UpdateTaskStatus(ctx context.Context, taskID int, status string, errorMsg *string) (time.Time, error) {
+func (rts *researchTaskStore) UpdateTaskStatus(ctx context.Context, taskID int, status string, errorMsg *string) (time.Time, error) {
 	var updatedAt time.Time
 	err := Pool.QueryRow(ctx, GetQuery("research.update_task_status"),
 		taskID, status, errorMsg).Scan(&updatedAt)
@@ -51,7 +54,7 @@ func UpdateTaskStatus(ctx context.Context, taskID int, status string, errorMsg *
 }
 
 // UpdateTask updates a task with completed_at when applicable
-func UpdateTask(ctx context.Context, taskID int, status string, errorMsg *string) (time.Time, error) {
+func (rts *researchTaskStore) UpdateTask(ctx context.Context, taskID int, status string, errorMsg *string) (time.Time, error) {
 	var updatedAt time.Time
 	err := Pool.QueryRow(ctx, GetQuery("research.update_task"),
 		taskID, status, errorMsg).Scan(&updatedAt)
@@ -59,7 +62,7 @@ func UpdateTask(ctx context.Context, taskID int, status string, errorMsg *string
 }
 
 // StoreResearchPlan stores the plan for a research task
-func StoreResearchPlan(ctx context.Context, taskID int, plan *models.ResearchPlan) (time.Time, error) {
+func (rts *researchTaskStore) StoreResearchPlan(ctx context.Context, taskID int, plan *models.ResearchPlan) (time.Time, error) {
 	var updatedAt time.Time
 	err := Pool.QueryRow(ctx, GetQuery("research.store_plan"),
 		taskID, plan).Scan(&updatedAt)
@@ -67,7 +70,7 @@ func StoreResearchPlan(ctx context.Context, taskID int, plan *models.ResearchPla
 }
 
 // StoreFinalResult stores the final research result
-func StoreFinalResult(ctx context.Context, taskID int, result *models.ResearchQuestionResult) (time.Time, error) {
+func (rts *researchTaskStore) StoreFinalResult(ctx context.Context, taskID int, result *models.ResearchQuestionResult) (time.Time, error) {
 	var updatedAt time.Time
 	err := Pool.QueryRow(ctx, GetQuery("research.store_final_result"),
 		taskID, result).Scan(&updatedAt)
@@ -75,7 +78,7 @@ func StoreFinalResult(ctx context.Context, taskID int, result *models.ResearchQu
 }
 
 // SaveSubtask saves a research subtask
-func SaveSubtask(ctx context.Context, subtask *models.ResearchSubtask) (int, error) {
+func (rts *researchTaskStore) SaveSubtask(ctx context.Context, subtask *models.ResearchSubtask) (int, error) {
 	tx, err := Pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -104,7 +107,7 @@ func SaveSubtask(ctx context.Context, subtask *models.ResearchSubtask) (int, err
 }
 
 // UpdateSubtaskStatus updates the status of a research subtask
-func UpdateSubtaskStatus(ctx context.Context, taskID, questionID int,
+func (rts *researchTaskStore) UpdateSubtaskStatus(ctx context.Context, taskID, questionID int,
 	status string, errorMsg *string) (int, time.Time, error) {
 
 	var id int
@@ -117,7 +120,7 @@ func UpdateSubtaskStatus(ctx context.Context, taskID, questionID int,
 }
 
 // StoreGatheredInfo stores gathered information for a subtask
-func StoreGatheredInfo(ctx context.Context, taskID, questionID int,
+func (rts *researchTaskStore) StoreGatheredInfo(ctx context.Context, taskID, questionID int,
 	gatheredInfo []string, sources []string) (time.Time, error) {
 
 	var updatedAt time.Time
@@ -128,7 +131,7 @@ func StoreGatheredInfo(ctx context.Context, taskID, questionID int,
 }
 
 // StoreSynthesizedAnswer stores the synthesized answer for a subtask
-func StoreSynthesizedAnswer(ctx context.Context, taskID, questionID int,
+func (rts *researchTaskStore) StoreSynthesizedAnswer(ctx context.Context, taskID, questionID int,
 	answer string) (time.Time, error) {
 
 	var updatedAt time.Time
@@ -139,7 +142,7 @@ func StoreSynthesizedAnswer(ctx context.Context, taskID, questionID int,
 }
 
 // GetTaskByID retrieves a research task by its ID
-func GetTaskByID(ctx context.Context, taskID int) (*models.ResearchTask, error) {
+func (rts *researchTaskStore) GetTaskByID(ctx context.Context, taskID int) (*models.ResearchTask, error) {
 	var task models.ResearchTask
 
 	err := Pool.QueryRow(ctx, GetQuery("research.get_task_by_id"), taskID).Scan(
@@ -158,7 +161,7 @@ func GetTaskByID(ctx context.Context, taskID int) (*models.ResearchTask, error) 
 }
 
 // ListTasksByUserID lists all research tasks for a user
-func ListTasksByUserID(ctx context.Context, userID string, limit, offset int) ([]models.ResearchTask, error) {
+func (rts *researchTaskStore) ListTasksByUserID(ctx context.Context, userID string, limit, offset int) ([]models.ResearchTask, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -193,7 +196,7 @@ func ListTasksByUserID(ctx context.Context, userID string, limit, offset int) ([
 }
 
 // GetSubtasksForTask retrieves all subtasks for a research task
-func GetSubtasksForTask(ctx context.Context, taskID string) ([]models.ResearchSubtask, error) {
+func (rts *researchTaskStore) GetSubtasksForTask(ctx context.Context, taskID string) ([]models.ResearchSubtask, error) {
 	rows, err := Pool.Query(ctx, GetQuery("research.get_subtasks_for_task"), taskID)
 
 	if err != nil {

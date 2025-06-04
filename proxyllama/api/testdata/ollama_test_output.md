@@ -1,0 +1,1 @@
+serial primary key alter table postgre existing columns compound key remove

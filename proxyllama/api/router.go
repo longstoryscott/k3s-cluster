@@ -33,5 +33,5 @@ func RegisterAllRoutes(app *fiber.App) {
 	RegisterWebSearchRoutes(app)
 
 	// Setup reverse proxy handler with chunk processing
-	app.All("/*", ReverseProxyHandler)
+	app.All("/*", OllamaHandler)
 }

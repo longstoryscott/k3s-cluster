@@ -40,6 +40,11 @@ var MockConversationContext = ConversationContext{
 			Role:    "assistant",
 			Content: "Yes, by bundling inference into one container that requests two GPUs, you can utilize VRAM across both devices.",
 		},
+		{
+			ID:      5,
+			Role:    "user",
+			Content: "How can I ensure that my LLM and image generation models can run in parallel on multiple GPUs?",
+		},
 	},
-	SearchResults: []models.Message{},
+	SearchResults: []models.SearchResult{},
 }

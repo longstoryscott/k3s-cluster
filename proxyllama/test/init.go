@@ -23,6 +23,8 @@ func Init() {
 		conf.Database.SSLMode,
 	)
 
+	InitMockStore()
+
 	if err := storage.InitDB(psqlconn); err != nil {
 		util.HandleError(err)
 	}

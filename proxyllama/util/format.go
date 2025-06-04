@@ -14,14 +14,14 @@ func RemoveThinkTags(input string) string {
 // SanitizeText removes HTML/XML-like tags, markdown, escape characters, and trims excessive whitespace
 func SanitizeText(input string) string {
 	// Remove <...> tags and their content (e.g., <think>...</think>)
-	tagPattern := regexp.MustCompile(`<[^>]+>.*?</[^>]+>`)
+	tagPattern := regexp.MustCompile(`(?s)<[^>]+>.*?</[^>]+>`)
 	withoutTags := tagPattern.ReplaceAllString(input, " ")
 	// Remove any remaining standalone tags (e.g., <br>, <hr>, etc.)
 	standaloneTagPattern := regexp.MustCompile(`<[^>]+>`)
 	withoutStandaloneTags := standaloneTagPattern.ReplaceAllString(withoutTags, " ")
 
 	// Remove markdown syntax (**, __, *, _, `, #, >, ---)
-	markdownPattern := regexp.MustCompile(`(\*\*|__|\*|_|` + "`" + `|#+|>+|---|\[.*?\]\(.*?\))`)
+	markdownPattern := regexp.MustCompile(`(\*\*|__|\*|_|` + "`" + `(?s)|#+|>+|---|\[.*?\]\(.*?\))`)
 	withoutMarkdown := markdownPattern.ReplaceAllString(withoutStandaloneTags, " ")
 
 	// Remove escape characters (newlines, tabs, carriage returns)

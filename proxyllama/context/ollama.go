@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"errors"
 	"proxyllama/models"
 	"proxyllama/proxy"
 	"proxyllama/recherche"
@@ -55,6 +56,9 @@ func (cc *ConversationContext) generateSummarization(messages []models.Message, 
 
 // PrepareOllamaRequest prepares the request for Ollama
 func (cc *ConversationContext) PrepareOllamaRequest(ctx context.Context, chatReq models.OllamaChatReq) ([]byte, error) {
+	if chatReq.Model == nil || *chatReq.Model == "" {
+		return nil, util.HandleError(errors.New("model name is required"))
+	}
 	// Get the user message from the request (last message from user)
 	var userMessage string
 	for i := len(chatReq.Messages) - 1; i >= 0; i-- {
@@ -136,5 +140,5 @@ func (cc *ConversationContext) PrepareOllamaRequest(ctx context.Context, chatReq
 	}
 
 	// Convert conversation context to Ollama format (includes summaries, memories, and web search results)
-	return cc.ToJSON()
+	return cc.ToJSON(&chatReq)
 }

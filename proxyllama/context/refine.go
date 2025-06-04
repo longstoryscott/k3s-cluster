@@ -20,7 +20,7 @@ func (cc *ConversationContext) GetCritiqueForResponse(ctx context.Context, respo
 		return "", fmt.Errorf("failed to get user config: %w", err)
 	}
 
-	critiqueProfile, err := storage.GetModelProfile(ctx, cfg.ModelProfiles.SelfCritiqueProfileID)
+	critiqueProfile, err := storage.ModelProfileStoreInstance.GetModelProfile(ctx, cfg.ModelProfiles.SelfCritiqueProfileID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get self-critique profile: %w", err)
 	}
@@ -67,7 +67,7 @@ func (cc *ConversationContext) ImproveResponseWithCritique(ctx context.Context, 
 	if err != nil {
 		return "", fmt.Errorf("failed to get user config: %w", err)
 	}
-	improvementProfile, err := storage.GetModelProfile(ctx, cfg.ModelProfiles.ImprovementProfileID)
+	improvementProfile, err := storage.ModelProfileStoreInstance.GetModelProfile(ctx, cfg.ModelProfiles.ImprovementProfileID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get self-critique profile: %w", err)
 	}

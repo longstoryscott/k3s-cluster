@@ -4,36 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"proxyllama/models"
 	"proxyllama/util"
-	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
-type Summary struct {
-	ID             int       `json:"id"`
-	ConversationID int       `json:"conversation_id"`
-	Content        string    `json:"content"`
-	Level          int       `json:"level"` // 1 = first level, 2 = summary of summaries, etc.
-	SourceIDs      []int     `json:"source_ids"`
-	CreatedAt      time.Time `json:"created_at"`
-}
+type summaryStore struct{}
 
 // CreateSummary adds a new summary for a conversation
-func CreateSummary(ctx context.Context, conversationID int, content string, level int, sourceIDs []int) (int, error) {
+func (ss *summaryStore) CreateSummary(ctx context.Context, conversationID int, content string, level int, sourceIDs []int) (int, error) {
 	// Convert source IDs to JSON
 	sourceIDsJSON, err := json.Marshal(sourceIDs)
 	if err != nil {
 		return 0, util.HandleError(fmt.Errorf("failed to marshal source IDs: %w", err))
 	}
 	sanitizedContent := util.RemoveThinkTags(content)
-
-	util.LogDebug("Creating summary for conversation", logrus.Fields{
-		"conversation_id": conversationID,
-		"content":         sanitizedContent,
-		"level":           level,
-		"source_ids":      sourceIDs,
-	})
 
 	var summaryID int
 	err = Pool.QueryRow(ctx, GetQuery("summary.create_summary"),
@@ -49,7 +33,7 @@ func CreateSummary(ctx context.Context, conversationID int, content string, leve
 }
 
 // GetSummariesForConversation gets all summaries for a conversation
-func GetSummariesForConversation(ctx context.Context, conversationID int) ([]Summary, error) {
+func (ss *summaryStore) GetSummariesForConversation(ctx context.Context, conversationID int) ([]models.Summary, error) {
 	// Try to get from cache first
 	if summaries, found := GetSummariesByConversationIDFromCache(ctx, conversationID); found {
 		return summaries, nil
@@ -62,9 +46,9 @@ func GetSummariesForConversation(ctx context.Context, conversationID int) ([]Sum
 	}
 	defer rows.Close()
 
-	var summaries []Summary
+	var summaries []models.Summary
 	for rows.Next() {
-		var s Summary
+		var s models.Summary
 		var sourceIDsJSON []byte
 
 		if err := rows.Scan(&s.ID, &s.ConversationID, &s.Content, &s.Level, &sourceIDsJSON, &s.CreatedAt); err != nil {
@@ -95,7 +79,7 @@ func GetSummariesForConversation(ctx context.Context, conversationID int) ([]Sum
 }
 
 // GetRecentSummaries gets recent summaries for a conversation at a specific level
-func GetRecentSummaries(ctx context.Context, conversationID int, level int, limit int) ([]Summary, error) {
+func (ss *summaryStore) GetRecentSummaries(ctx context.Context, conversationID int, level int, limit int) ([]models.Summary, error) {
 	// This one doesn't use cache because it's more dynamic with limit parameter
 
 	rows, err := Pool.Query(ctx, GetQuery("summary.get_recent_summaries"), conversationID, level, limit)
@@ -104,9 +88,9 @@ func GetRecentSummaries(ctx context.Context, conversationID int, level int, limi
 	}
 	defer rows.Close()
 
-	var summaries []Summary
+	var summaries []models.Summary
 	for rows.Next() {
-		var s Summary
+		var s models.Summary
 		var sourceIDsJSON []byte
 
 		if err := rows.Scan(&s.ID, &s.ConversationID, &s.Content, &s.Level, &sourceIDsJSON, &s.CreatedAt); err != nil {
@@ -131,7 +115,7 @@ func GetRecentSummaries(ctx context.Context, conversationID int, level int, limi
 }
 
 // DeleteSummariesForConversation deletes all summaries for a conversation
-func DeleteSummariesForConversation(ctx context.Context, conversationID int) error {
+func (ss *summaryStore) DeleteSummariesForConversation(ctx context.Context, conversationID int) error {
 	_, err := Pool.Exec(ctx, GetQuery("summary.delete_summaries"), conversationID)
 	if err != nil {
 		return fmt.Errorf("failed to delete summaries: %w", err)
@@ -144,8 +128,8 @@ func DeleteSummariesForConversation(ctx context.Context, conversationID int) err
 }
 
 // GetSummary gets a single summary by ID
-func GetSummary(ctx context.Context, summaryID int) (*Summary, error) {
-	var s Summary
+func (ss *summaryStore) GetSummary(ctx context.Context, summaryID int) (*models.Summary, error) {
+	var s models.Summary
 	var sourceIDsJSON []byte
 
 	err := Pool.QueryRow(ctx, GetQuery("summary.get_summary"), summaryID).Scan(

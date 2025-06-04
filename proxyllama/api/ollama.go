@@ -8,6 +8,7 @@ import (
 	pxcx "proxyllama/context"
 	"proxyllama/models"
 	"proxyllama/proxy"
+	"proxyllama/storage"
 	"proxyllama/util"
 	"time"
 
@@ -15,8 +16,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// ReverseProxyHandler forwards the request to Ollama and streams the response back to the client
-func ReverseProxyHandler(c *fiber.Ctx) error {
+// OllamaHandler forwards the request to Ollama and streams the response back to the client
+func OllamaHandler(c *fiber.Ctx) error {
 	// Parse the incoming request
 	var chatReq models.OllamaChatReq
 	if err := c.BodyParser(&chatReq); err != nil {
@@ -33,14 +34,28 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to process conversation")
 	}
 
-	ollamaReqBody, err := cc.PrepareOllamaRequest(c.Context(), chatReq)
+	usrCfg, err := pxcx.GetUserConfig(cc.UserID)
+	if err != nil {
+		return handleError(err, fiber.StatusInternalServerError, "Failed to retrieve user configuration")
+	}
+
+	profile, err := storage.ModelProfileStoreInstance.GetModelProfile(c.UserContext(), usrCfg.ModelProfiles.PrimaryProfileID)
+	if err != nil {
+		return handleError(err, fiber.StatusInternalServerError, "Failed to retrieve model profile")
+	}
+	if profile == nil {
+		return handleError(nil, fiber.StatusNotFound, "Model profile not found")
+	}
+
+	chatReq.Options = profile.Parameters.ToMap()
+	chatReq.Model = &profile.ModelName
+
+	ollamaReqBody, err := cc.PrepareOllamaRequest(c.UserContext(), chatReq)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to prepare Ollama request")
 	}
 
-	handler, statusCode, err := proxy.GetProxyHandler(c.Context(), ollamaReqBody, c.Path(), http.MethodPost, true, func() *models.OllamaChatResp {
-		return &models.OllamaChatResp{}
-	})
+	handler, statusCode, err := proxy.GetProxyHandler[*models.OllamaChatResp](c.UserContext(), ollamaReqBody, c.Path(), http.MethodPost, true, time.Minute*10)
 	if err != nil {
 		return handleError(err, fiber.StatusBadGateway, "Error during streaming")
 	}
@@ -50,8 +65,12 @@ func ReverseProxyHandler(c *fiber.Ctx) error {
 	c.Response().SetBodyStreamWriter(func(w *bufio.Writer) {
 		res, err = handler(w)
 		if err != nil {
-			handleError(err, fiber.StatusInternalServerError, "Error during handler execution")
-			return
+			if proxy.IsIncompleteError(err) {
+				util.HandleError(err)
+			} else {
+				handleError(err, fiber.StatusInternalServerError, "Error during handler execution")
+				return
+			}
 		}
 
 		// Only store the assistant response if there was no context error

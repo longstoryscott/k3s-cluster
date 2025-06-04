@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"proxyllama/config"
 	"proxyllama/models"
 	"testing"
+	"time"
 )
 
 func Test_ChatRequest(t *testing.T) {
@@ -15,7 +17,7 @@ func Test_ChatRequest(t *testing.T) {
 	config.GetConfig(&confFile)
 	// Create a sample chat request
 	req := models.OllamaChatReq{
-		Model: config.DefaultPrimaryProfile.ModelName,
+		Model: &config.DefaultPrimaryProfile.ModelName,
 		Messages: []models.OllamaChatMessage{
 			{Role: "user", Content: "Why is the sky blue?"},
 		},
@@ -27,8 +29,11 @@ func Test_ChatRequest(t *testing.T) {
 		t.Fatalf("Failed to marshal chat request: %v", err)
 	}
 
-	handler, status, err := GetProxyHandler(context.Background(), data, "/api/chat", "POST", true, func() *models.OllamaChatResp { return &models.OllamaChatResp{} })
+	handler, status, err := GetProxyHandler[*models.OllamaChatResp](context.Background(), data, "/api/chat", "POST", true, time.Minute)
 	if err != nil {
+		if IsIncompleteError(err) {
+			t.Fatalf("Chat request failed with incomplete error: %v", err)
+		}
 		t.Fatalf("Failed to get proxy handler: %v", err)
 	}
 	if status != 200 {
@@ -66,7 +71,7 @@ func Test_EmbeddingRequest(t *testing.T) {
 		t.Fatalf("Failed to marshal embedding request: %v", err)
 	}
 
-	handler, status, err := GetProxyHandler(context.Background(), data, "/api/embed", "POST", false, func() *models.OllamaEmbeddingResponse { return &models.OllamaEmbeddingResponse{} })
+	handler, status, err := GetProxyHandler[*models.OllamaEmbeddingResponse](context.Background(), data, "/api/embed", "POST", false, time.Second*15)
 	if err != nil {
 		t.Fatalf("Failed to get proxy handler: %v", err)
 	}
@@ -80,6 +85,9 @@ func Test_EmbeddingRequest(t *testing.T) {
 
 	res, err := handler(wr)
 	if err != nil {
+		if IsIncompleteError(err) {
+			t.Fatalf("Chat request failed with incomplete error: %v", err)
+		}
 		t.Fatalf("Embedding request failed: %v", err)
 	}
 
@@ -109,7 +117,7 @@ func Test_GenerateRequest(t *testing.T) {
 		t.Fatalf("Failed to marshal generate request: %v", err)
 	}
 
-	handler, status, err := GetProxyHandler(context.Background(), data, "/api/generate", "POST", true, func() *models.OllamaGenerateResponse { return &models.OllamaGenerateResponse{} })
+	handler, status, err := GetProxyHandler[*models.OllamaGenerateResponse](context.Background(), data, "/api/generate", "POST", true, time.Second*15)
 	if err != nil {
 		t.Fatalf("Failed to get proxy handler: %v", err)
 	}
@@ -123,6 +131,9 @@ func Test_GenerateRequest(t *testing.T) {
 
 	res, err := handler(wr)
 	if err != nil {
+		if IsIncompleteError(err) {
+			t.Fatalf("Chat request failed with incomplete error: %v", err)
+		}
 		t.Fatalf("Generate request failed: %v", err)
 	}
 
@@ -131,4 +142,65 @@ func Test_GenerateRequest(t *testing.T) {
 	}
 
 	t.Log("Generate response:", res)
+}
+
+const filename = "testdata/ollama_test_output.md"
+const TIMEOUT = 5 * time.Minute
+
+func Test_ChatRequestWithLongContext(t *testing.T) {
+	confFile := "testdata/.config.yaml"
+	config.GetConfig(&confFile)
+	os.Setenv("TEST_OUTPUT_FILE", filename)
+	// Clear the output file before running the test
+	if err := os.WriteFile(filename, []byte(""), 0644); err != nil {
+		t.Fatalf("Failed to clear output file: %v", err)
+	}
+	defer os.Setenv("TEST_OUTPUT_FILE", "")
+
+	msgs, err := os.ReadFile("testdata/messages.json")
+	if err != nil {
+		t.Fatalf("Failed to read messages file: %v", err)
+	}
+	var messages []models.OllamaChatMessage
+	if err := json.Unmarshal(msgs, &messages); err != nil {
+		t.Fatalf("Failed to unmarshal messages: %v", err)
+	}
+
+	req := models.OllamaChatReq{
+		Model:    &config.DefaultPrimaryProfile.ModelName,
+		Messages: messages,
+		Stream:   true,
+		Options:  config.DefaultPrimaryProfile.Parameters.ToMap(),
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("Failed to marshal chat request: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), TIMEOUT)
+	defer cancel()
+	handler, status, err := GetProxyHandler[*models.OllamaChatResp](ctx, data, "/api/chat", "POST", true, TIMEOUT)
+	if err != nil {
+		t.Fatalf("Failed to get proxy handler: %v", err)
+	}
+	if status != 200 {
+		t.Fatalf("Expected status 200, got %d", status)
+	}
+	// Create a buffer to capture the response
+	w := &bytes.Buffer{}
+	wr := bufio.NewWriter(w)
+
+	res, err := handler(wr)
+	if err != nil {
+		if IsIncompleteError(err) {
+			t.Fatalf("Chat request failed with incomplete error: %v", err)
+		}
+		t.Fatalf("Chat request failed: %v", err)
+	}
+
+	if res == "" {
+		t.Fatalf("Chat request returned empty response")
+	}
+
+	t.Log("Chat response:", res)
 }

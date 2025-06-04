@@ -74,7 +74,7 @@ func GetUserConfig(userID string) (*config.UserConfig, error) {
 	util.LogDebug("User config not found in cache, retrieving from storage", map[string]interface{}{"userID": userID})
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	ucFromStorage, err := storage.GetUserConfig(ctx, userID)
+	ucFromStorage, err := storage.UserConfigStoreInstance.GetUserConfig(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func SetUserConfig(userConfig *config.UserConfig) error {
 	userConfigCacheMutex.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return storage.UpdateUserConfig(ctx, userConfig.UserID, userConfig)
+	return storage.UserConfigStoreInstance.UpdateUserConfig(ctx, userConfig.UserID, userConfig)
 }
 
 // InvalidateCachedUserConfig removes a user config from the cache

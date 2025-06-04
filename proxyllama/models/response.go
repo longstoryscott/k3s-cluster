@@ -5,6 +5,21 @@ import (
 	"fmt"
 )
 
+// NewResponse returns a pointer to an OllamaResponse based on the type argument
+func NewResponse[T OllamaResponse]() T {
+	var response T
+	switch any(response).(type) {
+	case *OllamaChatResp:
+		return any(&OllamaChatResp{}).(T) // Return a new OllamaChatResp
+	case *OllamaGenerateResponse:
+		return any(&OllamaGenerateResponse{}).(T) // Return a new OllamaGenerateResponse
+	case *OllamaEmbeddingResponse:
+		return any(&OllamaEmbeddingResponse{}).(T) // Return a new OllamaEmbeddingResponse
+	default:
+		panic("unsupported response type")
+	}
+}
+
 type OllamaResponse interface {
 	IsDone() bool
 	GetChunkContent() string

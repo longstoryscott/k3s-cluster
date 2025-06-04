@@ -45,8 +45,12 @@ func main() {
 		conf.Database.SSLMode,
 	)
 
+	if err := storage.InitializeStorage(); err != nil {
+		util.HandleFatalError(err)
+	}
+
 	if err := storage.InitDB(psqlconn); err != nil {
-		util.HandleError(err)
+		util.HandleFatalError(err)
 	}
 	util.LogInfo("Connected to PostgreSQL database", logrus.Fields{
 		"connection": psqlconn,
@@ -101,8 +105,7 @@ func main() {
 		"address": serverAddress,
 	})
 
-	// Use logrus.Fatal for fatal error handling
 	if err := app.Listen(serverAddress); err != nil {
-		util.HandleError(err)
+		util.HandleFatalError(err)
 	}
 }

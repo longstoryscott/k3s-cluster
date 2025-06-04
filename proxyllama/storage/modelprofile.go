@@ -25,8 +25,11 @@ func getModelProfilesListCacheKey(userID string) string {
 	return cacheKey(modelProfilesListKeyPrefix, userID)
 }
 
+// modelProfileStore implements the ModelProfileStore interface
+type modelProfileStore struct{}
+
 // GetModelProfileFromCache tries to get a single model profile from Redis
-func GetModelProfileFromCache(ctx context.Context, profileID uuid.UUID) (*models.ModelProfile, bool) {
+func (mps *modelProfileStore) GetModelProfileFromCache(ctx context.Context, profileID uuid.UUID) (*models.ModelProfile, bool) {
 	// Early return if cache is disabled
 	if !IsStorageCacheEnabled() {
 		return nil, false
@@ -76,7 +79,7 @@ func GetModelProfileFromCache(ctx context.Context, profileID uuid.UUID) (*models
 }
 
 // CacheModelProfile stores a single model profile in Redis
-func CacheModelProfile(ctx context.Context, profile *models.ModelProfile) error {
+func (mps *modelProfileStore) CacheModelProfile(ctx context.Context, profile *models.ModelProfile) error {
 	if !IsStorageCacheEnabled() || profile == nil {
 		return nil
 	}
@@ -91,7 +94,7 @@ func CacheModelProfile(ctx context.Context, profile *models.ModelProfile) error 
 }
 
 // InvalidateModelProfileCache removes a single model profile from Redis
-func InvalidateModelProfileCache(ctx context.Context, profileID uuid.UUID) {
+func (mps *modelProfileStore) InvalidateModelProfileCache(ctx context.Context, profileID uuid.UUID) {
 	if !IsStorageCacheEnabled() {
 		return
 	}
@@ -100,7 +103,7 @@ func InvalidateModelProfileCache(ctx context.Context, profileID uuid.UUID) {
 }
 
 // GetModelProfilesListFromCache tries to get all model profiles for a user from Redis
-func GetModelProfilesListFromCache(ctx context.Context, userID string) ([]*models.ModelProfile, bool) {
+func (mps *modelProfileStore) GetModelProfilesListFromCache(ctx context.Context, userID string) ([]*models.ModelProfile, bool) {
 	if !IsStorageCacheEnabled() {
 		return nil, false
 	}
@@ -117,7 +120,7 @@ func GetModelProfilesListFromCache(ctx context.Context, userID string) ([]*model
 }
 
 // CacheModelProfilesList stores all model profiles for a user in Redis
-func CacheModelProfilesList(ctx context.Context, userID string, profiles []*models.ModelProfile) error {
+func (mps *modelProfileStore) CacheModelProfilesList(ctx context.Context, userID string, profiles []*models.ModelProfile) error {
 	if !IsStorageCacheEnabled() || profiles == nil {
 		return nil
 	}
@@ -132,7 +135,7 @@ func CacheModelProfilesList(ctx context.Context, userID string, profiles []*mode
 }
 
 // InvalidateModelProfilesListCache removes the model profiles list for a user from Redis
-func InvalidateModelProfilesListCache(ctx context.Context, userID string) {
+func (mps *modelProfileStore) InvalidateModelProfilesListCache(ctx context.Context, userID string) {
 	if !IsStorageCacheEnabled() {
 		return
 	}
@@ -141,7 +144,7 @@ func InvalidateModelProfilesListCache(ctx context.Context, userID string) {
 }
 
 // CreateModelProfile creates a new model profile
-func CreateModelProfile(ctx context.Context, profile *models.ModelProfile) (uuid.UUID, error) {
+func (mps *modelProfileStore) CreateModelProfile(ctx context.Context, profile *models.ModelProfile) (uuid.UUID, error) {
 	userID := profile.UserID
 	name := profile.Name
 	description := profile.Description
@@ -167,18 +170,18 @@ func CreateModelProfile(ctx context.Context, profile *models.ModelProfile) (uuid
 	}
 
 	// Invalidate the model profiles cache for this user
-	InvalidateModelProfilesListCache(ctx, userID)
+	mps.InvalidateModelProfilesListCache(ctx, userID)
 
 	return profileID, nil
 }
 
 // GetModelProfile retrieves a model profile by ID
-func GetModelProfile(ctx context.Context, profileID uuid.UUID) (*models.ModelProfile, error) {
+func (mps *modelProfileStore) GetModelProfile(ctx context.Context, profileID uuid.UUID) (*models.ModelProfile, error) {
 	tx, err := Pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, util.HandleError(fmt.Errorf("failed to begin transaction: %w", err))
 	}
-	mp, err := GetModelProfileWithTx(ctx, profileID, tx)
+	mp, err := mps.GetModelProfileWithTx(ctx, profileID, tx)
 	if err != nil {
 		tx.Rollback(ctx) // Rollback on error
 		return nil, util.HandleError(fmt.Errorf("failed to get model profile: %w", err))
@@ -191,7 +194,7 @@ func GetModelProfile(ctx context.Context, profileID uuid.UUID) (*models.ModelPro
 }
 
 // GetModelProfileWithTx retrieves a model profile by ID with transaction
-func GetModelProfileWithTx(ctx context.Context, profileID uuid.UUID, tx pgx.Tx) (*models.ModelProfile, error) {
+func (mps *modelProfileStore) GetModelProfileWithTx(ctx context.Context, profileID uuid.UUID, tx pgx.Tx) (*models.ModelProfile, error) {
 	// Special case for nil UUID - look for a default profile based on type
 	if profileID == uuid.Nil {
 		util.LogWarning("nil UUID passed to GetModelProfile, using primary profile as default")
@@ -199,7 +202,7 @@ func GetModelProfileWithTx(ctx context.Context, profileID uuid.UUID, tx pgx.Tx) 
 	}
 
 	// Try to get from cache first
-	if profile, found := GetModelProfileFromCache(ctx, profileID); found {
+	if profile, found := mps.GetModelProfileFromCache(ctx, profileID); found {
 		return profile, nil
 	}
 
@@ -223,7 +226,7 @@ func GetModelProfileWithTx(ctx context.Context, profileID uuid.UUID, tx pgx.Tx) 
 	}
 
 	// Cache for future use
-	if err := CacheModelProfile(ctx, &mp); err != nil {
+	if err := mps.CacheModelProfile(ctx, &mp); err != nil {
 		// Just log, don't fail on cache error
 		util.LogWarning("Failed to cache model profile", nil)
 	}
@@ -232,7 +235,7 @@ func GetModelProfileWithTx(ctx context.Context, profileID uuid.UUID, tx pgx.Tx) 
 }
 
 // UpdateModelProfile updates an existing model profile
-func UpdateModelProfile(ctx context.Context, profile *models.ModelProfile) error {
+func (mps *modelProfileStore) UpdateModelProfile(ctx context.Context, profile *models.ModelProfile) error {
 	profileID := profile.ID
 	name := profile.Name
 	description := profile.Description
@@ -263,17 +266,17 @@ func UpdateModelProfile(ctx context.Context, profile *models.ModelProfile) error
 		util.LogWarning("Could not fetch user_id for profile", nil)
 	} else {
 		// Invalidate the model profiles cache for this user
-		InvalidateModelProfilesListCache(ctx, userID)
+		mps.InvalidateModelProfilesListCache(ctx, userID)
 	}
 
 	// Invalidate the individual profile cache
-	InvalidateModelProfileCache(ctx, profileID)
+	mps.InvalidateModelProfileCache(ctx, profileID)
 
 	return nil
 }
 
 // DeleteModelProfile deletes a model profile
-func DeleteModelProfile(ctx context.Context, profileID uuid.UUID) error {
+func (mps *modelProfileStore) DeleteModelProfile(ctx context.Context, profileID uuid.UUID) error {
 	// Get user ID to invalidate their cache
 	var userID string
 	err := Pool.QueryRow(ctx, GetQuery("modelprofile.get_user_id"), profileID).Scan(&userID)
@@ -289,17 +292,17 @@ func DeleteModelProfile(ctx context.Context, profileID uuid.UUID) error {
 
 	// Invalidate caches
 	if userID != "" {
-		InvalidateModelProfilesListCache(ctx, userID)
+		mps.InvalidateModelProfilesListCache(ctx, userID)
 	}
-	InvalidateModelProfileCache(ctx, profileID)
+	mps.InvalidateModelProfileCache(ctx, profileID)
 
 	return nil
 }
 
 // ListModelProfilesByUser gets all model profiles for a specific user
-func ListModelProfilesByUser(ctx context.Context, userID string) ([]*models.ModelProfile, error) {
+func (mps *modelProfileStore) ListModelProfilesByUser(ctx context.Context, userID string) ([]*models.ModelProfile, error) {
 	// Try to get from cache first
-	if profiles, found := GetModelProfilesListFromCache(ctx, userID); found {
+	if profiles, found := mps.GetModelProfilesListFromCache(ctx, userID); found {
 		return profiles, nil
 	}
 
@@ -347,7 +350,7 @@ func ListModelProfilesByUser(ctx context.Context, userID string) ([]*models.Mode
 	}
 
 	// Cache for future use
-	if err := CacheModelProfilesList(ctx, userID, profiles); err != nil {
+	if err := mps.CacheModelProfilesList(ctx, userID, profiles); err != nil {
 		// Just log, don't fail on cache error
 		util.LogWarning("Failed to cache model profiles for user", nil)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -145,17 +146,33 @@ func ExtractUrlContentFromQuery(ctx context.Context, query string) (*models.Sear
 
 		if len(urls) > 0 {
 			util.LogInfo(fmt.Sprintf("Extracted URLs from query: %v", urls))
+			// Remove duplicates
+			urls = slices.Compact(urls)
+			results := make([]models.SearchResultContent, 0)
 
-			// Extract content from the first URL
-			content, err := ExtractTextFromURL(ctx, urls[0])
-			if err != nil {
-				return nil, util.HandleError(fmt.Errorf("failed to extract content from URL: %w", err))
+			for _, u := range urls {
+				// Ensure each URL is valid
+				if _, err := url.ParseRequestURI(u); err != nil {
+					util.LogWarning(fmt.Sprintf("Invalid URL found in query: %s, error: %v", u, err))
+					continue
+				}
+				// Normalize the URL by removing trailing slashes
+				address := strings.TrimSuffix(u, "/")
+				content, err := ExtractTextFromURL(ctx, address)
+				if err != nil {
+					util.HandleError(fmt.Errorf("failed to extract content from URL: %w", err))
+					continue
+				}
+				results = append(results, models.SearchResultContent{
+					URL:     address,
+					Content: content,
+				})
 			}
 
 			return &models.SearchResult{
-				Query:    query,
-				Results:  urls,
-				Contents: []string{content},
+				IsFromUrlInUserQuery: true,
+				Query:                "",
+				Contents:             results,
 			}, nil
 		}
 		util.LogInfo("No valid URLs found in query")
@@ -175,20 +192,31 @@ func QuickSearch(ctx context.Context, query string, maxResults int, includeConte
 		result.Error = err.Error()
 		return result, err
 	}
-	result.Results = urls
+	// Remove duplicates
+	urls = slices.Compact(urls)
 
 	// Extract content if requested
 	if includeContents && len(urls) > 0 {
-		result.Contents = []string{}
-		for _, url := range urls {
-			content, err := ExtractTextFromURL(ctx, url)
+		result.Contents = make([]models.SearchResultContent, 0)
+		for _, u := range urls {
+			// Ensure each URL is valid
+			if _, err := url.ParseRequestURI(u); err != nil {
+				util.LogWarning(fmt.Sprintf("Invalid URL found in query: %s, error: %v", u, err))
+				continue
+			}
+			// Normalize the URL by removing trailing slashes
+			address := strings.TrimSuffix(u, "/")
+			content, err := ExtractTextFromURL(ctx, address)
 			if err != nil {
 				// Just log the error and continue
-				util.LogWarning(fmt.Sprintf("Error extracting text from URL %s: %v", url, err))
+				util.LogWarning(fmt.Sprintf("Error extracting text from URL %s: %v", address, err))
 				continue
 			}
 			if content != "" {
-				result.Contents = append(result.Contents, content)
+				result.Contents = append(result.Contents, models.SearchResultContent{
+					URL:     address,
+					Content: content,
+				})
 			}
 		}
 	}

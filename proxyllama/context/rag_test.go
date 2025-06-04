@@ -28,8 +28,13 @@ func Test_RetrieveAndInjectMemories(t *testing.T) {
 		t.Fatal("Expected memories to be injected, but none were found")
 	}
 	for _, memory := range MockConversationContext.RetrievedMemories {
-		if memory.Content == "" {
+		if len(memory.Fragments) == 0 {
 			t.Error("Injected memory has empty content")
+		}
+		for _, fragment := range memory.Fragments {
+			if fragment.Content == "" {
+				t.Error("Injected memory fragment has empty content")
+			}
 		}
 	}
 }

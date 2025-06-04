@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"proxyllama/models"
 	"proxyllama/util"
+	"time"
 )
 
 // StreamOllamaRequest sends a request to the Ollama API and handles streaming the response
@@ -20,9 +21,7 @@ func StreamOllamaGenerateRequest(ctx context.Context, model string, requestBody 
 
 	util.LogInfo("Sending request to Ollama")
 
-	handler, _, err := GetProxyHandler(ctx, reqBody, "/api/generate", http.MethodPost, true, func() *models.OllamaGenerateResponse {
-		return &models.OllamaGenerateResponse{}
-	})
+	handler, _, err := GetProxyHandler[*models.OllamaGenerateResponse](ctx, reqBody, "/api/generate", http.MethodPost, true, time.Minute)
 	if err != nil {
 		return "", fmt.Errorf("error streaming request: %w", err)
 	}
@@ -32,7 +31,11 @@ func StreamOllamaGenerateRequest(ctx context.Context, model string, requestBody 
 
 	res, err := handler(wr)
 	if err != nil {
-		return "", fmt.Errorf("error handling response: %w", err)
+		if IsIncompleteError(err) {
+			util.HandleError(err)
+		} else {
+			return "", fmt.Errorf("error handling response: %w", err)
+		}
 	}
 
 	if err := wr.Flush(); err != nil {

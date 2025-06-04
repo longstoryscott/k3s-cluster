@@ -9,12 +9,13 @@ import (
 	"net/http"
 	"proxyllama/models"
 	"proxyllama/util"
+	"time"
 )
 
 // StreamOllamaChatRequest sends a request to the Ollama API and handles streaming the response
 func StreamOllamaChatRequest(ctx context.Context, modelProfile *models.ModelProfile, messages []models.OllamaChatMessage) (string, error) {
 	requestBody := models.OllamaChatReq{
-		Model:    modelProfile.ModelName,
+		Model:    &modelProfile.ModelName,
 		Messages: messages,
 		Stream:   true,
 		Options:  modelProfile.Parameters.ToMap(),
@@ -27,9 +28,7 @@ func StreamOllamaChatRequest(ctx context.Context, modelProfile *models.ModelProf
 
 	util.LogInfo("Sending request to Ollama")
 
-	handler, _, err := GetProxyHandler(ctx, reqBody, "/api/chat", http.MethodPost, true, func() *models.OllamaChatResp {
-		return &models.OllamaChatResp{}
-	})
+	handler, _, err := GetProxyHandler[*models.OllamaChatResp](ctx, reqBody, "/api/chat", http.MethodPost, true, time.Minute*10)
 	if err != nil {
 		return "", util.HandleError(fmt.Errorf("error streaming request: %w", err))
 	}
@@ -39,7 +38,11 @@ func StreamOllamaChatRequest(ctx context.Context, modelProfile *models.ModelProf
 
 	res, err := handler(wr)
 	if err != nil {
-		return "", util.HandleError(fmt.Errorf("error handling response: %w", err))
+		if IsIncompleteError(err) {
+			util.HandleError(err)
+		} else {
+			return "", util.HandleError(fmt.Errorf("error handling response: %w", err))
+		}
 	}
 
 	if err := wr.Flush(); err != nil {

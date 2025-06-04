@@ -4,25 +4,18 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"proxyllama/models"
 	"proxyllama/util"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/sirupsen/logrus"
 )
 
-// Memory represents a stored memory for a user
-type Memory struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Content   string    `json:"content"`
-	Source    string    `json:"source"`
-	CreatedAt time.Time `json:"created_at"`
-}
+type memoryStore struct{}
 
 // InitMemorySchema initializes the database schema for memory storage
-func InitMemorySchema(ctx context.Context) error {
+func (md *memoryStore) InitMemorySchema(ctx context.Context) error {
 	util.LogInfo("Initializing memory schema...")
 
 	// Create memories table and hypertable
@@ -72,12 +65,12 @@ func InitMemorySchema(ctx context.Context) error {
 }
 
 // StoreMemory stores a memory with embedding for a user
-func StoreMemory(ctx context.Context, userID, source string, sourceID int, embeddings [][]float32) error {
+func (md *memoryStore) StoreMemory(ctx context.Context, userID, source, role string, sourceID int, embeddings [][]float32) error {
 	tx, err := Pool.Begin(ctx)
 	if err != nil {
 		return util.HandleError(fmt.Errorf("failed to begin transaction: %w", err))
 	}
-	if err := StoreMemoryWithTx(ctx, userID, source, sourceID, embeddings, tx); err != nil {
+	if err := md.StoreMemoryWithTx(ctx, userID, source, role, sourceID, embeddings, tx); err != nil {
 		tx.Rollback(ctx) // rollback on error
 		return util.HandleError(err)
 	}
@@ -88,18 +81,11 @@ func StoreMemory(ctx context.Context, userID, source string, sourceID int, embed
 }
 
 // StoreMemoryWithTx stores a memory with embedding for a user within a transaction
-func StoreMemoryWithTx(ctx context.Context, userID, source string, sourceID int, embeddings [][]float32, tx pgx.Tx) error {
+func (md *memoryStore) StoreMemoryWithTx(ctx context.Context, userID, source, role string, sourceID int, embeddings [][]float32, tx pgx.Tx) error {
 	for _, embedding := range embeddings {
 		pe, _ := processEmbedding(embedding)
 		embeddingStr := formatEmbeddingForPgVector(pe)
-		util.LogDebug("Storing memory", logrus.Fields{
-			"user_id":          userID,
-			"source":           source,
-			"source_id":        sourceID,
-			"embedding_length": len(embedding),
-			"processed_length": len(pe),
-		})
-		_, err := tx.Exec(ctx, GetQuery("memory.store_memory"), userID, sourceID, source, embeddingStr)
+		_, err := tx.Exec(ctx, GetQuery("memory.store_memory"), userID, sourceID, source, embeddingStr, role)
 		if err != nil {
 			util.HandleError(fmt.Errorf("failed to store memory: %w", err))
 		}
@@ -109,7 +95,7 @@ func StoreMemoryWithTx(ctx context.Context, userID, source string, sourceID int,
 }
 
 // DeleteMemory deletes a memory by ID
-func DeleteMemory(ctx context.Context, id, userID string) error {
+func (md *memoryStore) DeleteMemory(ctx context.Context, id, userID string) error {
 	_, err := Pool.Exec(ctx, GetQuery("memory.delete_memory"), id, userID)
 
 	if err != nil {
@@ -120,7 +106,7 @@ func DeleteMemory(ctx context.Context, id, userID string) error {
 }
 
 // DeleteAllUserMemories deletes all memories for a user
-func DeleteAllUserMemories(ctx context.Context, userID string) error {
+func (md *memoryStore) DeleteAllUserMemories(ctx context.Context, userID string) error {
 	_, err := Pool.Exec(ctx, GetQuery("memory.delete_all_user_memories"), userID)
 
 	if err != nil {
@@ -200,37 +186,99 @@ func normalizeVector(vec []float32) []float32 {
 	return result
 }
 
-// GetSimilarMessages finds semantically similar messages based on vector similarity
-// func GetSimilarMessages(ctx context.Context, queryEmbedding []float32, similarityThreshold float32, limit int) ([]Message, error) {
-// 	// Ensure the query embedding is 768 dimensions
-// 	processedEmbedding, _ := processEmbedding(queryEmbedding)
-// 	embeddingStr := formatEmbeddingForPgVector(processedEmbedding)
+// SearchMessagesBySimilarity searches for semantically similar messages in a conversation
+func SearchMessagesBySimilarity(ctx context.Context, conversationID int, embedding []float32, minSimilarity float64, limit int) ([]models.Memory, error) {
+	if len(embedding) == 0 {
+		return nil, fmt.Errorf("embedding vector is empty")
+	}
 
-// 	rows, err := Pool.Query(ctx, GetQuery("memory.similar_messages"), embeddingStr, similarityThreshold, limit, "messages")
-// 	if err != nil {
-// 		return nil, util.HandleError(fmt.Errorf("failed to query similar messages: %w", err))
-// 	}
-// 	defer rows.Close()
+	rows, err := Pool.Query(ctx, GetQuery("memory.search_conversation_similarity"), conversationID, formatEmbeddingForPgVector(embedding), limit, minSimilarity)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search messages by similarity: %w", err)
+	}
+	defer rows.Close()
 
-// 	for _, r := range rows.RawValues() {
-// 		util.LogDebug("Raw Similar Message:", logrus.Fields{"row": string(r)})
-// 	}
+	var results []models.Memory
+	var mem models.Memory
+	for rows.Next() {
+		var frag models.MemoryFragment
+		if err := rows.Scan(&frag.Role, &mem.SourceID, &frag.Content, &mem.Source, &mem.Similarity, &mem.ConversationID, &mem.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan message row: %w", err)
+		}
+		frag.ID = mem.SourceID
+		mem.Fragments = append(mem.Fragments, frag)
+		if mem.Source == models.MemorySourceMessage && len(mem.Fragments) < 2 && frag.Role == "user" {
+			continue
+		}
+		results = append(results, mem)
+	}
 
-// 	var messages []Message
-// 	for rows.Next() {
-// 		var msg Message
-// 		var similarity float32
+	util.LogInfo("Found messages by vector similarity")
+	return results, nil
+}
 
-// 		if err := rows.Scan(&msg.ID, &msg.ConversationID, &msg.Role, &msg.Content, &msg.CreatedAt, &similarity); err != nil {
-// 			return nil, util.HandleError(fmt.Errorf("failed to scan message row: %w", err))
-// 		}
+// SearchAllMessagesBySimilarity searches for semantically similar messages across all conversations
+func SearchAllMessagesBySimilarity(ctx context.Context, embedding []float32, minSimilarity float64, limit int) ([]models.Memory, error) {
+	if len(embedding) == 0 {
+		return nil, fmt.Errorf("embedding vector is empty")
+	}
 
-// 		messages = append(messages, msg)
-// 	}
+	rows, err := Pool.Query(ctx, GetQuery("memory.search_all_similarity"), formatEmbeddingForPgVector(embedding), minSimilarity, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search all messages by similarity: %w", err)
+	}
+	defer rows.Close()
 
-// 	if err = rows.Err(); err != nil {
-// 		return nil, fmt.Errorf("error iterating message rows: %w", err)
-// 	}
+	var results []models.Memory
+	var currentMem models.Memory
+	var lastMessageRole string
+	var messageCount int
 
-// 	return messages, nil
-// }
+	for rows.Next() {
+		var frag models.MemoryFragment
+		if err := rows.Scan(&frag.Role, &currentMem.SourceID, &frag.Content, &currentMem.Source, &currentMem.Similarity, &currentMem.ConversationID, &currentMem.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan message row: %w", err)
+		}
+		frag.ID = currentMem.SourceID
+
+		// Start a new memory if this is the first message or if we already have a pair
+		if messageCount == 0 || (messageCount%2 == 0 && lastMessageRole != "") {
+			// If we have a completed memory with at least one user and one assistant message, add it to results
+			if len(currentMem.Fragments) >= 2 && messageCount > 0 {
+				results = append(results, currentMem)
+			}
+			// Reset current memory
+			currentMem = models.Memory{
+				SourceID:       currentMem.SourceID,
+				Source:         currentMem.Source,
+				Similarity:     currentMem.Similarity,
+				ConversationID: currentMem.ConversationID,
+				CreatedAt:      currentMem.CreatedAt,
+				Fragments:      []models.MemoryFragment{},
+			}
+		}
+
+		// Add fragment to current memory
+		currentMem.Fragments = append(currentMem.Fragments, frag)
+		lastMessageRole = frag.Role
+		messageCount++
+
+		// If we have a pair (user + assistant), add to results
+		if len(currentMem.Fragments) == 2 &&
+			((currentMem.Fragments[0].Role == "user" && currentMem.Fragments[1].Role == "assistant") ||
+				(currentMem.Fragments[0].Role == "assistant" && currentMem.Fragments[1].Role == "user")) {
+			results = append(results, currentMem)
+			currentMem = models.Memory{}
+			messageCount = 0
+		}
+	}
+
+	// Add the last memory if it has both user and assistant messages
+	if len(currentMem.Fragments) == 2 &&
+		((currentMem.Fragments[0].Role == "user" && currentMem.Fragments[1].Role == "assistant") ||
+			(currentMem.Fragments[0].Role == "assistant" && currentMem.Fragments[1].Role == "user")) {
+		results = append(results, currentMem)
+	}
+
+	return results, nil
+}

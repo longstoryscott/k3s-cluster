@@ -25,7 +25,7 @@ func RegisterModelProfileRoutes(app *fiber.App) {
 func ListModelProfiles(c *fiber.Ctx) error {
 	userID := c.UserContext().Value(auth.UserIDKey).(string)
 
-	profiles, err := storage.ListModelProfilesByUser(c.Context(), userID)
+	profiles, err := storage.ModelProfileStoreInstance.ListModelProfilesByUser(c.UserContext(), userID)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to retrieve model profiles")
 	}
@@ -70,7 +70,7 @@ func GetModelProfile(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid model profile ID")
 	}
 
-	profile, err := storage.GetModelProfile(c.Context(), uuid.MustParse(profileID))
+	profile, err := storage.ModelProfileStoreInstance.GetModelProfile(c.UserContext(), uuid.MustParse(profileID))
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Model profile not found")
 	}
@@ -94,7 +94,7 @@ func CreateModelProfile(c *fiber.Ctx) error {
 
 	profile.UserID = userID
 
-	_, err := storage.CreateModelProfile(c.Context(), &profile)
+	_, err := storage.ModelProfileStoreInstance.CreateModelProfile(c.UserContext(), &profile)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to create model profile")
 	}
@@ -113,7 +113,7 @@ func UpdateModelProfile(c *fiber.Ctx) error {
 
 	profile.UserID = userID
 
-	if err := storage.UpdateModelProfile(c.Context(), &profile); err != nil {
+	if err := storage.ModelProfileStoreInstance.UpdateModelProfile(c.UserContext(), &profile); err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to update model profile")
 	}
 
@@ -128,7 +128,7 @@ func DeleteModelProfile(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid model profile ID")
 	}
 
-	if err := storage.DeleteModelProfile(c.Context(), uuid.MustParse(profileID)); err != nil {
+	if err := storage.ModelProfileStoreInstance.DeleteModelProfile(c.UserContext(), uuid.MustParse(profileID)); err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to delete model profile")
 	}
 

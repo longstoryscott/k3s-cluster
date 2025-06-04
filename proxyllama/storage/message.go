@@ -5,21 +5,22 @@ import (
 	"fmt"
 	"proxyllama/config"
 	"proxyllama/models"
-	"proxyllama/proxy"
 	"proxyllama/util"
 )
 
+type messageStore struct{}
+
 // AddMessage adds a message to a conversation
-func AddMessage(ctx context.Context, conversationID int, role, content string, usrCfg *config.UserConfig) (int, [][]float32, error) {
+func (ms *messageStore) AddMessage(ctx context.Context, conversationID int, role, content string, usrCfg *config.UserConfig) (int, error) {
 	// Check if Pool is initialized
 	if Pool == nil {
-		return 0, nil, util.HandleError(fmt.Errorf("database connection pool is not initialized (Pool is nil)"))
+		return 0, util.HandleError(fmt.Errorf("database connection pool is not initialized (Pool is nil)"))
 	}
 
 	// Start a transaction for atomicity
 	tx, err := Pool.Begin(ctx)
 	if err != nil {
-		return 0, nil, util.HandleError(err)
+		return 0, util.HandleError(err)
 	}
 	// Use defer with a named error return to ensure we correctly handle transaction state
 	defer func() {
@@ -29,40 +30,22 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 	}()
 
 	var messageID int
-	var profile *models.ModelProfile
-	var embeddings [][]float32
 	// Use the SQL query from our loader
 	err = tx.QueryRow(ctx, GetQuery("message.add_message"), conversationID, role, content).Scan(&messageID)
 	if err != nil {
-		return 0, nil, util.HandleError(err)
+		return 0, util.HandleError(err)
 	}
 
 	// Update the conversation's updated_at timestamp
 	_, err = tx.Exec(ctx, GetQuery("conversation.update_conversation"), conversationID)
 	if err != nil {
-		return 0, nil, util.HandleError(err)
-	}
-
-	profile, err = GetModelProfileWithTx(ctx, usrCfg.ModelProfiles.EmbeddingProfileID, tx)
-	if err != nil {
-		util.LogWarning("Failed to get model profile for embedding", nil)
-		return messageID, nil, nil // Proceed without embedding if profile retrieval fails
-	}
-
-	embeddings, err = proxy.GetOllamaEmbedding(ctx, content, profile.ModelName)
-	if err != nil {
-		return 0, nil, util.HandleError(err)
+		return 0, util.HandleError(err)
 	}
 
 	// Commit the transaction
 	if err = tx.Commit(ctx); err != nil {
-		return 0, nil, util.HandleError(err)
+		return 0, util.HandleError(err)
 	}
-
-	if memErr := StoreMemory(ctx, usrCfg.UserID, "message", messageID, embeddings); memErr != nil {
-		util.HandleError(memErr)
-	}
-
 	// Create message object for caching
 	message := &models.Message{
 		ID:             messageID,
@@ -81,11 +64,11 @@ func AddMessage(ctx context.Context, conversationID int, role, content string, u
 		// We'll just have a cache miss next time
 	}
 
-	return messageID, embeddings, nil
+	return messageID, nil
 }
 
 // GetMessage gets a single message by ID
-func GetMessage(ctx context.Context, messageID int) (*models.Message, error) {
+func (ms *messageStore) GetMessage(ctx context.Context, messageID int) (*models.Message, error) {
 	// Try to get from cache first
 	if msg, found := GetMessageFromCache(ctx, messageID); found {
 		return msg, nil
@@ -109,7 +92,7 @@ func GetMessage(ctx context.Context, messageID int) (*models.Message, error) {
 }
 
 // GetConversationHistory retrieves all messages for a conversation
-func GetConversationHistory(ctx context.Context, conversationID int) ([]models.Message, error) {
+func (ms *messageStore) GetConversationHistory(ctx context.Context, conversationID int) ([]models.Message, error) {
 	// Try to get from cache first
 	if messages, found := GetMessagesByConversationIDFromCache(ctx, conversationID); found && len(messages) > 0 {
 		util.LogDebug("Cache hit for conversation messages", nil)

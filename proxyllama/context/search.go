@@ -8,6 +8,7 @@ import (
 	"proxyllama/recherche"
 	"proxyllama/storage"
 	"proxyllama/util"
+	"slices"
 
 	"github.com/sirupsen/logrus"
 )
@@ -39,7 +40,7 @@ func (cc *ConversationContext) SearchAndInjectResults(ctx context.Context, query
 		return err
 	}
 
-	fmtProfile, err := storage.GetModelProfile(ctx, cfg.ModelProfiles.FormattingProfileID)
+	fmtProfile, err := storage.ModelProfileStoreInstance.GetModelProfile(ctx, cfg.ModelProfiles.FormattingProfileID)
 	if err != nil {
 		return util.HandleError(err)
 	}
@@ -76,22 +77,55 @@ func (cc *ConversationContext) SearchAndInjectResults(ctx context.Context, query
 }
 
 func (cc *ConversationContext) InjectSearchResults(ctx context.Context, results *models.SearchResult, preamble string) error {
-	if results == nil || len(results.Results) == 0 {
+	if results == nil || len(results.Contents) == 0 {
 		util.LogWarning("No search results to inject")
 		return nil
 	}
 
 	util.LogInfo("Injecting search results into conversation context", logrus.Fields{
-		"count": len(results.Results),
+		"count": len(results.Contents),
 	})
 
-	for _, c := range results.Contents {
-		if len(c) > 0 {
-			cc.SearchResults = append(cc.SearchResults, models.Message{
-				Role:    "system",
-				Content: fmt.Sprintf("%s:\n %v", preamble, c),
+	if slices.ContainsFunc(cc.SearchResults, func(sr models.SearchResult) bool {
+		return sr.Query == results.Query
+	}) {
+		util.LogInfo("Search results already injected for this query, skipping")
+		return nil // Already injected
+	}
+
+	// Create a map of all URLs from existing search results for efficient lookup
+	existingURLs := make(map[string]bool)
+	for _, sr := range cc.SearchResults {
+		for _, content := range sr.Contents {
+			existingURLs[content.URL] = true
+		}
+	}
+
+	// Filter out contents with duplicate URLs
+	var uniqueContents []models.SearchResultContent
+	for _, content := range results.Contents {
+		if _, exists := existingURLs[content.URL]; !exists {
+			uniqueContents = append(uniqueContents, content)
+			existingURLs[content.URL] = true // Mark as seen
+		} else {
+			util.LogInfo("Skipping duplicate search result URL", logrus.Fields{
+				"url": content.URL,
 			})
 		}
+	}
+
+	// Replace the contents with the filtered list
+	filteredResults := *results
+	filteredResults.Contents = uniqueContents
+
+	// Only add if we have unique contents after filtering
+	if len(filteredResults.Contents) > 0 {
+		cc.SearchResults = append(cc.SearchResults, filteredResults)
+		util.LogInfo("Added unique search results", logrus.Fields{
+			"count": len(filteredResults.Contents),
+		})
+	} else {
+		util.LogInfo("No unique search results to add after filtering")
 	}
 
 	return nil

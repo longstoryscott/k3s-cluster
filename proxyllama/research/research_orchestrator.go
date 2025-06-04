@@ -84,10 +84,10 @@ func PerformDeepResearch(ctx context.Context, taskID int, userID, originalQuery 
 		// Store individual sub-answers in the database
 		if res.Error != nil {
 			errorMsg := res.Error.Error()
-			_, _, _ = storage.UpdateSubtaskStatus(ctx, taskID, res.ID, string(models.ResearchTaskStatusFailed), &errorMsg)
+			_, _, _ = storage.ResearchTaskStoreInstance.UpdateSubtaskStatus(ctx, taskID, res.ID, string(models.ResearchTaskStatusFailed), &errorMsg)
 		} else {
-			_, _ = storage.StoreSynthesizedAnswer(ctx, taskID, res.ID, res.SynthesizedAnswer)
-			_, _, _ = storage.UpdateSubtaskStatus(ctx, taskID, res.ID, string(models.ResearchTaskStatusCompleted), nil)
+			_, _ = storage.ResearchTaskStoreInstance.StoreSynthesizedAnswer(ctx, taskID, res.ID, res.SynthesizedAnswer)
+			_, _, _ = storage.ResearchTaskStoreInstance.UpdateSubtaskStatus(ctx, taskID, res.ID, string(models.ResearchTaskStatusCompleted), nil)
 		}
 	}
 
@@ -102,7 +102,7 @@ func PerformDeepResearch(ctx context.Context, taskID int, userID, originalQuery 
 	}
 
 	// Store final result in database
-	_, err = storage.StoreFinalResult(ctx, taskID, finalReport)
+	_, err = storage.ResearchTaskStoreInstance.StoreFinalResult(ctx, taskID, finalReport)
 	if err != nil {
 		util.LogWarning("Error storing final result", logrus.Fields{"taskID": taskID, "error": err})
 	}
@@ -132,7 +132,7 @@ func planResearchTask(ctx context.Context, userID string, taskID int, query stri
 	var subTaskIds []int
 	// Create subtasks in database
 	for _, sq := range plan.SubQuestions {
-		id, err := storage.SaveSubtask(ctx, &models.ResearchSubtask{
+		id, err := storage.ResearchTaskStoreInstance.SaveSubtask(ctx, &models.ResearchSubtask{
 			TaskID:     taskID,
 			QuestionID: sq.ID,
 			Status:     models.ResearchTaskStatusPending,
@@ -145,7 +145,7 @@ func planResearchTask(ctx context.Context, userID string, taskID int, query stri
 		subTaskIds = append(subTaskIds, id)
 	}
 
-	_, err = storage.StoreResearchPlan(ctx, taskID, plan)
+	_, err = storage.ResearchTaskStoreInstance.StoreResearchPlan(ctx, taskID, plan)
 	if err != nil {
 		util.LogWarning("Error storing subtasks", logrus.Fields{"taskID": taskID, "error": err})
 	}
@@ -207,7 +207,7 @@ func processSubQuestion(ctx context.Context, userID string, taskID int, subQ mod
 	}
 
 	// Store gathered information
-	_, err := storage.StoreGatheredInfo(ctx, taskID, subQ.ID, allExtractedTexts, allSources)
+	_, err := storage.ResearchTaskStoreInstance.StoreGatheredInfo(ctx, taskID, subQ.ID, allExtractedTexts, allSources)
 	if err != nil {
 		util.LogWarning("Error storing gathered info", logrus.Fields{"taskID": taskID, "subQID": subQ.ID, "error": err})
 	}
@@ -316,7 +316,7 @@ func CallLLMForResult(ctx context.Context, userID, consolidatedInput string, use
 		return nil, fmt.Errorf("failed to get user config: %w", err)
 	}
 
-	profile, err := storage.GetModelProfile(ctx, cfg.ModelProfiles.ResearchConsolidationProfileID)
+	profile, err := storage.ModelProfileStoreInstance.GetModelProfile(ctx, cfg.ModelProfiles.ResearchConsolidationProfileID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get model profile: %w", err)
 	}
@@ -341,7 +341,7 @@ func CallLLMForSubResult(ctx context.Context, userID, consolidatedInput string, 
 		return nil, fmt.Errorf("failed to get user config: %w", err)
 	}
 
-	profile, err := storage.GetModelProfile(ctx, cfg.ModelProfiles.ResearchAnalysisProfileID)
+	profile, err := storage.ModelProfileStoreInstance.GetModelProfile(ctx, cfg.ModelProfiles.ResearchAnalysisProfileID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get model profile: %w", err)
 	}
@@ -372,7 +372,7 @@ func CallLLMForResearchPlan(ctx context.Context, userID, query string) (*models.
 		Content: systemPrompt,
 	})
 
-	profile, err := storage.GetModelProfile(ctx, cfg.ModelProfiles.ResearchPlanProfileID)
+	profile, err := storage.ModelProfileStoreInstance.GetModelProfile(ctx, cfg.ModelProfiles.ResearchPlanProfileID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get model profile: %w", err)
 	}
@@ -383,7 +383,7 @@ func CallLLMForResearchPlan(ctx context.Context, userID, query string) (*models.
 func doResearch[T any](ctx context.Context, profile *models.ModelProfile, ollamaMessages []models.OllamaChatMessage) (*T, error) {
 	// Create a non-streaming request to get the full response at once
 	ollamaReq := models.OllamaChatReq{
-		Model:    profile.ModelName,
+		Model:    &profile.ModelName,
 		Messages: ollamaMessages,
 		Format:   format,
 		Stream:   false, // We want the complete response at once
@@ -431,7 +431,7 @@ func doResearch[T any](ctx context.Context, profile *models.ModelProfile, ollama
 
 // updateTaskStatus updates the status of a research task in the database
 func updateTaskStatus(ctx context.Context, taskID int, status models.ResearchTaskStatus, errorMsg *string) {
-	_, err := storage.UpdateTaskStatus(ctx, taskID, string(status), errorMsg)
+	_, err := storage.ResearchTaskStoreInstance.UpdateTaskStatus(ctx, taskID, string(status), errorMsg)
 	if err != nil {
 		util.LogWarning("Error updating task status", logrus.Fields{"taskID": taskID, "error": err})
 	}
@@ -439,7 +439,7 @@ func updateTaskStatus(ctx context.Context, taskID int, status models.ResearchTas
 
 // updateSubtaskStatus updates the status of a research subtask in the database
 func updateSubtaskStatus(ctx context.Context, taskID int, questionID int, status models.ResearchTaskStatus, errorMsg *string) {
-	_, _, err := storage.UpdateSubtaskStatus(ctx, taskID, questionID, string(status), errorMsg)
+	_, _, err := storage.ResearchTaskStoreInstance.UpdateSubtaskStatus(ctx, taskID, questionID, string(status), errorMsg)
 	if err != nil {
 		util.LogWarning("Error updating subtask status", logrus.Fields{"taskID": taskID, "subQID": questionID, "error": err})
 	}

@@ -3,20 +3,14 @@ package storage
 import (
 	"context"
 	"fmt"
+	"proxyllama/models"
 	"time"
 )
 
-type Conversation struct {
-	ID        int       `json:"id"`
-	UserID    string    `json:"user_id"`
-	Title     string    `json:"title"`
-	Model     string    `json:"model"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
+type conversationStore struct{}
 
 // CreateConversation starts a new conversation for a user
-func CreateConversation(ctx context.Context, userID string, title string) (int, error) {
+func (cs *conversationStore) CreateConversation(ctx context.Context, userID string, title string) (int, error) {
 	// Ensure the user exists
 	if err := EnsureUser(ctx, userID); err != nil {
 		return 0, err
@@ -29,7 +23,7 @@ func CreateConversation(ctx context.Context, userID string, title string) (int, 
 	}
 
 	// Create a conversation object for caching
-	conversation := &Conversation{
+	conversation := &models.Conversation{
 		ID:        conversationID,
 		UserID:    userID,
 		Title:     title,
@@ -49,7 +43,7 @@ func CreateConversation(ctx context.Context, userID string, title string) (int, 
 }
 
 // GetUserConversations gets all conversations for a user, ordered by most recent
-func GetUserConversations(ctx context.Context, userID string) ([]Conversation, error) {
+func (cs *conversationStore) GetUserConversations(ctx context.Context, userID string) ([]models.Conversation, error) {
 	// Try to get from cache first
 	if conversations, found := GetConversationsByUserIDFromCache(ctx, userID); found {
 		return conversations, nil
@@ -62,9 +56,9 @@ func GetUserConversations(ctx context.Context, userID string) ([]Conversation, e
 	}
 	defer rows.Close()
 
-	var conversations []Conversation
+	var conversations []models.Conversation
 	for rows.Next() {
-		var conv Conversation
+		var conv models.Conversation
 		if err := rows.Scan(&conv.ID, &conv.UserID, &conv.Title, &conv.CreatedAt, &conv.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -85,14 +79,14 @@ func GetUserConversations(ctx context.Context, userID string) ([]Conversation, e
 }
 
 // GetConversation retrieves a single conversation by ID
-func GetConversation(ctx context.Context, conversationID int) (*Conversation, error) {
+func (cs *conversationStore) GetConversation(ctx context.Context, conversationID int) (*models.Conversation, error) {
 	// Try to get from cache first
 	if conversation, found := GetConversationFromCache(ctx, conversationID); found {
 		return conversation, nil
 	}
 
 	// Not in cache, get from database
-	var conv Conversation
+	var conv models.Conversation
 	err := Pool.QueryRow(ctx, GetQuery("conversation.get_conversation"), conversationID).Scan(
 		&conv.ID, &conv.UserID, &conv.Title, &conv.CreatedAt, &conv.UpdatedAt,
 	)
@@ -110,7 +104,7 @@ func GetConversation(ctx context.Context, conversationID int) (*Conversation, er
 }
 
 // UpdateConversationTitle updates the title of a conversation
-func UpdateConversationTitle(ctx context.Context, conversationID int, title string) error {
+func (cs *conversationStore) UpdateConversationTitle(ctx context.Context, conversationID int, title string) error {
 	_, err := Pool.Exec(ctx, GetQuery("conversation.update_title"), title, conversationID)
 	if err != nil {
 		return err
@@ -121,7 +115,7 @@ func UpdateConversationTitle(ctx context.Context, conversationID int, title stri
 
 	// Also invalidate any user conversations lists that might include this conversation
 	// Get the conversation to find the userID
-	conversation, err := GetConversation(ctx, conversationID)
+	conversation, err := cs.GetConversation(ctx, conversationID)
 	if err == nil {
 		// We got the conversation after the update, so let's invalidate the user's list
 		InvalidateUserConversationsCache(ctx, conversation.UserID)
@@ -131,9 +125,9 @@ func UpdateConversationTitle(ctx context.Context, conversationID int, title stri
 }
 
 // DeleteConversation deletes a conversation and all its messages using transaction
-func DeleteConversation(ctx context.Context, conversationID int) error {
+func (cs *conversationStore) DeleteConversation(ctx context.Context, conversationID int) error {
 	// Get the conversation to find the userID before deletion
-	conversation, err := GetConversation(ctx, conversationID)
+	conversation, err := cs.GetConversation(ctx, conversationID)
 	if err != nil {
 		return fmt.Errorf("failed to get conversation before deletion: %w", err)
 	}

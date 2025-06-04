@@ -18,8 +18,11 @@ func getUserConfigCacheKey(userID string) string {
 	return userConfigKeyPrefix + userID
 }
 
+// userConfigStore implements the UserConfigStore interface
+type userConfigStore struct{}
+
 // getUserConfigFromCache tries to get user config from Redis
-func getUserConfigFromCache(ctx context.Context, userID string) (*config.UserConfig, bool) {
+func (ucs *userConfigStore) getUserConfigFromCache(ctx context.Context, userID string) (*config.UserConfig, bool) {
 	if !IsStorageCacheEnabled() {
 		return nil, false
 	}
@@ -36,7 +39,7 @@ func getUserConfigFromCache(ctx context.Context, userID string) (*config.UserCon
 }
 
 // cacheUserConfig stores user config in Redis
-func cacheUserConfig(ctx context.Context, userID string, cfg *config.UserConfig) {
+func (ucs *userConfigStore) cacheUserConfig(ctx context.Context, userID string, cfg *config.UserConfig) {
 	if !IsStorageCacheEnabled() || cfg == nil {
 		return
 	}
@@ -54,7 +57,7 @@ func cacheUserConfig(ctx context.Context, userID string, cfg *config.UserConfig)
 }
 
 // GetUserConfig retrieves user configuration from database
-func GetUserConfig(ctx context.Context, userID string) (*config.UserConfig, error) {
+func (ucs *userConfigStore) GetUserConfig(ctx context.Context, userID string) (*config.UserConfig, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	// Ensure user exists
@@ -64,7 +67,7 @@ func GetUserConfig(ctx context.Context, userID string) (*config.UserConfig, erro
 	}
 
 	// Try to get from cache first
-	usrCfg, found := getUserConfigFromCache(ctx, userID)
+	usrCfg, found := ucs.getUserConfigFromCache(ctx, userID)
 	if found {
 		return usrCfg, nil
 	}
@@ -97,13 +100,13 @@ func GetUserConfig(ctx context.Context, userID string) (*config.UserConfig, erro
 	config.MergeWithDefaultConfig(&usrConfig)
 
 	// Cache for future use
-	cacheUserConfig(ctx, userID, &usrConfig)
+	ucs.cacheUserConfig(ctx, userID, &usrConfig)
 
 	return &usrConfig, nil
 }
 
 // UpdateUserConfig saves user configuration to database
-func UpdateUserConfig(ctx context.Context, userID string, cfg *config.UserConfig) error {
+func (ucs *userConfigStore) UpdateUserConfig(ctx context.Context, userID string, cfg *config.UserConfig) error {
 	// Convert config to JSON
 	configJson, err := json.Marshal(cfg)
 	if err != nil {
@@ -117,13 +120,13 @@ func UpdateUserConfig(ctx context.Context, userID string, cfg *config.UserConfig
 	}
 
 	// Update the cache
-	cacheUserConfig(ctx, userID, cfg)
+	ucs.cacheUserConfig(ctx, userID, cfg)
 
 	return nil
 }
 
 // GetAllUsers retrieves all users from the database
-func GetAllUsers(ctx context.Context) ([]models.User, error) {
+func (ucs *userConfigStore) GetAllUsers(ctx context.Context) ([]models.User, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 

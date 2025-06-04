@@ -19,7 +19,7 @@ type CreateResearchRequest struct {
 // StartResearchTask starts a new research task
 func StartResearchTask(ctx context.Context, userID, query, model string, conversationID *int) (*int, error) {
 	// Save the task to the database
-	taskID, err := storage.SaveResearchTask(ctx, userID, query, conversationID)
+	taskID, err := storage.ResearchTaskStoreInstance.SaveResearchTask(ctx, userID, query, conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save research task: %w", err)
 	}
@@ -32,12 +32,12 @@ func StartResearchTask(ctx context.Context, userID, query, model string, convers
 
 // GetResearchTask gets a research task by ID
 func GetResearchTask(ctx context.Context, taskID int) (*models.ResearchTask, error) {
-	return storage.GetTaskByID(ctx, taskID)
+	return storage.ResearchTaskStoreInstance.GetTaskByID(ctx, taskID)
 }
 
 // GetUserResearchTasks gets all research tasks for a user
 func GetUserResearchTasks(ctx context.Context, userID string) ([]*models.ResearchTask, error) {
-	tasks, err := storage.ListTasksByUserID(ctx, userID, 100, 0) // Default limit 100, offset 0
+	tasks, err := storage.ResearchTaskStoreInstance.ListTasksByUserID(ctx, userID, 100, 0) // Default limit 100, offset 0
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func GetUserResearchTasks(ctx context.Context, userID string) ([]*models.Researc
 // CancelResearchTask cancels a research task
 func CancelResearchTask(ctx context.Context, taskID int) error {
 	// Get the task first to verify ownership
-	task, err := storage.GetTaskByID(ctx, taskID)
+	task, err := storage.ResearchTaskStoreInstance.GetTaskByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("failed to get research task: %w", err)
 	}
@@ -80,6 +80,6 @@ func CancelResearchTask(ctx context.Context, taskID int) error {
 	task.UpdatedAt = time.Now()
 	errMessage := "Task was canceled by the user"
 
-	_, err = storage.UpdateTask(ctx, taskID, string(models.ResearchTaskStatusCanceled), &errMessage)
+	_, err = storage.ResearchTaskStoreInstance.UpdateTask(ctx, taskID, string(models.ResearchTaskStatusCanceled), &errMessage)
 	return err
 }

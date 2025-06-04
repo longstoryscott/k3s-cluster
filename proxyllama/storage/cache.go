@@ -302,7 +302,7 @@ func CacheMessagesByConversationID(ctx context.Context, conversationID int, mess
 // ========== Summary Cache Operations ==========
 
 // GetSummaryFromCache attempts to retrieve a summary from cache
-func GetSummaryFromCache(ctx context.Context, summaryID int) (*Summary, bool) {
+func GetSummaryFromCache(ctx context.Context, summaryID int) (*models.Summary, bool) {
 	if !IsStorageCacheEnabled() {
 		return nil, false
 	}
@@ -313,7 +313,7 @@ func GetSummaryFromCache(ctx context.Context, summaryID int) (*Summary, bool) {
 		return nil, false
 	}
 
-	var summary Summary
+	var summary models.Summary
 	if err := json.Unmarshal(data, &summary); err != nil {
 		logrus.Errorf("Error deserializing summary from Redis: %v", err)
 		return nil, false
@@ -323,7 +323,7 @@ func GetSummaryFromCache(ctx context.Context, summaryID int) (*Summary, bool) {
 }
 
 // CacheSummary stores a summary in cache
-func CacheSummary(ctx context.Context, summary *Summary) error {
+func CacheSummary(ctx context.Context, summary *models.Summary) error {
 	if !IsStorageCacheEnabled() || summary == nil {
 		return nil
 	}
@@ -350,7 +350,7 @@ func InvalidateSummaryCache(ctx context.Context, summaryID int) {
 }
 
 // GetSummariesByConversationIDFromCache tries to get all summaries for a conversation from cache
-func GetSummariesByConversationIDFromCache(ctx context.Context, conversationID int) ([]Summary, bool) {
+func GetSummariesByConversationIDFromCache(ctx context.Context, conversationID int) ([]models.Summary, bool) {
 	if !IsStorageCacheEnabled() {
 		return nil, false
 	}
@@ -359,7 +359,7 @@ func GetSummariesByConversationIDFromCache(ctx context.Context, conversationID i
 	summariesListKey := cacheKey(summariesListPrefix, conversationID)
 	data, err := redisClient.Get(ctx, summariesListKey).Bytes()
 	if err == nil {
-		var summaries []Summary
+		var summaries []models.Summary
 		if err := json.Unmarshal(data, &summaries); err == nil {
 			return summaries, true
 		}
@@ -380,7 +380,7 @@ func GetSummariesByConversationIDFromCache(ctx context.Context, conversationID i
 	}
 
 	// Now get each summary from cache
-	var summaries []Summary
+	var summaries []models.Summary
 	for _, sumID := range summaryIDs {
 		if sum, found := GetSummaryFromCache(ctx, sumID); found {
 			summaries = append(summaries, *sum)
@@ -394,7 +394,7 @@ func GetSummariesByConversationIDFromCache(ctx context.Context, conversationID i
 }
 
 // CacheSummariesByConversationID caches all summaries for a conversation
-func CacheSummariesByConversationID(ctx context.Context, conversationID int, summaries []Summary) error {
+func CacheSummariesByConversationID(ctx context.Context, conversationID int, summaries []models.Summary) error {
 	if !IsStorageCacheEnabled() || len(summaries) == 0 {
 		return nil
 	}
@@ -454,7 +454,7 @@ func InvalidateConversationSummariesCache(ctx context.Context, conversationID in
 			continue
 		}
 
-		var sum Summary
+		var sum models.Summary
 		if err := json.Unmarshal(data, &sum); err != nil {
 			continue
 		}
@@ -468,7 +468,7 @@ func InvalidateConversationSummariesCache(ctx context.Context, conversationID in
 // ========== Conversation Cache Operations ==========
 
 // GetConversationFromCache attempts to retrieve a conversation from cache
-func GetConversationFromCache(ctx context.Context, conversationID int) (*Conversation, bool) {
+func GetConversationFromCache(ctx context.Context, conversationID int) (*models.Conversation, bool) {
 	if !IsStorageCacheEnabled() {
 		return nil, false
 	}
@@ -479,7 +479,7 @@ func GetConversationFromCache(ctx context.Context, conversationID int) (*Convers
 		return nil, false
 	}
 
-	var conversation Conversation
+	var conversation models.Conversation
 	if err := json.Unmarshal(data, &conversation); err != nil {
 		logrus.Errorf("Error deserializing conversation from Redis: %v", err)
 		return nil, false
@@ -489,7 +489,7 @@ func GetConversationFromCache(ctx context.Context, conversationID int) (*Convers
 }
 
 // CacheConversation stores a conversation in cache
-func CacheConversation(ctx context.Context, conversation *Conversation) error {
+func CacheConversation(ctx context.Context, conversation *models.Conversation) error {
 	if !IsStorageCacheEnabled() || conversation == nil {
 		return nil
 	}
@@ -521,7 +521,7 @@ func InvalidateConversationCache(ctx context.Context, conversationID int) {
 }
 
 // GetConversationsByUserIDFromCache attempts to retrieve user's conversations from cache
-func GetConversationsByUserIDFromCache(ctx context.Context, userID string) ([]Conversation, bool) {
+func GetConversationsByUserIDFromCache(ctx context.Context, userID string) ([]models.Conversation, bool) {
 	if !IsStorageCacheEnabled() {
 		return nil, false
 	}
@@ -541,7 +541,7 @@ func GetConversationsByUserIDFromCache(ctx context.Context, userID string) ([]Co
 	}
 
 	// Now get each conversation from cache
-	var conversations []Conversation
+	var conversations []models.Conversation
 	for _, convID := range conversationIDs {
 		if conv, found := GetConversationFromCache(ctx, convID); found {
 			conversations = append(conversations, *conv)
@@ -555,7 +555,7 @@ func GetConversationsByUserIDFromCache(ctx context.Context, userID string) ([]Co
 }
 
 // CacheConversationsByUserID caches all conversations for a user
-func CacheConversationsByUserID(ctx context.Context, userID string, conversations []Conversation) error {
+func CacheConversationsByUserID(ctx context.Context, userID string, conversations []models.Conversation) error {
 	if !IsStorageCacheEnabled() || len(conversations) == 0 {
 		return nil
 	}

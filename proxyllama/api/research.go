@@ -36,7 +36,7 @@ func CreateResearchTask(c *fiber.Ctx) error {
 	}
 
 	// Start the research task
-	taskID, err := research.StartResearchTask(c.Context(), userID, req.Query, req.Model, conversationID)
+	taskID, err := research.StartResearchTask(c.UserContext(), userID, req.Query, req.Model, conversationID)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to start research task")
 	}
@@ -52,7 +52,7 @@ func CreateResearchTask(c *fiber.Ctx) error {
 func ListResearchTasks(c *fiber.Ctx) error {
 	userID := c.UserContext().Value(auth.UserIDKey).(string)
 
-	tasks, err := research.GetUserResearchTasks(c.Context(), userID)
+	tasks, err := research.GetUserResearchTasks(c.UserContext(), userID)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to get research tasks")
 	}
@@ -72,7 +72,7 @@ func GetResearchTask(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Task ID is required")
 	}
 
-	task, err := research.GetResearchTask(c.Context(), taskID)
+	task, err := research.GetResearchTask(c.UserContext(), taskID)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to get research task")
 	}
@@ -92,7 +92,7 @@ func CancelResearchTask(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Task ID is required")
 	}
 
-	if err := research.CancelResearchTask(c.Context(), taskID); err != nil {
+	if err := research.CancelResearchTask(c.UserContext(), taskID); err != nil {
 		return handleError(err, fiber.StatusInternalServerError, "Failed to cancel research task")
 	}
 

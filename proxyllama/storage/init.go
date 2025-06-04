@@ -306,7 +306,7 @@ func InitializeTables(ctx context.Context) error {
 	}
 
 	// Initialize memory schema
-	InitMemorySchema(ctx)
+	(&memoryStore{}).InitMemorySchema(ctx)
 
 	return nil
 }

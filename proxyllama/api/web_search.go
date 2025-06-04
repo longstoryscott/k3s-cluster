@@ -67,7 +67,7 @@ func PerformWebSearch(c *fiber.Ctx) error {
 	})
 
 	// Perform the web search
-	results, err := recherche.QuickSearch(c.Context(), req.Query, maxResults, includeContent)
+	results, err := recherche.QuickSearch(c.UserContext(), req.Query, maxResults, includeContent)
 	if err != nil {
 		return handleError(err, fiber.StatusInternalServerError, fmt.Sprintf("Web search failed: %v", err))
 	}
