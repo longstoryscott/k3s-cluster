@@ -152,7 +152,7 @@ export const useChatOperations = (state: ChatState, actions: ChatActions) => {
       actions.addMessage(messageWithStatus);
 
       // Stream the assistant's response
-      for await (const chunk of chat(getToken(auth.user), state.messages, message)) {
+      for await (const chunk of chat(getToken(auth.user), message)) {
         // Use functional update to ensure we're always working with the latest state
         actions.setResponse(r => r + chunk);
       }

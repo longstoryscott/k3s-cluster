@@ -33,8 +33,8 @@ func (cc *ConversationContext) SummarizeMessages(ctx context.Context) (models.Su
 		return models.Summary{}, nil // Not enough unsummarized messages to summarize
 	}
 
-	// Calculate how many messages to summarize (N/2)
-	messagesToSummarize := min(max(usrCfg.Summarization.MessagesBeforeSummary/2, 1), len(unsummarizedMessages))
+	// Summarize the oldest N messages
+	messagesToSummarize := unsummarizedMessages[:usrCfg.Summarization.MessagesBeforeSummary]
 
 	// Extract the oldest N/2 unsummarized messages to summarize
 	var messagesToSummarizeContent []models.Message
@@ -113,7 +113,8 @@ func (cc *ConversationContext) getUnsummarizedMessages(ctx context.Context) ([]m
 	var unsummarizedMessages []models.Message
 	var unsummarizedIDs []int
 	for _, msg := range cc.Messages {
-		if !summarizedMessageIDs[msg.ID] {
+		if !summarizedMessageIDs[msg.ID] && msg.ID > 0 {
+			// Only include messages that have a valid ID and haven't been summarized
 			unsummarizedMessages = append(unsummarizedMessages, msg)
 			unsummarizedIDs = append(unsummarizedIDs, msg.ID)
 		}

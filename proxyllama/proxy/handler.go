@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"proxyllama/config"
 	"proxyllama/models"
 	"proxyllama/util"
@@ -65,14 +64,6 @@ func GetProxyHandler[T models.OllamaResponse](ctx context.Context, reqBody []byt
 
 	// Create a response content builder
 	var responseContent strings.Builder
-
-	util.LogDebug("Creating request to Ollama", logrus.Fields{
-		"url":     url,
-		"method":  method,
-		"stream":  stream,
-		"timeout": timeout,
-		"body":    string(reqBody),
-	})
 
 	// Create the request
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(reqBody))
@@ -141,8 +132,10 @@ func streamHandler[T models.OllamaResponse](w *bufio.Writer, resp *http.Response
 	go func() {
 		select {
 		case <-ctx.Done():
+			util.LogInfo("Context done, stopping streaming")
 			close(done)
 		case <-time.After(timeout): // Fallback timeout
+			util.LogInfo("Timeout reached, stopping streaming")
 			close(done)
 		}
 	}()
@@ -151,6 +144,7 @@ loopScan:
 	for scanner.Scan() {
 		select {
 		case <-done:
+			util.LogInfo("Stopping streaming due to context done or timeout")
 			break loopScan // Exit if context is done or timeout occurs
 		default:
 			// Continue processing
@@ -166,13 +160,6 @@ loopScan:
 		respObj.UnmarshalJSON(line)
 		content := respObj.GetChunkContent()
 		if content != "" {
-			if filename := os.Getenv("TEST_OUTPUT_FILE"); filename != "" {
-				f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-				if err == nil {
-					defer f.Close()
-					f.Write([]byte(content)) // or f.Write(res) for the full chunk
-				}
-			}
 			responseContent.WriteString(content)
 		}
 
@@ -180,6 +167,7 @@ loopScan:
 			// If proxyToClient is false, we don't want to write to the client
 			// but we still want to accumulate the response content
 			if respObj.IsDone() {
+				util.LogInfo("Streaming completed, but not proxying to client")
 				completed = true
 				break
 			}
@@ -197,6 +185,7 @@ loopScan:
 
 		// Check if this is the last chunk (done=true)
 		if respObj.IsDone() {
+			util.LogInfo("Streaming completed successfully")
 			completed = true
 			break
 		}

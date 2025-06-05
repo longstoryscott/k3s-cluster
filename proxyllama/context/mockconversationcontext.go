@@ -6,14 +6,14 @@ import (
 )
 
 var MockConversationContext = ConversationContext{
-	UserID:         "CgNsc20SBGxkYXA",
-	ConversationID: 0,
+	UserID:         "test_user",
+	ConversationID: 1,
 	Title:          "Test Conversation",
 	MasterSummary:  nil,
 	Summaries: []models.Summary{
 		{
 			CreatedAt:      time.Date(2023, 10, 01, 12, 00, 00, 0, time.UTC),
-			ConversationID: 0,
+			ConversationID: 1,
 			Content:        `by bundling the inference for both LLMs and image generation into one container (or sidecar) that requests two GPUs, you ensure that model splitting can occur across both devices. This approach meets your requirement while keeping the gRPC interface separate from the inference logic, just as before—but now with full multi-GPU utilization available in a single process.`,
 			SourceIDs:      []int{1, 2, 3},
 		},

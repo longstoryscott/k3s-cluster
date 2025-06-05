@@ -23,9 +23,9 @@ type Message struct {
 	Content        string    `json:"content"`
 	Images         []string  `json:"images,omitempty"`     // Optional images associated with the message
 	ToolCalls      []any     `json:"tool_calls,omitempty"` // Optional tool calls associated with the message
-	ID             int       `json:"-"`                    // Internal use only, not sent to LLM
-	CreatedAt      time.Time `json:"-"`                    // Timestamp of when the message was created
-	ConversationID int       `json:"-"`                    // ID of the conversation this message belongs to
+	ID             int       `json:"id"`
+	CreatedAt      time.Time `json:"createdAt"`      // Timestamp of when the message was created
+	ConversationID int       `json:"conversationId"` // ID of the conversation this message belongs to
 }
 
 // Summary represents a consolidated summary of messages or other summaries
@@ -44,6 +44,12 @@ type OllamaChatMessage struct {
 	Content   string   `json:"content"`
 	Images    []string `json:"images,omitempty"`     // Optional images associated with the message
 	ToolCalls []any    `json:"tool_calls,omitempty"` // Optional tool calls associated with the message
+}
+
+// ChatRequest represents a request from the UI
+type ChatRequest struct {
+	Content        string `json:"content"`        // message to send to the model, each message is a struct with role and content
+	ConversationId int    `json:"conversationId"` // ui sends camelCase
 }
 
 // OllamaChatReq represents a request to the Ollama API

@@ -50,7 +50,7 @@ func main() {
 	}
 
 	if err := storage.InitDB(psqlconn); err != nil {
-		util.HandleFatalError(err)
+		util.HandleFatalErrorAtCallLevel(err, 1)
 	}
 	util.LogInfo("Connected to PostgreSQL database", logrus.Fields{
 		"connection": psqlconn,

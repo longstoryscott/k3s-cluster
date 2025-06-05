@@ -32,10 +32,10 @@ var DefaultSummarizationProfile = models.ModelProfile{
 	Name:        "Summarization (Default)",
 	Type:        models.ModelProfileTypePrimarySummary,
 	Description: "Default profile for conversation summarization.",
-	ModelName:   "phi4-reasoning:plus",
+	ModelName:   "cogito:8b",
 	Parameters: models.ModelParameters{
-		NumCtx:        2048,
-		RepeatLastN:   64,
+		NumCtx:        10216,
+		RepeatLastN:   -1,
 		RepeatPenalty: 1.1,
 		Temperature:   0.3,
 		Seed:          0,

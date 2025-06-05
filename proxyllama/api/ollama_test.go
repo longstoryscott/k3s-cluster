@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"os"
-	"proxyllama/config"
 	"proxyllama/models"
 	"proxyllama/test"
 	"testing"
@@ -39,16 +38,9 @@ and I want the id column to be added (and incremented) on all existing rows.`
 
 var conversationId = 1
 
-var problemRequest = models.OllamaChatReq{
-	Messages: []models.OllamaChatMessage{
-		{
-			Role:    "user",
-			Content: problemRequestString,
-		},
-	},
-	Model:          &config.DefaultPrimaryProfile.ModelName,
-	Stream:         true,
-	ConversationId: &conversationId,
+var problemRequest = models.ChatRequest{
+	Content:        problemRequestString,
+	ConversationId: conversationId,
 }
 
 const TIMEOUT = 5 * time.Minute

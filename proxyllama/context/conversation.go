@@ -9,7 +9,6 @@ import (
 	"proxyllama/proxy"
 	"proxyllama/storage"
 	"proxyllama/util"
-	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -296,10 +295,15 @@ func (cc *ConversationContext) AddAssistantMessage(ctx context.Context, content 
 	return embeddings, nil
 }
 
-// ToJSON converts the conversation context to Ollama-compatible format
-func (cc *ConversationContext) ToJSON(req *models.OllamaChatReq) ([]byte, error) {
+// ChainMessages uses the conversation context to chain messages together
+// This prepares the request for Ollama by enhancing it with RAG, summaries, and recent messages
+// It returns the JSON-encoded request body for Ollama
+// and handles any errors that occur during the process.
+func (cc *ConversationContext) ChainMessages(req *models.OllamaChatReq) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+
+	req.Messages = make([]models.OllamaChatMessage, 0)
 
 	if err := cc.EnhanceRequestWithRAG(ctx, req); err != nil {
 		return nil, util.HandleError(fmt.Errorf("failed to enhance request with RAG: %w", err))
@@ -325,6 +329,7 @@ func (cc *ConversationContext) ToJSON(req *models.OllamaChatReq) ([]byte, error)
 	if err := cc.addRecentMessagesToReq(req); err != nil {
 		return nil, err
 	}
+	msgsInOrder := make([]string, 0)
 
 	// debug log the content of each message in the request
 	for i, msg := range req.Messages {
@@ -332,7 +337,15 @@ func (cc *ConversationContext) ToJSON(req *models.OllamaChatReq) ([]byte, error)
 			"index": i,
 			"role":  msg.Role,
 		})
+
+		msgsInOrder = append(msgsInOrder, msg.Role)
 	}
+
+	util.LogDebug("Added messages to request", logrus.Fields{
+		"count":    len(req.Messages),
+		"messages": msgsInOrder,
+	})
+
 	return json.Marshal(req)
 }
 
@@ -388,16 +401,13 @@ func (cc *ConversationContext) addRecentMessagesToReq(req *models.OllamaChatReq)
 	// Add regular messages (most recent based on configuration)
 	// Ensure messages are in chronological order (oldest first, newest last)
 	for i := startIndex; i < len(cc.Messages); i++ {
-		if slices.ContainsFunc(req.Messages, func(msg models.OllamaChatMessage) bool {
-			return msg.Content == cc.Messages[i].Content && msg.Role == cc.Messages[i].Role
-		}) {
-			util.LogDebug("Message already exists in request, skipping", logrus.Fields{
-				"content": cc.Messages[i].Content,
+		if cc.Messages[i].ID <= 0 {
+			util.LogWarning("Message ID is not set", logrus.Fields{
 				"role":    cc.Messages[i].Role,
+				"content": cc.Messages[i].Content,
 			})
-			continue // Skip if message already exists in request
+			continue
 		}
-
 		req.Messages = append(req.Messages, models.OllamaChatMessage{
 			Role:    cc.Messages[i].Role,
 			Content: cc.Messages[i].Content,

@@ -6,6 +6,7 @@ import (
 	"proxyllama/models"
 	"proxyllama/proxy"
 	"proxyllama/recherche"
+	"proxyllama/storage"
 	"proxyllama/util"
 	"sync"
 	"time"
@@ -55,23 +56,38 @@ func (cc *ConversationContext) generateSummarization(messages []models.Message, 
 }
 
 // PrepareOllamaRequest prepares the request for Ollama
-func (cc *ConversationContext) PrepareOllamaRequest(ctx context.Context, chatReq models.OllamaChatReq) ([]byte, error) {
-	if chatReq.Model == nil || *chatReq.Model == "" {
-		return nil, util.HandleError(errors.New("model name is required"))
-	}
-	// Get the user message from the request (last message from user)
-	var userMessage string
-	for i := len(chatReq.Messages) - 1; i >= 0; i-- {
-		if chatReq.Messages[i].Role == "user" {
-			userMessage = chatReq.Messages[i].Content
-			break
-		}
+func (cc *ConversationContext) PrepareOllamaRequest(ctx context.Context, message string) ([]byte, error) {
+	if message == "" {
+		return nil, util.HandleError(errors.New("message cannot be empty"))
 	}
 
-	embedding, err := cc.AddUserMessage(ctx, userMessage)
+	usrCfg, err := GetUserConfig(cc.UserID)
 	if err != nil {
 		return nil, util.HandleError(err)
 	}
+
+	profile, err := storage.ModelProfileStoreInstance.GetModelProfile(ctx, usrCfg.ModelProfiles.PrimaryProfileID)
+	if err != nil {
+		return nil, util.HandleError(err)
+	}
+	if profile == nil {
+		return nil, util.HandleError(errors.New("model profile not found"))
+	}
+
+	embedding, err := cc.AddUserMessage(ctx, message)
+	if err != nil {
+		return nil, util.HandleError(err)
+	}
+
+	ollamaReq := models.OllamaChatReq{
+		Messages:       []models.OllamaChatMessage{}, // Will be populated later
+		ConversationId: &cc.ConversationID,
+	}
+
+	// Always set streaming to true to prevent timeouts
+	ollamaReq.Stream = true
+	ollamaReq.Options = profile.Parameters.ToMap()
+	ollamaReq.Model = &profile.ModelName
 
 	var wg sync.WaitGroup
 
@@ -81,7 +97,7 @@ func (cc *ConversationContext) PrepareOllamaRequest(ctx context.Context, chatReq
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 		defer cancel()
-		results, err := recherche.ExtractUrlContentFromQuery(ctx, userMessage)
+		results, err := recherche.ExtractUrlContentFromQuery(ctx, message)
 		if err != nil {
 			util.LogWarning("Error extracting URL content", logrus.Fields{"error": err})
 			// Non-critical error, we can continue without URL content
@@ -95,7 +111,7 @@ func (cc *ConversationContext) PrepareOllamaRequest(ctx context.Context, chatReq
 	}(cc)
 
 	// Get the user's intent to determine if we should perform a web search or retrieve memories
-	intent, err := cc.DetectIntent(ctx, userMessage)
+	intent, err := cc.DetectIntent(ctx, message)
 	if err != nil {
 		util.LogWarning("Error detecting intent", logrus.Fields{"error": err})
 		// Non-critical error, we can continue without intent
@@ -112,7 +128,7 @@ func (cc *ConversationContext) PrepareOllamaRequest(ctx context.Context, chatReq
 					util.LogWarning("Error injecting web search results", logrus.Fields{"error": err})
 					// Non-critical error, we can continue without web search results
 				}
-			}(cc, userMessage)
+			}(cc, message)
 		}
 
 		if intent.Memory {
@@ -135,10 +151,10 @@ func (cc *ConversationContext) PrepareOllamaRequest(ctx context.Context, chatReq
 
 	// If embeddings are empty, log a warning and return an empty JSON object
 	if len(embedding) == 0 {
-		util.LogWarning("Empty embedding vector", logrus.Fields{"userMessage": userMessage})
+		util.LogWarning("Empty embedding vector", logrus.Fields{"userMessage": message})
 		return []byte("{}"), nil
 	}
 
 	// Convert conversation context to Ollama format (includes summaries, memories, and web search results)
-	return cc.ToJSON(&chatReq)
+	return cc.ChainMessages(&ollamaReq)
 }

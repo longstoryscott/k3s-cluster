@@ -31,6 +31,28 @@ func HandleFatalError(err error, additionalFields ...logrus.Fields) {
 	panic(err) // Ensure we panic after logging
 }
 
+func HandleFatalErrorAtCallLevel(err error, lvl int, additionalFields ...logrus.Fields) {
+	if err == nil {
+		return
+	}
+
+	_, file, line, _ := runtime.Caller(lvl) // Get the caller of this function
+
+	// Create base fields
+	logFields := logrus.Fields{
+		"file": filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)),
+		"line": line,
+	}
+
+	// Merge any additional fields
+	if len(additionalFields) > 0 {
+		maps.Copy(logFields, additionalFields[0])
+	}
+
+	logrus.WithFields(logFields).Fatal(err)
+	panic(err) // Ensure we panic after logging
+}
+
 // handleError is a helper function that logs the error and returns a fiber error
 // to standardize error handling across API endpoints
 func HandleError(err error, additionalFields ...logrus.Fields) error {

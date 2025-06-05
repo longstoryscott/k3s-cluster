@@ -1,7 +1,6 @@
 package context
 
 import (
-	"context"
 	"encoding/json"
 	"proxyllama/config"
 	"proxyllama/models"
@@ -27,7 +26,7 @@ func Test_ToJSON(t *testing.T) {
 	}
 
 	// Convert to JSON
-	jsonData, err := MockConversationContext.ToJSON(&req)
+	jsonData, err := MockConversationContext.ChainMessages(&req)
 	if err != nil {
 		t.Fatalf("Failed to convert to JSON: %v", err)
 	}
@@ -112,39 +111,5 @@ func Test_ToJSON(t *testing.T) {
 	}
 	if req.Messages[0].Role != "system" {
 		t.Fatalf("Expected first message role to be 'system', got '%s'", req.Messages[0].Role)
-	}
-}
-
-func Test_PrepareOllamaRequest(t *testing.T) {
-	test.Init()
-	msgs := []models.OllamaChatMessage{}
-	for _, m := range MockConversationContext.Messages {
-		msgs = append(msgs, models.OllamaChatMessage{
-			Role:    m.Role,
-			Content: m.Content,
-		})
-	}
-	req := models.OllamaChatReq{
-		Messages: msgs,
-		Model:    &config.DefaultPrimaryProfile.ModelName,
-		Stream:   true,
-		Options:  config.DefaultPrimaryProfile.Parameters.ToMap(),
-	}
-
-	ollamaReqBody, err := MockConversationContext.PrepareOllamaRequest(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Failed to prepare Ollama request: %v", err)
-	}
-
-	if ollamaReqBody == nil {
-		t.Fatal("Expected non-nil Ollama request body")
-	}
-
-	var ollamaReq models.OllamaChatReq
-	if err := json.Unmarshal(ollamaReqBody, &ollamaReq); err != nil {
-		t.Fatalf("Failed to unmarshal Ollama request body: %v", err)
-	}
-	if ollamaReq.Model == nil || *ollamaReq.Model != config.DefaultPrimaryProfile.ModelName {
-		t.Fatalf("Expected model name '%s', got '%s'", config.DefaultPrimaryProfile.ModelName, *ollamaReq.Model)
 	}
 }

@@ -1,14 +1,11 @@
 import { gen, getHeaders, req } from "./base";
-import { ChatMessage, ChatUserMessage } from "./types";
+import { ChatUserMessage } from "./types";
 
-export async function* chat(accessToken: string, messages: ChatMessage[], message: ChatUserMessage) {
+export async function* chat(accessToken: string, message: ChatUserMessage) {
 
   try {
     const generator = gen({
-      body: JSON.stringify({
-        messages: [...messages, message],
-        conversationId: message.conversationId
-      }),
+      body: JSON.stringify(message),
       method: 'POST',
       headers: getHeaders(accessToken),
       path: 'api/chat'
