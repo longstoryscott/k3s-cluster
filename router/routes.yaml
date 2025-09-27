@@ -11,9 +11,12 @@ spec:
     - name: nextcloud
       port: 3000
       protocol: HTTP
-    - name: ollama
-      port: 11434
-      protocol: HTTP
+    # - name: ollama
+    #   port: 11434
+    #   protocol: HTTP
+    # - name: sd
+    #   port: 8000
+    #   protocol: HTTP
     - name: dex
       port: 9091
       protocol: HTTP
@@ -32,7 +35,7 @@ spec:
     - name: fnf
       protocol: HTTP
       port: 8082
-    - name: proxyllama
+    - name: maistro
       protocol: HTTP
       port: 8083
     - name: usrmgr
@@ -41,6 +44,15 @@ spec:
     - name: pgadmin
       port: 8084
       protocol: HTTP
+    # - name: inference
+    #   port: 50051
+    #   protocol: HTTP
+    - name: registry-ui
+      protocol: HTTP
+      port: 8085
+    - name: searxng
+      protocol: HTTP
+      port: 8086
 ---
 apiVersion: gateway.nginx.org/v1alpha1
 kind: ClientSettingsPolicy
@@ -73,63 +85,121 @@ spec:
         - name: nextcloud
           namespace: nextcloud
           port: 8080
---- # Ollama
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: ollama-route
-  namespace: nginx-gateway
-spec:
-  parentRefs:
-    - name: lsm-gateway
-      sectionName: ollama
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      filters:
-        - type: ExtensionRef
-          extensionRef:
-            group: gateway.nginx.org
-            kind: SnippetsFilter
-            name: ollama-timeout-snippet
-      backendRefs:
-        - name: ollama
-          namespace: ollama
-          port: 11434
----
-apiVersion: gateway.nginx.org/v1alpha1
-kind: ClientSettingsPolicy
-metadata:
-  name: ollama-timeout-policy
-  namespace: nginx-gateway
-spec:
-  targetRef:
-    group: gateway.networking.k8s.io
-    kind: HTTPRoute
-    name: ollama-route
-  body:
-    timeout: "0s"
-  keepAlive:
-    time: 9999s
-    timeout:
-      server: 9099s
-      header: 9999s
----
-apiVersion: gateway.nginx.org/v1alpha1
-kind: SnippetsFilter
-metadata:
-  name: ollama-timeout-snippet
-  namespace: nginx-gateway
-spec:
-  snippets:
-    - context: http
-      value: |
-        proxy_read_timeout 1800;
-        proxy_connect_timeout 1800;
-        proxy_send_timeout 1800;
-        send_timeout 1800;
+# --- # Ollama
+# apiVersion: gateway.networking.k8s.io/v1
+# kind: HTTPRoute
+# metadata:
+#   name: ollama-route
+#   namespace: nginx-gateway
+# spec:
+#   parentRefs:
+#     - name: lsm-gateway
+#       sectionName: ollama
+#   rules:
+#     - matches:
+#         - path:
+#             type: PathPrefix
+#             value: /
+#       filters:
+#         - type: ExtensionRef
+#           extensionRef:
+#             group: gateway.nginx.org
+#             kind: SnippetsFilter
+#             name: ollama-timeout-snippet
+#       backendRefs:
+#         - name: ollama
+#           namespace: ollama
+#           port: 11434
+# ---
+# apiVersion: gateway.nginx.org/v1alpha1
+# kind: ClientSettingsPolicy
+# metadata:
+#   name: ollama-timeout-policy
+#   namespace: nginx-gateway
+# spec:
+#   targetRef:
+#     group: gateway.networking.k8s.io
+#     kind: HTTPRoute
+#     name: ollama-route
+#   body:
+#     timeout: "0s"
+#   keepAlive:
+#     time: 9999s
+#     timeout:
+#       server: 9099s
+#       header: 9999s
+# ---
+# apiVersion: gateway.nginx.org/v1alpha1
+# kind: SnippetsFilter
+# metadata:
+#   name: ollama-timeout-snippet
+#   namespace: nginx-gateway
+# spec:
+#   snippets:
+#     - context: http
+#       value: |
+#         proxy_read_timeout 1800;
+#         proxy_connect_timeout 1800;
+#         proxy_send_timeout 1800;
+#         send_timeout 1800;
+
+# --- # stable-diffusion
+# apiVersion: gateway.networking.k8s.io/v1
+# kind: HTTPRoute
+# metadata:
+#   name: sd-route
+#   namespace: nginx-gateway
+# spec:
+#   parentRefs:
+#     - name: lsm-gateway
+#       sectionName: sd
+#   rules:
+#     - matches:
+#         - path:
+#             type: PathPrefix
+#             value: /
+#       # filters:
+#       #   - type: ExtensionRef
+#       #     extensionRef:
+#       #       group: gateway.nginx.org
+#       #       kind: SnippetsFilter
+#       #       name: sd-timeout-snippet
+#       backendRefs:
+#         - name: ollama
+#           namespace: ollama
+#           port: 8000
+# ---
+# apiVersion: gateway.nginx.org/v1alpha1
+# kind: ClientSettingsPolicy
+# metadata:
+#   name: sd-timeout-policy
+#   namespace: nginx-gateway
+# spec:
+#   targetRef:
+#     group: gateway.networking.k8s.io
+#     kind: HTTPRoute
+#     name: sd-route
+#   body:
+#     timeout: "0s"
+#   keepAlive:
+#     time: 9999s
+#     timeout:
+#       server: 9099s
+#       header: 9999s
+# ---
+# apiVersion: gateway.nginx.org/v1alpha1
+# kind: SnippetsFilter
+# metadata:
+#   name: sd-timeout-snippet
+#   namespace: nginx-gateway
+# spec:
+#   snippets:
+#     - context: http
+#       value: |
+#         proxy_read_timeout 1800;
+#         proxy_connect_timeout 1800;
+#         proxy_send_timeout 1800;
+#         send_timeout 1800;
 --- # dex
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -305,27 +375,80 @@ spec:
           namespace: registry
           port: 5000
           kind: Service
---- # Proxyllama
+--- # maistro
+# apiVersion: gateway.nginx.org/v1alpha1
+# kind: ClientSettingsPolicy
+# metadata:
+#   name: maistro-websocket-policy
+#   namespace: nginx-gateway
+# spec:
+#   targetRef:
+#     group: gateway.networking.k8s.io
+#     kind: HTTPRoute
+#     name: maistro-route
+#   body:
+#     timeout: "0s"
+#   keepAlive:
+#     time: 3600s
+#     timeout:
+#       server: 3600s
+#       header: 3600s
+# ---
+# apiVersion: gateway.nginx.org/v1alpha1
+# kind: SnippetsFilter
+# metadata:
+#   name: maistro-websocket-snippet
+#   namespace: nginx-gateway
+# spec:
+#   snippets:
+#     - context: http
+#       value: |
+#         proxy_http_version 1.1;
+#         proxy_set_header Upgrade $http_upgrade;
+#         proxy_set_header Connection "upgrade";
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Real-IP $remote_addr;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#         proxy_read_timeout 300s;
+#         proxy_send_timeout 300s;
+#         proxy_buffering off;
+# ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: proxyllama-route
+  name: maistro-route
   namespace: nginx-gateway
 spec:
   parentRefs:
     - name: lsm-gateway
-      sectionName: proxyllama
-  hostnames:
-    - "ai.longstorymedia.com"
-    - "localhost"
+      sectionName: maistro
+  # hostnames:
+  #   - "ai.longstorymedia.com"
+  #   - "localhost"
   rules:
+    # - matches:
+    #     - path:
+    #         type: PathPrefix
+    #         value: /ws
+    #   filters:
+    #     - type: ExtensionRef
+    #       extensionRef:
+    #         group: gateway.nginx.org
+    #         kind: SnippetsFilter
+    #         name: maistro-websocket-snippet
+    #   backendRefs:
+    #     - name: maistro
+    #       namespace: maistro
+    #       port: 80
+    #       kind: Service
     - matches:
         - path:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: proxyllama
-          namespace: proxyllama
+        - name: maistro
+          namespace: maistro
           port: 80
           kind: Service
 --- # pgAdmin
@@ -347,3 +470,56 @@ spec:
         - name: pgadmin
           namespace: psql
           port: 8084
+# --- # Inference
+# apiVersion: gateway.networking.k8s.io/v1
+# kind: GRPCRoute
+# metadata:
+#   name: inference-route
+#   namespace: nginx-gateway
+# spec:
+#   parentRefs:
+#     - name: lsm-gateway
+#       sectionName: inference
+#   rules:
+#     - backendRefs:
+#         - name: inference
+#           namespace: ollama
+#           port: 50051
+--- # Registry UI
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: registry-ui-route
+  namespace: nginx-gateway
+spec:
+  parentRefs:
+    - name: lsm-gateway
+      sectionName: registry-ui
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: registry-ui
+          namespace: registry
+          port: 80
+--- # SearxNG
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: searxng-route
+  namespace: nginx-gateway
+spec:
+  parentRefs:
+    - name: lsm-gateway
+      sectionName: searxng
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: searxng
+          namespace: searxng
+          port: 8080

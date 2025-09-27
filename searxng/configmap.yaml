@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: searxng-config
+  namespace: searxng
+data:
+  settings.yml: |
+    general:
+      debug: false
+      instance_name: "SearXNG K3s"
+      privacypolicy_url: false
+      donation_url: false
+      contact_url: false
+      enable_metrics: true
+
+    search:
+      safe_search: 0
+      autocomplete: ""
+      default_lang: ""
+      ban_time_on_fail: 300
+      max_ban_time_on_fail: 3600
+      formats: [html, json]
+
+    default_doi_resolver: 'oadoi.org'
+      
+
+
+    server:
+      secret_key: "${SEARXNG_SECRET_KEY}"
+      limiter: false
+      image_proxy: true
+      method: "GET"
+      base_url: "http://searxng.searxng.svc.cluster.local:8080/"
+      json_available: true
+
+    ui:
+      static_use_hash: false
+      default_theme: simple
+      theme_args:
+        simple_style: auto
+
+    redis:
+      url: "redis://redis.redis.svc.cluster.local:6379/0"
+
+    outgoing:
+      request_timeout: 10.0
+      useragent_suffix: " (K3s Cluster Bot)"
+      max_request_timeout: 30.0
+      pool_connections: 50
+      pool_maxsize: 20
+      proxy_url: false
+      using_tor_proxy: false
+      # proxies:
+      #   http: false
+      #   https: false
+      source_ips: []
+      retries: 2
+      enable_http2: true
+      
+    categories_as_tabs:
+      general:
+      images:
+      videos:
+      news:
+      map:
+      music:
+      it:
+      science:
+      files:
+      social media:
+
+    engines:
+      - name: duckduckgo
+        engine: duckduckgo
+        shortcut: ddg
+        categories: [general, images, videos, news, map]
+        disabled: false
+        
+      - name: startpage
+        engine: startpage
+        shortcut: sp
+        categories: general
+        disabled: false
+        
+      - name: bing
+        engine: bing
+        shortcut: bi
+        categories: [general, images, videos, news]
+        disabled: false
+        
+      - name: wikipedia
+        engine: wikipedia
+        shortcut: wp
+        categories: general
+        disabled: false

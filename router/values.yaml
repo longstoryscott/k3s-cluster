@@ -143,10 +143,14 @@ service:
       targetPort: 3000
       protocol: TCP
       name: nextcloud
-    - port: 11434
-      targetPort: 11434
-      protocol: TCP
-      name: ollama
+    # - port: 11434
+    #   targetPort: 11434
+    #   protocol: TCP
+    #   name: ollama
+    # - port: 8000
+    #   targetPort: 8000
+    #   protocol: TCP
+    #   name: sd
     - port: 9091
       targetPort: 9091
       protocol: TCP
@@ -174,7 +178,7 @@ service:
     - port: 8083
       targetPort: 8083
       protocol: TCP
-      name: proxyllama
+      name: maistro
     - port: 3333
       targetPort: 3333
       protocol: TCP
@@ -183,6 +187,18 @@ service:
       targetPort: 8084
       protocol: TCP
       name: pgadmin
+    - port: 8085
+      targetPort: 8085
+      protocol: TCP
+      name: registry-ui
+    - port: 8086
+      targetPort: 8086
+      protocol: TCP
+      name: searxng
+    # - port: 50051
+    #   targetPort: 50051
+    #   protocol: TCP
+    #   name: inference
 
 metrics:
   ## Enable exposing metrics in the Prometheus format.

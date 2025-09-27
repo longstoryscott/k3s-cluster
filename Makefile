@@ -2,16 +2,17 @@ SCRIPTS = $(CURDIR)/scripts
 REGISTRY = $(CURDIR)/registry
 ROUTER = $(CURDIR)/router
 REDIS = $(CURDIR)/redis
+RABBITMQ = $(CURDIR)/rabbitmq
 NEXTCLOUD = $(CURDIR)/nc
 POSTGRESQL = $(CURDIR)/psql
 MYSQL = $(CURDIR)/mysql
 FNF = $(CURDIR)/fnf
 OLLAMA = $(CURDIR)/ollama
 AUTH = $(CURDIR)/auth
-PROXYLLAMA = $(CURDIR)/proxyllama
 MONITORING = $(CURDIR)/monitoring
 NVIDIA = $(CURDIR)/nvidia
 AILAB = $(CURDIR)/ls-ai-ui
+SEARXNG = $(CURDIR)/searxng
 
 export HELM_KUBECONTEXT=lsnet
 export NODES=(lsnode-0 lsnode-1 lsnode-2 lsnode-3)
@@ -29,13 +30,13 @@ update-workers: ex
 	cd $(SCRIPTS) && bash update-workers.sh && cd ..
 
 ex:
-	for f in $(SCRIPTS)/*.sh $(ROUTER)/*.sh $(REGISTRY)/*.sh $(NEXTCLOUD)/*.sh $(FNF)/*.sh $(MYSQL)/*.sh $(AUTH)/*sh $(PROXYLLAMA)/*sh $(MONITORING)/*.sh; do chmod +x "$$f"; done;
+	for f in $(SCRIPTS)/*.sh $(ROUTER)/*.sh $(REGISTRY)/*.sh $(NEXTCLOUD)/*.sh $(FNF)/*.sh $(MYSQL)/*.sh $(AUTH)/*sh $(MONITORING)/*.sh $(RABBITMQ)/*.sh $(SEARXNG)/*.sh; do chmod +x "$$f"; done;
 
 auth: ex
 	$(AUTH)/install.sh $(AUTH)
 
 registry:
-	$(REGISTRY)/registry-mgmt.sh install
+	$(REGISTRY)/registry-mgmt.sh install-simple
 
 registry-help:
 	$(REGISTRY)/registry-mgmt.sh
@@ -73,6 +74,9 @@ ollama:
 redis:
 	$(REDIS)/install.sh $(REDIS)
 
+rabbitmq:
+	$(RABBITMQ)/install.sh $(RABBITMQ)
+
 proxyllama:
 	$(PROXYLLAMA)/install.sh $(PROXYLLAMA)
 
@@ -104,4 +108,7 @@ registry-simple: ex
 	$(REGISTRY)/registry-mgmt.sh install-simple
 	$(REGISTRY)/registry-mgmt.sh configure-docker-simple
 
-.PHONY: router ex ollama psql mysql proxyllama nc monitoring fnf registry redis auth nvidia
+searxng:
+	$(SEARXNG)/install.sh $(SEARXNG)
+
+.PHONY: router ex ollama psql mysql proxyllama nc monitoring fnf registry redis rabbitmq auth nvidia searxng

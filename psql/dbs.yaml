@@ -26,12 +26,15 @@ data:
     psql -v ON_ERROR_STOP=0 --username "lsm" --dbname "postgres" <<-EOSQL
       SELECT 'CREATE DATABASE ollama' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'ollama') \gexec
       SELECT 'CREATE DATABASE nextcloud' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'nextcloud') \gexec
+      SELECT 'CREATE DATABASE llmmll' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'llmmll') \gexec
     EOSQL
 
     # Add TimescaleDB extension to required databases
     echo "Creating TimescaleDB extension in ollama database..."
     psql -v ON_ERROR_STOP=0 --username "lsm" --dbname "ollama" -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
     psql -v ON_ERROR_STOP=0 --username "lsm" --dbname "ollama" -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
+    psql -v ON_ERROR_STOP=0 --username "lsm" --dbname "llmmll" -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+    psql -v ON_ERROR_STOP=0 --username "lsm" --dbname "llmmll" -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
 
     # List all databases to confirm
     echo "Listing all databases:"

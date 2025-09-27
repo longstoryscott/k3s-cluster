@@ -76,7 +76,7 @@ spec:
                   name: secrets
                   key: psqlpw
             - name: POSTGRES_MULTIPLE_DATABASES
-              value: "ollama,nextcloud"
+              value: "ollama,nextcloud,llmmll"
             - name: PGROOT
               value: /home/postgres
             - name: PGDATA

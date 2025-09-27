@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-# Simple Registry Management Script (HTTP only)
+# Simple Registry Management Script (HTTP only) with UI support
 
 REGISTRY_HOME="${HOME}/.registry"
 AUTH_DIR="${REGISTRY_HOME}/auth"
@@ -11,28 +11,36 @@ DOCKER_CONFIG_DIR="${HOME}/.docker"
 DOCKER_CONFIG_FILE="${DOCKER_CONFIG_DIR}/daemon.json"
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}' 2>/dev/null || echo "127.0.0.1")
 REGISTRY_PORT="31500"
+UI_PORT="31501"
 REGISTRY_DNS="registry.local"
 REGISTRY_URL="${NODE_IP}:${REGISTRY_PORT}"
+UI_URL="${NODE_IP}:${UI_PORT}"
 
 function print_usage() {
   cat <<EOF
-Simple Registry Management Utility (HTTP only)
+Simple Registry Management Utility (HTTP only) with UI support
 
 Usage:
   ./registry-mgmt.sh [command]
 
 Available Commands:
   install-simple                     - Install registry with simplified settings (HTTP, no TLS)
+  install-ui                         - Install the registry UI
+  install-all                        - Install both registry and UI
   configure-docker-simple            - Configure Docker for simple HTTP registry
   add-user    <username> <password>  - Add a new user to the registry
   del-user    <username>             - Delete a user from the registry
   change-pw   <username> <password>  - Change a user's password
   list-users                         - List all users in the registry
   restart                            - Restart the registry pod
+  restart-ui                         - Restart the registry UI pod
+  status                             - Show registry and UI status
+  urls                               - Show registry and UI URLs
 
 Examples:
-  ./registry-mgmt.sh install-simple
+  ./registry-mgmt.sh install-all
   ./registry-mgmt.sh add-user developer password123
+  ./registry-mgmt.sh status
 EOF
 }
 
@@ -61,6 +69,11 @@ function install_simple() {
     -n registry \
     --from-file="${HTPASSWD_FILE}" \
     --dry-run=client -o yaml | kubectl apply -f -
+  AUTH_HEADER=$(echo -n "${REGISTRY_USER}:${REGISTRY_PW}" | base64)
+  kubectl create secret generic registry-ui-authheader \
+    -n registry \
+    --from-literal=authheader="Basic ${AUTH_HEADER}" \
+    --dry-run=client -o yaml | kubectl apply -f -
   # Use the checked-in deployment.yaml instead of a temp file
   kubectl apply -f "$(dirname "$0")/deployment.yaml" -n registry
   kubectl apply -f "$(dirname "$0")/service.yaml" -n registry
@@ -73,6 +86,29 @@ function install_simple() {
   echo
   echo "You may need to run:"
   echo "  $0 configure-docker-simple  # To configure Docker for this simple registry"
+}
+
+function install_ui() {
+  echo "Installing Docker Registry UI..."
+  kubectl create namespace registry || true
+  
+  # Apply the UI deployment and service
+  kubectl apply -f "$(dirname "$0")/registry-ui-deployment.yaml" -n registry
+  kubectl apply -f "$(dirname "$0")/registry-ui-service.yaml" -n registry
+  
+  echo "Registry UI deployment complete!"
+  echo "UI will be accessible at: http://${UI_URL}"
+  echo
+  echo "Note: The UI connects to your registry at: http://registry.registry.svc.cluster.local:5000"
+  echo "Make sure your registry is running before using the UI."
+}
+
+function install_all() {
+  install_simple
+  echo
+  install_ui
+  echo
+  show_urls
 }
 
 function configure_docker_simple() {
@@ -183,11 +219,54 @@ function restart_registry_pod() {
   fi
 }
 
+function restart_ui_pod() {
+  UI_POD=$(kubectl get pods -n registry -l app=registry-ui -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  if [ -n "${UI_POD}" ]; then
+    echo "Restarting registry UI pod..."
+    kubectl delete pod "${UI_POD}" -n registry
+  else
+    echo "Registry UI pod not found. Is the UI deployed?"
+  fi
+}
+
+function show_status() {
+  echo "=== Registry Status ==="
+  kubectl get pods -n registry -l app=registry || echo "Registry not found"
+  echo
+  echo "=== Registry UI Status ==="
+  kubectl get pods -n registry -l app=registry-ui || echo "Registry UI not found"
+  echo
+  echo "=== Services ==="
+  kubectl get svc -n registry || echo "No services found"
+}
+
+function show_urls() {
+  echo "=== Access URLs ==="
+  echo "Registry: http://${REGISTRY_URL}"
+  echo "Registry UI: http://${UI_URL}"
+  echo
+  echo "=== Credentials ==="
+  USER_SECRET_FILE="${SECRETS_DIR}/registryuser"
+  PW_SECRET_FILE="${SECRETS_DIR}/registrypw"
+  if [[ -f "$USER_SECRET_FILE" && -f "$PW_SECRET_FILE" ]]; then
+    echo "Username: $(cat "$USER_SECRET_FILE")"
+    echo "Password: $(cat "$PW_SECRET_FILE")"
+  else
+    echo "No default credentials found. Use 'list-users' to see available users."
+  fi
+}
+
 init_directories
 
 case "$1" in
 install-simple)
   install_simple
+  ;;
+install-ui)
+  install_ui
+  ;;
+install-all)
+  install_all
   ;;
 configure-docker-simple)
   configure_docker_simple
@@ -206,6 +285,15 @@ list-users)
   ;;
 restart)
   restart_registry_pod
+  ;;
+restart-ui)
+  restart_ui_pod
+  ;;
+status)
+  show_status
+  ;;
+urls)
+  show_urls
   ;;
 *)
   print_usage

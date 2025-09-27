@@ -15,7 +15,11 @@ spec:
     app.kubernetes.io/instance: ollama
     app.kubernetes.io/component: app
   ports:
-    - name: http
+    - name: ollama
       port: 11434
       targetPort: 11434
+      protocol: TCP
+    - name: sd
+      port: 8000
+      targetPort: 8000
       protocol: TCP

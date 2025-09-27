@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry-config-updater
+  namespace: registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: registry-config-updater
+  template:
+    metadata:
+      labels:
+        app: registry-config-updater
+    spec:
+      serviceAccountName: registry
+      containers:
+        - name: registry-config-updater
+          image: bitnami/kubectl:latest
+          resources:
+            limits:
+              cpu: 200m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          command:
+            - "/bin/bash"
+            - "-c"
+            - |
+              kubectl apply -f /config/registry-config.yaml
+              echo "Restarting registry deployment to apply new configuration..."
+              kubectl rollout restart deployment/registry -n registry
+              echo "Waiting for registry deployment to complete restart..."
+              kubectl rollout status deployment/registry -n registry --timeout=90s
+              echo "Registry configuration updated successfully."
+              sleep infinity
+          volumeMounts:
+            - name: config-volume
+              mountPath: /config
+      volumes:
+        - name: config-volume
+          configMap:
+            name: registry-config-updater
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: registry-config-updater
+  namespace: registry
+data:
+  registry-config.yaml: |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: registry-config
+      namespace: registry
+    data:
+      config.yml: |
+        version: 0.1
+        log:
+          fields:
+            service: registry
+        storage:
+          delete:
+            enabled: true
+          cache:
+            blobdescriptor: inmemory
+          filesystem:
+            rootdirectory: /var/lib/registry
+        auth:
+          htpasswd:
+            realm: Registry
+            path: /auth/htpasswd
+        http:
+          addr: :5000
+          secret: mysecret
+          debug:
+            prometheus:
+              enabled: true
+              path: /metrics
+          headers:
+            X-Content-Type-Options: [nosniff]
+            Access-Control-Allow-Origin: ['*']
+            Access-Control-Allow-Methods: ['HEAD', 'GET', 'OPTIONS', 'DELETE']
+            Access-Control-Allow-Headers: ['Authorization', 'Accept', 'Cache-Control']
+            Access-Control-Max-Age: [1728000]
+            Access-Control-Allow-Credentials: [true]
+            Access-Control-Expose-Headers: ['Docker-Content-Digest']

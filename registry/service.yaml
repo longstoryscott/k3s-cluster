@@ -15,3 +15,21 @@ spec:
       nodePort: 31500
   type: NodePort
   publishNotReadyAddresses: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry-ui
+  namespace: registry
+  labels:
+    app: registry-ui
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      nodePort: 31501
+      protocol: TCP
+  selector:
+    app: registry-ui

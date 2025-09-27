@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: pgadmin
-          image: dpage/pgadmin4:9.4
+          image: dpage/pgadmin4:9.7
           env:
             - name: PGADMIN_DEFAULT_EMAIL
               value: "longstoryscott@gmail.com"
