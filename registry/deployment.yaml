@@ -17,8 +17,6 @@ spec:
     spec:
       serviceAccountName: registry
       automountServiceAccountToken: false
-      hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: registry
           image: registry:2
@@ -113,7 +111,7 @@ spec:
               value: "Private Registry UI"
             - name: DELETE_IMAGES
               value: "true"
-            - name: NGINX_PROXY_PASS_URL
+            - name: REGISTRY_URL
               value: "http://registry.registry.svc.cluster.local:5000"
             - name: PULL_URL
               value: "192.168.0.71:31500"

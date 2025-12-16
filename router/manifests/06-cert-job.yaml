@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  labels:
+    app.kubernetes.io/instance: nginx-gateway
+    app.kubernetes.io/name: nginx-gateway
+    app.kubernetes.io/version: 2.1.4
+  name: nginx-gateway-cert-generator
+  namespace: nginx-gateway
+spec:
+  template:
+    metadata:
+      annotations: {}
+    spec:
+      automountServiceAccountToken: true
+      containers:
+        - name: cert-generator
+          image: ghcr.io/nginx/nginx-gateway-fabric:2.1.4
+          imagePullPolicy: IfNotPresent
+          args:
+            - generate-certs
+            - --service=nginx-gateway
+            - --cluster-domain=cluster.local
+            - --server-tls-secret=server-tls
+            - --agent-tls-secret=agent-tls
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsGroup: 1001
+            runAsUser: 101
+            seccompProfile:
+              type: RuntimeDefault
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 1001
+        runAsNonRoot: true
+      serviceAccountName: nginx-gateway-cert-generator
+  ttlSecondsAfterFinished: 30

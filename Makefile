@@ -13,6 +13,8 @@ MONITORING = $(CURDIR)/monitoring
 NVIDIA = $(CURDIR)/nvidia
 AILAB = $(CURDIR)/ls-ai-ui
 SEARXNG = $(CURDIR)/searxng
+GAMING_DESKTOP = $(CURDIR)/gaming-desktop
+STEAM = $(CURDIR)/steam
 
 export HELM_KUBECONTEXT=lsnet
 export NODES=(lsnode-0 lsnode-1 lsnode-2 lsnode-3)
@@ -30,7 +32,7 @@ update-workers: ex
 	cd $(SCRIPTS) && bash update-workers.sh && cd ..
 
 ex:
-	for f in $(SCRIPTS)/*.sh $(ROUTER)/*.sh $(REGISTRY)/*.sh $(NEXTCLOUD)/*.sh $(FNF)/*.sh $(MYSQL)/*.sh $(AUTH)/*sh $(MONITORING)/*.sh $(RABBITMQ)/*.sh $(SEARXNG)/*.sh; do chmod +x "$$f"; done;
+	for f in $(SCRIPTS)/*.sh $(ROUTER)/*.sh $(REGISTRY)/*.sh $(NEXTCLOUD)/*.sh $(FNF)/*.sh $(MYSQL)/*.sh $(AUTH)/*sh $(MONITORING)/*.sh $(RABBITMQ)/*.sh $(SEARXNG)/*.sh $(GAMING_DESKTOP)/*.sh $(STEAM)/*.sh; do chmod +x "$$f"; done;
 
 auth: ex
 	$(AUTH)/install.sh $(AUTH)
@@ -54,7 +56,7 @@ docker-login:
 	REGISTRY_USER=$$(cat $(CURDIR)/registry/.secrets/registryuser) && REGISTRY_PW=$$(cat $(CURDIR)/registry/.secrets/registrypw) && echo $$REGISTRY_PW | docker login http://registry.local:31500 -u $$REGISTRY_USER --password-stdin
 
 router: ex
-	$(ROUTER)/install.sh $(ROUTER)
+	$(ROUTER)/install.sh
 
 psql:
 	$(POSTGRESQL)/install.sh $(POSTGRESQL)
@@ -111,4 +113,16 @@ registry-simple: ex
 searxng:
 	$(SEARXNG)/install.sh $(SEARXNG)
 
-.PHONY: router ex ollama psql mysql proxyllama nc monitoring fnf registry redis rabbitmq auth nvidia searxng
+gaming-desktop: ex
+	$(GAMING_DESKTOP)/install.sh $(GAMING_DESKTOP)
+
+gaming-desktop-build:
+	$(GAMING_DESKTOP)/build-push.sh
+
+gaming-desktop-remote:
+	$(GAMING_DESKTOP)/setup-remote-build.sh
+
+steam: ex
+	$(STEAM)/deploy.sh
+
+.PHONY: router ex ollama psql mysql proxyllama nc monitoring fnf registry redis rabbitmq auth nvidia searxng gaming-desktop gaming-desktop-build gaming-desktop-remote steam

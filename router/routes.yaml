@@ -14,7 +14,7 @@ spec:
     # - name: ollama
     #   port: 11434
     #   protocol: HTTP
-    # - name: sd
+    # - name: llmmllab  # Removed - conflicts with ollama LoadBalancer port 8000
     #   port: 8000
     #   protocol: HTTP
     - name: dex
@@ -35,9 +35,9 @@ spec:
     - name: fnf
       protocol: HTTP
       port: 8082
-    - name: maistro
-      protocol: HTTP
-      port: 8083
+    # - name: maistro
+    #   protocol: HTTP
+    #   port: 8083
     - name: usrmgr
       protocol: HTTP
       port: 3333
@@ -53,6 +53,9 @@ spec:
     - name: searxng
       protocol: HTTP
       port: 8086
+    - name: steam
+      protocol: HTTP
+      port: 8087
 ---
 apiVersion: gateway.nginx.org/v1alpha1
 kind: ClientSettingsPolicy
@@ -143,16 +146,17 @@ spec:
 #         proxy_send_timeout 1800;
 #         send_timeout 1800;
 
+# Removed llmmllab-route - conflicts with ollama LoadBalancer port 8000
 # --- # stable-diffusion
 # apiVersion: gateway.networking.k8s.io/v1
 # kind: HTTPRoute
 # metadata:
-#   name: sd-route
+#   name: llmmllab-route
 #   namespace: nginx-gateway
 # spec:
 #   parentRefs:
 #     - name: lsm-gateway
-#       sectionName: sd
+#       sectionName: llmmllab
 #   rules:
 #     - matches:
 #         - path:
@@ -200,6 +204,24 @@ spec:
 #         proxy_connect_timeout 1800;
 #         proxy_send_timeout 1800;
 #         send_timeout 1800;
+--- # dex timeout policy
+apiVersion: gateway.nginx.org/v1alpha1
+kind: ClientSettingsPolicy
+metadata:
+  name: auth-timeout-policy
+  namespace: nginx-gateway
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: dex-route
+  body:
+    timeout: "300s"
+  keepAlive:
+    time: 300s
+    timeout:
+      server: 300s
+      header: 300s
 --- # dex
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -239,6 +261,24 @@ spec:
                 value: "GET, POST, OPTIONS"
               - name: Access-Control-Allow-Headers
                 value: "Content-Type, Authorization"
+--- # usrmgr timeout policy
+apiVersion: gateway.nginx.org/v1alpha1
+kind: ClientSettingsPolicy
+metadata:
+  name: usrmgr-timeout-policy
+  namespace: nginx-gateway
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: usrmgr-route
+  body:
+    timeout: "300s"
+  keepAlive:
+    time: 300s
+    timeout:
+      server: 300s
+      header: 300s
 --- # usrmgr
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -522,4 +562,25 @@ spec:
       backendRefs:
         - name: searxng
           namespace: searxng
+          port: 8080
+--- # Steam
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: steam-route
+  namespace: nginx-gateway
+  annotations:
+    nginx.org/websocket-services: "selkies-desktop-official"
+spec:
+  parentRefs:
+    - name: lsm-gateway
+      sectionName: steam
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: selkies-desktop-official
+          namespace: steam
           port: 8080

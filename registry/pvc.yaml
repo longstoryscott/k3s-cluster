@@ -7,7 +7,7 @@ metadata:
     app: registry
 spec:
   capacity:
-    storage: 50Gi
+    storage: 200Gi
   accessModes:
     - ReadWriteOnce
   persistentVolumeReclaimPolicy: Delete
@@ -26,4 +26,4 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 50Gi
+      storage: 200Gi

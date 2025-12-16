@@ -211,7 +211,7 @@ spec:
                   name: openldap-admin-secret
                   key: LDAP_ADMIN_PASSWORD
             - name: USRMGR_JWKS_URI
-              value: https://auth.longstorymedia.com/keys
+              value: http://dex.auth.svc.cluster.local:5556/keys
             - name: USRMGR_OAUTH_CLIENT_ID
               value: lsm-client
             - name: USRMGR_OAUTH_CLIENT_SECRET

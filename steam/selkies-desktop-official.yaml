@@ -1,0 +1,145 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: selkies-desktop-official
+  namespace: steam
+  labels:
+    app: selkies-desktop-official
+spec:
+  serviceName: selkies-desktop-official
+  replicas: 1
+  selector:
+    matchLabels:
+      app: selkies-desktop-official
+  template:
+    metadata:
+      labels:
+        app: selkies-desktop-official
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      runtimeClassName: nvidia
+      containers:
+        - name: selkies-desktop
+          image: ghcr.io/selkies-project/selkies-gstreamer/gst-py-example:main-ubuntu22.04
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            # Display and session settings
+            - name: DISPLAY
+              value: ":20"
+            - name: START_XFCE4
+              value: "true"
+
+            # Network settings - bind to all interfaces for host networking
+            - name: NGINX_PORT
+              value: "8090"
+            - name: SELKIES_PORT
+              value: "8091"
+            - name: SELKIES_METRICS_HTTP_PORT
+              value: "9081"
+
+            # Disable auth for internal cluster access
+            - name: SELKIES_ENABLE_BASIC_AUTH
+              value: "false"
+            - name: SELKIES_ENABLE_HTTPS
+              value: "false"
+
+            # GPU settings
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "all"
+
+            # Disable TURN for testing - allow direct connections
+            - name: SELKIES_TURN_PROTOCOL
+              value: "udp"
+            - name: SELKIES_TURN_HOST
+              value: ""
+            - name: SELKIES_TURN_PORT
+              value: ""
+            - name: TURN_MIN_PORT
+              value: ""
+            - name: TURN_MAX_PORT
+              value: ""
+
+            # Audio settings
+            - name: PIPEWIRE_LATENCY
+              value: "128/48000"
+            - name: XDG_RUNTIME_DIR
+              value: "/tmp/runtime-ubuntu"
+
+            # Encoder settings for GPU
+            - name: SELKIES_ENCODER
+              value: "nvh264enc"
+            - name: SELKIES_ENABLE_RESIZE
+              value: "true"
+
+            # Data channel and WebRTC settings
+            - name: SELKIES_ENABLE_HTTPS
+              value: "false"
+            - name: SELKIES_VIDEO_BITRATE
+              value: "8000"
+            - name: SELKIES_FRAMERATE
+              value: "60"
+            - name: SELKIES_WEBRTC_ICE_CONNECTION_TIMEOUT
+              value: "10"
+
+            # Security settings
+            - name: PASSWD
+              value: "ubuntu"
+
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+            limits:
+              memory: "4Gi"
+              cpu: "2"
+
+          securityContext:
+            privileged: false
+            runAsUser: 1000
+            runAsGroup: 1000
+
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+            - name: steam-home
+              mountPath: /home/ubuntu
+            - name: tmp
+              mountPath: /tmp
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8090
+            initialDelaySeconds: 30
+            periodSeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8090
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi
+
+  volumeClaimTemplates:
+    - metadata:
+        name: steam-home
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 50Gi

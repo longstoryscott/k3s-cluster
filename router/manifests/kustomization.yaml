@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: nginx-gateway-fabric
+  namespace: nginx-gateway
+
+resources:
+  - 01-namespace.yaml
+  - 02-serviceaccounts.yaml
+  - 03-rbac.yaml
+  - 04-service.yaml
+  - 05-deployment.yaml
+  - 06-cert-job.yaml
+  - 07-gateway-config.yaml
+
+# Labels disabled to avoid selector immutability issues with existing deployment
+# labels:
+# - pairs:
+#     app.kubernetes.io/part-of: nginx-gateway-fabric
+
+images:
+  - name: ghcr.io/nginx/nginx-gateway-fabric
+    newTag: 2.1.4

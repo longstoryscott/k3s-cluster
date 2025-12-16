@@ -1,0 +1,144 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: linux-desktop
+  namespace: steam
+  labels:
+    app: linux-desktop
+spec:
+  serviceName: "linux-desktop"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: linux-desktop
+  template:
+    metadata:
+      labels:
+        app: linux-desktop
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: lsnode-3
+      securityContext:
+        runAsUser: 0  # Run as root for container startup compatibility
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+        - name: desktop
+          image: dorowu/ubuntu-desktop-lxde-vnc:focal  # Use focal (20.04) for better package support
+          securityContext:
+            privileged: true
+            runAsUser: 0  # Run as root
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "2000m"
+            limits:
+              memory: "16Gi"
+              cpu: "8000m"
+          ports:
+            - containerPort: 80
+              name: novnc
+              protocol: TCP
+            - containerPort: 5900
+              name: vnc
+              protocol: TCP
+          volumeMounts:
+            - name: user-home
+              mountPath: /home/ubuntu
+            - name: system-apps
+              mountPath: /opt  # Applications like Steam - good choice
+            - name: system-local-bin
+              mountPath: /usr/local/bin-custom  # Custom binaries, avoiding system paths
+            - name: system-etc
+              mountPath: /etc/apt/sources.list.d  # Additional repositories - good choice
+            - name: tmp-storage
+              mountPath: /tmp
+            - name: dshm
+              mountPath: /dev/shm
+          env:
+            # Desktop Configuration
+            - name: VNC_PASSWORD
+              value: "mypassword"
+            - name: VNC_RESOLUTION
+              value: "1920x1080"
+            - name: VNC_COL_DEPTH
+              value: "24"
+            - name: DISPLAY
+              value: ":1"
+            - name: RESOLUTION
+              value: "1920x1080"
+            - name: SCREEN_WIDTH
+              value: "1920"
+            - name: SCREEN_HEIGHT
+              value: "1080"
+            # NVIDIA Configuration for GPU acceleration
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+            - name: CUDA_VISIBLE_DEVICES
+              value: "all"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "compute,utility,graphics,video"
+            - name: __GLX_VENDOR_LIBRARY_NAME
+              value: "nvidia"
+            # Package management
+            - name: DEBIAN_FRONTEND
+              value: "noninteractive"
+            # VNC Performance Optimization
+            - name: VNC_ARGS
+              value: "-wait 5 -defer 1 -speeds lan -ncache 10 -ncache_cr"
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - "/bin/bash"
+                  - "-c"
+                  - |
+                    # Wait for system to be ready
+                    sleep 10
+                    # Remove problematic Steam repository that causes apt issues
+                    rm -f /etc/apt/sources.list.d/steam*.list 2>/dev/null || true
+                    # Install essential packages
+                    apt update --allow-unauthenticated || apt update || true
+                    apt install -y gdebi-core software-properties-common wget curl || true
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+        - name: tmp-storage
+          emptyDir:
+            sizeLimit: 10Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: user-home
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "local-path"
+        resources:
+          requests:
+            storage: 100Gi
+    - metadata:
+        name: system-local-bin
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "local-path"
+        resources:
+          requests:
+            storage: 10Gi
+    - metadata:
+        name: system-apps
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "local-path"
+        resources:
+          requests:
+            storage: 100Gi
+    - metadata:
+        name: system-etc
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "local-path"
+        resources:
+          requests:
+            storage: 5Gi

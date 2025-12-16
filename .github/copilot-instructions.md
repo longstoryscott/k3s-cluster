@@ -105,3 +105,37 @@ Dex (auth service) provides OIDC for NextCloud and other services requiring auth
 - Registry debugging: `make registry-ls-<image>` to list tags
 
 When adding new services, follow the established pattern: create service directory with standard files, add to Makefile, and configure Gateway route if external access needed.
+
+## Networking Architecture (Detailed)
+
+- **Edge / Reverse Proxy:** A public-facing reverse proxy (external to the cluster) terminates TLS for public hostnames (e.g. `auth.longstorymedia.com`) and forwards traffic to the NGINX Gateway LoadBalancer IP / nodePort on the LAN. Upstream connections from the reverse proxy to the gateway must use the correct scheme (`http://` for plain HTTP listeners) and preserve the `Host` header.
+- **NGINX Gateway Fabric (in-cluster):** A LoadBalancer Service (`lsm-gateway-nginx`) exposes many listener ports on the cluster node IP (e.g. `192.168.0.71`) and maps each listener to an internal server block which proxies to a Kubernetes Service (port-based routing). Each `HTTPRoute` is bound to a `Gateway` listener via `sectionName` and `hostnames`.
+- **Service Backends:** Services are normal `ClusterIP` services. Gateway configuration creates upstreams pointing to `<namespace>_<service>_<port>` (e.g. `auth_dex_5556`) and uses the cluster DNS name (`<service>.<namespace>.svc.cluster.local`) in controller diagnostics.
+- **DNS and DDNS:** Public DNS (or DDNS) names must resolve to the router/public IP used by the reverse proxy. If your DDNS provider fails to resolve to your current public IP, the reverse proxy might attempt to route to an incorrect public address and return upstream 504s.
+
+## Troubleshooting Network 504s (Step-by-step)
+
+1. Reproduce the failing request and capture timestamps and client IP from upstream logs (external proxy). Note the exact request path and Host header.
+2. Confirm `HTTPRoute` and `Gateway` are accepted and programmed:
+  - `kubectl describe httproute dex-route -n nginx-gateway`
+  - `kubectl describe gateway lsm-gateway -n nginx-gateway`
+3. Confirm `Service` and `Endpoints` for the backend exist:
+  - `kubectl get svc dex -n auth -o wide`
+  - `kubectl get endpoints dex -n auth -o yaml`
+4. From inside the `lsm-gateway-nginx` pod, test backend reachability and routing:
+  - `kubectl exec -it <gateway-pod> -n nginx-gateway -- curl -vS http://dex.auth.svc.cluster.local:5556/.well-known/openid-configuration`
+  - `kubectl exec -it <gateway-pod> -n nginx-gateway -- curl -vS -H "Host: auth.longstorymedia.com" http://127.0.0.1:9091/.well-known/openid-configuration`
+  If these return 200, the in-cluster path and gateway routing are working.
+5. From the reverse proxy (external) host, verify upstream connectivity and that the proxy is forwarding the Host header correctly:
+  - `curl -vS -H "Host: auth.longstorymedia.com" http://<gateway-lan-ip>:9091/.well-known/openid-configuration`
+  - `nc -vz <gateway-lan-ip> 9091`
+  - If your reverse proxy attempts TLS to the upstream, use `openssl s_client -connect <gateway-lan-ip>:9091 -servername auth.longstorymedia.com` to validate TLS handshake.
+6. Check for DNS/DDNS mismatches — if your public DDNS does not resolve to the current public IP, the reverse proxy or router may route to an incorrect address. Use `dig +short <your-ddns>` to verify.
+7. If `curl` from the external host returns 200 but browsers see intermittent 504s, increase upstream timeouts on the external proxy and the gateway `ClientSettingsPolicy` timeout as needed.
+8. If traffic never arrives at the gateway node, capture a short `tcpdump` on the gateway host while reproducing the client request to check whether SYN packets reach the host.
+
+Common Fixes
+- Ensure the external reverse proxy uses `http://` (not `https://`) when forwarding to plain HTTP gateway listeners.
+- Preserve `Host` header in the proxy so the gateway can route by SNI/Host.
+- If using a DDNS service, verify its resolution and TTL. If it intermittently resolves to a different IP (or fails), replace it with a stable public IP or a reliable DDNS provider until the issue is fixed.
+- If you need TLS between reverse proxy and gateway, configure TLS on the gateway and update gateway listener to expect TLS.

@@ -1,45 +1,70 @@
 #!/bin/bash
 
-# Script to apply the monitoring routes configuration to your K3s cluster
+# Script to idempotently deploy NGINX Gateway Fabric using manifests
+# This script can be run multiple times safely
 
-echo "Applying updated Gateway configuration with monitoring routes..."
+set -e
 
-kubectl kustomize "https://github.com/nginx/nginx-gateway-fabric/config/crd/gateway-api/standard?ref=v1.6.2" | kubectl apply -f -
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Create the namespace if it doesn't exist
-kubectl create namespace nginx-gateway || true
+echo "🚀 Installing NGINX Gateway Fabric with LoadBalancer..."
 
-# Install or upgrade NGINX Gateway with our values
-helm upgrade --install nginx-gateway oci://ghcr.io/nginxinc/charts/nginx-gateway-fabric --create-namespace -n nginx-gateway --values ${1}/values.yaml
-kubectl wait --timeout=5m -n nginx-gateway deployment/nginx-gateway-nginx-gateway-fabric --for=condition=Available
+# Apply Gateway API CRDs (idempotent)
+echo "📦 Applying Gateway API CRDs..."
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
 
-# Apply the updated routes
-kubectl apply -f ${1}/routes.yaml --wait=true
-kubectl rollout status deployment/nginx-gateway-nginx-gateway-fabric -n nginx-gateway --timeout=2m || true
+# Apply NGINX Gateway Fabric CRDs (handle conflicts)  
+echo "📦 Applying NGINX Gateway Fabric CRDs..."
+kubectl apply -f https://raw.githubusercontent.com/nginxinc/nginx-gateway-fabric/v2.1.4/deploy/crds.yaml --force-conflicts=true --server-side=true
 
-# Restart the NGINX Gateway (only if needed)
-GATEWAY_POD=$(kubectl get pods -n nginx-gateway -l app.kubernetes.io/name=nginx-gateway-fabric -o jsonpath='{.items[0].metadata.name}')
-if [ ! -z "$GATEWAY_POD" ]; then
-  echo "Restarting NGINX Gateway pod: $GATEWAY_POD"
-  kubectl delete pod $GATEWAY_POD -n nginx-gateway
-  echo "Waiting for new pod to start..."
-  sleep 5
-  kubectl get pods -n nginx-gateway -l app.kubernetes.io/name=nginx-gateway-fabric
-else
-  echo "NGINX Gateway pod not found. Is it running in a different namespace?"
-fi
+# Apply the main deployment (idempotent)
+echo "🔧 Applying NGINX Gateway Fabric deployment..."
+# Delete the cert generator job if it exists (jobs are not idempotent)
+kubectl delete job nginx-gateway-cert-generator -n nginx-gateway --ignore-not-found=true
+kubectl apply -k "${SCRIPT_DIR}/manifests"
 
-echo "Monitoring UI routes have been configured."
+# Wait for the deployment to be ready
+echo "⏳ Waiting for NGINX Gateway to be ready..."
+kubectl rollout status deployment/nginx-gateway -n nginx-gateway --timeout=300s
+
+# Apply the Gateway and HTTPRoutes configuration
+echo "🌐 Applying Gateway and HTTPRoute configurations..."
+kubectl apply -f "${SCRIPT_DIR}/routes.yaml" --wait=true
+
+# Wait for Gateway to be programmed
+echo "⏳ Waiting for Gateway to be programmed..."
+kubectl wait --for=condition=Programmed gateway/lsm-gateway -n nginx-gateway --timeout=60s
+
+# Get the LoadBalancer service information
+echo "✅ NGINX Gateway Fabric deployment complete!"
 echo ""
-GATEWAY_IP=$(kubectl get svc -n nginx-gateway nginx-gateway-nginx-gateway-fabric -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
+GATEWAY_IP=$(kubectl get svc -n nginx-gateway lsm-gateway-nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
 if [ -z "$GATEWAY_IP" ]; then
-  GATEWAY_IP="<your-gateway-ip>"
+  echo "⏳ LoadBalancer IP not yet assigned. Checking service status..."
+  kubectl get svc -n nginx-gateway lsm-gateway-nginx
+  echo ""
+  echo "💡 Run 'kubectl get svc -n nginx-gateway lsm-gateway-nginx' to check for external IP assignment"
+else
+  echo "🌍 LoadBalancer External IP: $GATEWAY_IP"
+  echo ""
+  echo "🔗 Service Access URLs:"
+  echo "   • NextCloud:      http://$GATEWAY_IP:3000"
+  echo "   • Auth Service:   http://$GATEWAY_IP:9091"
+  echo "   • Grafana:        http://$GATEWAY_IP:3001"
+  echo "   • Prometheus:     http://$GATEWAY_IP:9090"
+  echo "   • User Manager:   http://$GATEWAY_IP:3333"
+  echo "   • Registry:       http://$GATEWAY_IP:5000"
+  echo "   • Registry UI:    http://$GATEWAY_IP:8085"
 fi
 
-echo "You can now access your monitoring UIs at:"
-echo "- Grafana:      http://$GATEWAY_IP:3001"
-echo "- Prometheus:   http://$GATEWAY_IP:9090"
-echo "- Alertmanager: http://$GATEWAY_IP:9093"
 echo ""
-echo "To get your Gateway IP address, run:"
-echo "kubectl get svc -n nginx-gateway nginx-gateway-nginx-gateway-fabric"
+echo "🎯 Gateway Status:"
+kubectl get gateway lsm-gateway -n nginx-gateway -o wide
+
+echo ""
+echo "📊 HTTPRoute Status:"
+kubectl get httproute -n nginx-gateway
+
+echo ""
+echo "✨ Deployment completed successfully!"
