@@ -13,7 +13,7 @@ MONITORING = $(CURDIR)/monitoring
 NVIDIA = $(CURDIR)/nvidia
 AILAB = $(CURDIR)/ls-ai-ui
 SEARXNG = $(CURDIR)/searxng
-GAMING_DESKTOP = $(CURDIR)/gaming-desktop
+# GAMING_DESKTOP = $(CURDIR)/gaming-desktop
 STEAM = $(CURDIR)/steam
 
 export HELM_KUBECONTEXT=lsnet
@@ -32,7 +32,7 @@ update-workers: ex
 	cd $(SCRIPTS) && bash update-workers.sh && cd ..
 
 ex:
-	for f in $(SCRIPTS)/*.sh $(ROUTER)/*.sh $(REGISTRY)/*.sh $(NEXTCLOUD)/*.sh $(FNF)/*.sh $(MYSQL)/*.sh $(AUTH)/*sh $(MONITORING)/*.sh $(RABBITMQ)/*.sh $(SEARXNG)/*.sh $(GAMING_DESKTOP)/*.sh $(STEAM)/*.sh; do chmod +x "$$f"; done;
+	for f in $(SCRIPTS)/*.sh $(ROUTER)/*.sh $(REGISTRY)/*.sh $(NEXTCLOUD)/*.sh $(FNF)/*.sh $(MYSQL)/*.sh $(AUTH)/*sh $(MONITORING)/*.sh $(RABBITMQ)/*.sh $(SEARXNG)/*.sh $(STEAM)/*.sh; do chmod +x "$$f"; done;
 
 auth: ex
 	$(AUTH)/install.sh $(AUTH)
@@ -101,7 +101,7 @@ destroy:
 	$(SCRIPTS)/k8s-down.sh
 
 sync:
-	rsync -avzru --delete --exclude=".git" --exclude="node_modules" -e 'ssh -p 2222' . lsm@lsnet.tplinkdns.com:~/k8s/
+	rsync -avzru --delete --exclude=".git" --exclude="node_modules" -e 'ssh -p 22' . lsm@lsnode-0.local:~/k8s/
 
 apply: sync
 	ssh -p 2222 lsm@lsnet.tplinkdns.com "cd k8s && make"

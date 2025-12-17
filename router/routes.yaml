@@ -55,7 +55,7 @@ spec:
       port: 8086
     - name: steam
       protocol: HTTP
-      port: 8087
+      port: 9080
 ---
 apiVersion: gateway.nginx.org/v1alpha1
 kind: ClientSettingsPolicy
@@ -583,4 +583,4 @@ spec:
       backendRefs:
         - name: selkies-desktop-official
           namespace: steam
-          port: 8080
+          port: 58080

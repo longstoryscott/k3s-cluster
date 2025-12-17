@@ -1,11 +1,11 @@
 #!/bin/bash
 
 MASTER_IP=$(./set-static-ip.sh)
-NODES=(lsnode-1 lsnode-2 lsnode-3)
+NODES=(lsnode-1.local lsnode-2.local lsnode-3)
 CONF=$(sudo cat /etc/rancher/k3s/k3s.yaml | sed "s|127.0.0.1|${MASTER_IP}|g")
 
 for node in "${NODES[@]}"; do
-    ssh "${node}.local" "touch ~/.kube/config && \
+    ssh "${node}" "touch ~/.kube/config && \
         echo \"${CONF}\" > ~/.kube/config && \
         sudo chmod 600 ~/.kube/config && \
         sudo chown \"$USER\" ~/.kube/config && \
