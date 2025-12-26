@@ -1,0 +1,13 @@
+dn: uid=example,dc=example,dc=com
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+uid: example
+sn: User
+cn: Example User
+mail: user@example.com
+userPassword: {SSHA}CHANGE_THIS_PASSWORD_HASH
+
+# Add more users as needed
+# Generate password hashes with: slappasswd -h {SSHA}

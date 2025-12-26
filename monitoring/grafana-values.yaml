@@ -1,8 +1,10 @@
+# Grafana Helm Chart values
+# Admin password is set via --set adminPassword in install.sh
+# The password is read from monitoring/grafana-password.txt (gitignored)
+
 persistence:
   enabled: true
   size: 5Gi
-
-adminPassword: "6u!tar00!QAZ"
 
 datasources:
   datasources.yaml:

@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Source helper functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../helpers.sh"
+load_config
+
+# Generate Grafana admin password if it doesn't exist
+GRAFANA_PASSWORD_FILE="$(dirname "$0")/grafanapw"
+GRAFANA_PASSWORD=$(cat "$GRAFANA_PASSWORD_FILE")
+
 # Create monitoring namespace if it doesn't exist
 kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
 
@@ -31,10 +40,11 @@ helm upgrade --install promtail grafana/promtail \
   --version 6.15.0 \
   --timeout 5m
 
-# Update the standalone Grafana with our custom configuration
+# Update the standalone Grafana with our custom configuration and generated password
 helm upgrade --install grafana grafana/grafana \
   --namespace monitoring \
   --values "${1}/grafana-values.yaml" \
+  --set adminPassword="$GRAFANA_PASSWORD" \
   --timeout 5m
 
 # Apply Loki data source
@@ -43,11 +53,16 @@ kubectl apply -f "${1}/loki-datasource.yaml"
 kubectl apply -f "${1}/referencegrant.yaml"
 
 # Show service endpoint information
+GRAFANA_DOMAIN=$(get_config "AUTH_DOMAIN" "metrics.example.com")
 echo
 echo "Monitoring stack has been installed!"
 echo
 echo "Grafana is accessible via the NGINX Gateway at:"
-echo "http://metrics.longstorymedia.com"
+echo "http://${GRAFANA_DOMAIN}"
+echo
+echo "Admin credentials:"
+echo "  Username: admin"
+echo "  Password: $(cat "$GRAFANA_PASSWORD_FILE")"
 echo "Default credentials: admin/6u!tar00!QAZ"
 echo
 echo "Prometheus is accessible via the NGINX Gateway at:"

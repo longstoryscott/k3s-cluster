@@ -24,9 +24,22 @@ if ! curl -s http://localhost:3000 >/dev/null; then
   exit 1
 fi
 
-# Login to Grafana and get cookie (default credentials: admin/6u!tar00!QAZ)
+# Get Grafana password from file
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GRAFANA_PASSWORD_FILE="${SCRIPT_DIR}/grafana-password.txt"
+
+if [[ ! -f "$GRAFANA_PASSWORD_FILE" ]]; then
+    echo "Error: Grafana password file not found at $GRAFANA_PASSWORD_FILE"
+    echo "Run 'make monitoring' first to generate the password."
+    kill $FORWARD_PID
+    exit 1
+fi
+
+GRAFANA_PASSWORD=$(cat "$GRAFANA_PASSWORD_FILE")
+
+# Login to Grafana and get cookie
 echo "Logging into Grafana..."
-COOKIE=$(curl -s -c - -X POST -H "Content-Type: application/json" -d '{"user":"admin","password":"6u!tar00!QAZ"}' http://localhost:3000/login | grep grafana_session | awk '{print $7}')
+COOKIE=$(curl -s -c - -X POST -H "Content-Type: application/json" -d "{\"user\":\"admin\",\"password\":\"${GRAFANA_PASSWORD}\"}" http://localhost:3000/login | grep grafana_session | awk '{print $7}')
 
 if [ -z "$COOKIE" ]; then
   echo "Error: Failed to login to Grafana."

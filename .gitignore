@@ -3,4 +3,16 @@ test-manifest.yaml
 .secrets/
 .config*
 
+# Sensitive configuration files
 *.ldif
+*.sql
+config.env
+.env
+**/secrets.yaml
+passwords.txt
+
+# Service-specific sensitive configs
+monitoring/grafana-password.txt
+rd/vnc-password.txt
+auth/ldap-users.ldif
+auth/ldap-groups.ldif

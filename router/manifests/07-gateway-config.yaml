@@ -45,6 +45,9 @@ spec:
           repository: ghcr.io/nginx/nginx-gateway-fabric/nginx
           tag: 2.1.4
       replicas: 1
+      pod:
+        nodeSelector:
+          kubernetes.io/hostname: lsnode-0
     service:
       externalTrafficPolicy: Local
       type: LoadBalancer

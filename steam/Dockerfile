@@ -1,4 +1,4 @@
-FROM ghcr.io/selkies-project/nvidia-egl-desktop:24.04
+FROM ghcr.io/selkies-project/nvidia-glx-desktop:24.04
 # Switch to root for package installation
 USER root
 
@@ -61,5 +61,5 @@ ENV DEBIAN_FRONTEND=dialog
 
 # Metadata
 LABEL maintainer="k3s-cluster"
-LABEL description="Selkies EGL Desktop with Steam pre-installed - Hardware encoding"
+LABEL description="Selkies GLX Desktop with Steam pre-installed - Software encoding"
 LABEL version="1.0"

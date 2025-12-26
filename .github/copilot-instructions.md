@@ -139,3 +139,21 @@ Common Fixes
 - Preserve `Host` header in the proxy so the gateway can route by SNI/Host.
 - If using a DDNS service, verify its resolution and TTL. If it intermittently resolves to a different IP (or fails), replace it with a stable public IP or a reliable DDNS provider until the issue is fixed.
 - If you need TLS between reverse proxy and gateway, configure TLS on the gateway and update gateway listener to expect TLS.
+
+## Quick Fixes for Connectivity Issues
+
+If services suddenly stop working externally (504s, connection refused):
+
+1. **First try:** `make router` - reapplies gateway config and often triggers svclb reconciliation
+2. **If that fails:** Toggle the router port forwarding rule off and back on in TP-Link admin UI
+3. **If LoadBalancer IP changed:** Delete svclb pods to force recreation:
+   ```bash
+   kubectl delete pods -n kube-system -l svccontroller.k3s.cattle.io/svcname=lsm-gateway-nginx
+   ```
+4. **Verify LoadBalancer is on lsnode-0:**
+   ```bash
+   kubectl get svc lsm-gateway-nginx -n nginx-gateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+   # Must be 192.168.0.71
+   ```
+
+The NginxProxy config includes `nodeSelector` to pin the gateway to lsnode-0 (see `router/manifests/07-gateway-config.yaml`).

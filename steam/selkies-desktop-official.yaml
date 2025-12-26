@@ -20,8 +20,6 @@ spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       runtimeClassName: nvidia
-      nodeSelector:
-        kubernetes.io/hostname: lsnode-3
       containers:
         - name: selkies-desktop
           image: 192.168.0.71:31500/steam-desktop:latest
@@ -62,6 +60,8 @@ spec:
               value: "ubuntu"
             - name: SELKIES_ENABLE_BASIC_AUTH
               value: "false"
+            - name: KASMVNC_ENABLE
+              value: "false" # EGL uses Xvfb/Xdummy, not KasmVNC
 
             # GPU settings - Force RTX 3090 (index 0) explicitly for stability
             - name: NVIDIA_VISIBLE_DEVICES
@@ -70,12 +70,30 @@ spec:
               value: "0"
             - name: NVIDIA_DRIVER_CAPABILITIES
               value: "all"
-            - name: VGL_DISPLAY
-              value: "egl"
+            # - name: __NV_PRIME_RENDER_OFFLOAD
+            #   value: "1"
+            # - name: __GLX_VENDOR_LIBRARY_NAME
+            #   value: "nvidia"
+            # - name: __GL_SYNC_TO_VBLANK
+            #   value: "0"
+            - name: __GL_YIELD
+              value: "USLEEP"
+            # - name: VK_ICD_FILENAMES
+            #   value: "/etc/vulkan/icd.d/nvidia_icd.json"
+            # - name: MESA_VK_DEVICE_SELECT
+            #   value: "10de:2204"
+
+            # Vulkan configuration for Unreal Engine
+            # - name: VK_ICD_FILENAMES
+            #   value: "/etc/vulkan/icd.d/nvidia_icd.json"
+            # - name: VK_DRIVER_FILES
+            #   value: "/etc/vulkan/icd.d/nvidia_icd.json"
+            - name: __GLX_VENDOR_LIBRARY_NAME
+              value: "nvidia"
 
             # Selkies WebRTC configuration
             - name: SELKIES_ENCODER
-              value: "nvh264enc"  # Hardware encoding with EGL
+              value: "x264enc" # Using software encoding - hw encoder fails with resource limits
             - name: SELKIES_ENABLE_RESIZE
               value: "false"
             - name: SELKIES_VIDEO_BITRATE
@@ -86,8 +104,14 @@ spec:
               value: "128000"
             - name: SELKIES_ENABLE_HTTPS
               value: "false"
+
+            # Host networking port override
             - name: NGINX_PORT
               value: "58080"
+            - name: SELKIES_PORT
+              value: "58081"
+            - name: SELKIES_METRICS_HTTP_PORT
+              value: "58082"
 
           stdin: true
           tty: true

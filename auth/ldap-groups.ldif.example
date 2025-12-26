@@ -1,0 +1,6 @@
+dn: cn=example-group,dc=example,dc=com
+objectClass: groupOfNames
+cn: example-group
+member: uid=example,dc=example,dc=com
+
+# Add more groups as needed
