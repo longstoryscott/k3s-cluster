@@ -20,15 +20,30 @@ spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: lsnode-3
       containers:
         - name: selkies-desktop
-          image: ghcr.io/selkies-project/nvidia-glx-desktop:latest
+          image: 192.168.0.71:31500/steam-desktop:latest
           securityContext:
             privileged: true
+          # lifecycle:
+          #   postStart:
+          #     exec:
+          #       command:
+          #         - /bin/bash
+          #         - -c
+          #         - |
+          #           # Wait for supervisord to start
+          #           sleep 5
+          #           # Kill and restart selkies-gstreamer with RTX 3090
+          #           supervisorctl stop selkies-gstreamer || true
+          #           export GPU_SELECT=GPU-6a792ee8-fbcb-869f-dbe0-05431e3d3355
+          #           supervisorctl start selkies-gstreamer || true
           env:
             # Display settings
             - name: TZ
-              value: "UTC"
+              value: "CDT"
             - name: DISPLAY_SIZEW
               value: "1920"
             - name: DISPLAY_SIZEH
@@ -48,15 +63,19 @@ spec:
             - name: SELKIES_ENABLE_BASIC_AUTH
               value: "false"
 
-            # GPU settings
+            # GPU settings - Force RTX 3090 (index 0) explicitly for stability
             - name: NVIDIA_VISIBLE_DEVICES
-              value: "all"
+              value: "GPU-6a792ee8-fbcb-869f-dbe0-05431e3d3355"
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0"
             - name: NVIDIA_DRIVER_CAPABILITIES
               value: "all"
+            - name: VGL_DISPLAY
+              value: "egl"
 
             # Selkies WebRTC configuration
             - name: SELKIES_ENCODER
-              value: "nvh264enc"
+              value: "nvh264enc"  # Hardware encoding with EGL
             - name: SELKIES_ENABLE_RESIZE
               value: "false"
             - name: SELKIES_VIDEO_BITRATE
@@ -67,8 +86,6 @@ spec:
               value: "128000"
             - name: SELKIES_ENABLE_HTTPS
               value: "false"
-
-            # Host networking port override
             - name: NGINX_PORT
               value: "58080"
 
@@ -83,9 +100,11 @@ spec:
             requests:
               memory: "2Gi"
               cpu: "1"
+              nvidia.com/gpu: "1"
             limits:
-              memory: "8Gi"
-              cpu: "4"
+              memory: "32Gi"
+              cpu: "24"
+              nvidia.com/gpu: "1"
 
           volumeMounts:
             - name: dshm
@@ -94,6 +113,8 @@ spec:
               mountPath: /home/ubuntu
             - name: steam-cache
               mountPath: /cache
+            - name: unreal-engine
+              mountPath: /opt/UnrealEngine
 
       volumes:
         - name: dshm
@@ -116,3 +137,10 @@ spec:
         resources:
           requests:
             storage: 20Gi
+    - metadata:
+        name: unreal-engine
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 100Gi

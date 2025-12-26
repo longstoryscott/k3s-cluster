@@ -55,7 +55,7 @@ spec:
       port: 8086
     - name: steam
       protocol: HTTP
-      port: 9080
+      port: 4567
 ---
 apiVersion: gateway.nginx.org/v1alpha1
 kind: ClientSettingsPolicy
@@ -564,6 +564,22 @@ spec:
           namespace: searxng
           port: 8080
 --- # Steam
+apiVersion: gateway.nginx.org/v1alpha1
+kind: ClientSettingsPolicy
+metadata:
+  name: steam-websocket-policy
+  namespace: nginx-gateway
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: steam-route
+  body:
+    timeout: 7200s # 2 hour timeout for WebSocket connections
+  keepAlive:
+    requests: 1000
+    time: 7200s
+---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

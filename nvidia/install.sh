@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# This script installs the NVIDIA driver and CUDA toolkit on Ubuntu 22.04.
+# This script installs the NVIDIA GPU Operator for k3s
+# The operator will manage drivers in containers (no host driver installation needed)
 
 kubectl label --overwrite ns gpu-operator pod-security.kubernetes.io/enforce=privileged
 helm repo add nvidia https://nvidia.github.io/gpu-operator
@@ -10,7 +11,12 @@ kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -
 kubectl label --overwrite ns gpu-operator pod-security.kubernetes.io/enforce=privileged
 helm upgrade --install nvidia-gpu-operator nvidia/gpu-operator \
   --namespace gpu-operator \
-  --version=v25.10.0 \
+  --version=v25.10.1 \
+  --set driver.enabled=true \
+  --set driver.upgradePolicy.autoUpgrade=true \
+  --set driver.upgradePolicy.drain.enable=true \
+  --set driver.upgradePolicy.drain.force=true \
+  --set driver.upgradePolicy.drain.deleteEmptyDir=true \
   --set toolkit.env[0].name=CONTAINERD_SOCKET \
   --set toolkit.env[0].value=/run/k3s/containerd/containerd.sock \
   --set toolkit.env[1].name=CONTAINERD_CONFIG \
