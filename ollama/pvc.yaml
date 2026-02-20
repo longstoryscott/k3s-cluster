@@ -2,7 +2,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: ollama-models
-  namespace: ollama
+  namespace: ai
 spec:
   accessModes:
     - ReadWriteOnce
@@ -14,7 +14,7 @@ apiVersion: v1
 kind: PersistentVolume
 metadata:
   name: ollama-models
-  namespace: ollama
+  namespace: ai
 spec:
   storageClassName: ""
   capacity:
@@ -25,14 +25,14 @@ spec:
     path: /data/ollama-models
     type: DirectoryOrCreate
   claimRef:
-    namespace: ollama
+    namespace: ai
     name: ollama-models
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: sd-models
-  namespace: ollama
+  namespace: ai
 spec:
   accessModes:
     - ReadWriteOnce
@@ -44,7 +44,7 @@ apiVersion: v1
 kind: PersistentVolume
 metadata:
   name: sd-models
-  namespace: ollama
+  namespace: ai
 spec:
   storageClassName: ""
   capacity:
@@ -55,14 +55,14 @@ spec:
     path: /data/sd-models
     type: DirectoryOrCreate
   claimRef:
-    namespace: ollama
+    namespace: ai
     name: sd-models
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: generated-images
-  namespace: ollama
+  namespace: ai
 spec:
   accessModes:
     - ReadWriteOnce
@@ -74,7 +74,7 @@ apiVersion: v1
 kind: PersistentVolume
 metadata:
   name: generated-images
-  namespace: ollama
+  namespace: ai
 spec:
   storageClassName: ""
   capacity:
@@ -85,5 +85,5 @@ spec:
     path: /data/generated-images
     type: DirectoryOrCreate
   claimRef:
-    namespace: ollama
+    namespace: ai
     name: generated-images

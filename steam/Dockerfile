@@ -46,8 +46,8 @@ RUN cd /tmp && \
 # Dependencies are already installed during image build
 RUN mv /usr/bin/steamdeps /usr/bin/steamdeps.real && \
   echo '#!/bin/bash\n\
-# Dependencies already satisfied during image build\n\
-exit 0' > /usr/bin/steamdeps && \
+  # Dependencies already satisfied during image build\n\
+  exit 0' > /usr/bin/steamdeps && \
   chmod +x /usr/bin/steamdeps
 
 # Ensure ubuntu user owns their home directory

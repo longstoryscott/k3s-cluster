@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: ollama-init-script
-  namespace: ollama
+  namespace: ai
 data:
   init.sh: |
     #!/bin/sh
