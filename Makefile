@@ -16,7 +16,7 @@ SEARXNG = $(CURDIR)/searxng
 # GAMING_DESKTOP = $(CURDIR)/gaming-desktop
 STEAM = $(CURDIR)/steam
 
-export HELM_KUBECONTEXT=lsnet
+export HELM_KUBECONTEXT=default
 export NODES=(lsnode-0 lsnode-1 lsnode-2 lsnode-3)
 export MASTER_NODE=lsnode-0
 export WORKER_NODES=(lsnode-1 lsnode-2 lsnode-3)
@@ -47,13 +47,13 @@ registry-user:
 	$(REGISTRY)/registry-mgmt.sh manage-users add
 
 registry-ls-%:
-	curl -s -u $$(cat $(CURDIR)/registry/.secrets/registryuser):$$(cat $(CURDIR)/registry/.secrets/registrypw) http://registry.local:31500/v2/$*/tags/list
+	curl -s -u $$(cat $(CURDIR)/registry/.secrets/registryuser):$$(cat $(CURDIR)/registry/.secrets/registrypw) http://192.168.0.71:31500:31500/v2/$*/tags/list
 
 configure-docker:
 	$(REGISTRY)/registry-mgmt.sh configure-docker
 
 docker-login:
-	REGISTRY_USER=$$(cat $(CURDIR)/registry/.secrets/registryuser) && REGISTRY_PW=$$(cat $(CURDIR)/registry/.secrets/registrypw) && echo $$REGISTRY_PW | docker login http://registry.local:31500 -u $$REGISTRY_USER --password-stdin
+	REGISTRY_USER=$$(cat $(CURDIR)/registry/.secrets/registryuser) && REGISTRY_PW=$$(cat $(CURDIR)/registry/.secrets/registrypw) && echo $$REGISTRY_PW | docker login 192.168.0.71:31500:31500 -u $$REGISTRY_USER --password-stdin
 
 router: ex
 	$(ROUTER)/install.sh

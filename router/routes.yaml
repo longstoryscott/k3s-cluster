@@ -56,6 +56,15 @@ spec:
     - name: steam
       protocol: HTTP
       port: 4567
+    - name: llmmll-server
+      protocol: HTTP
+      port: 8001
+    - name: llmmll-composer
+      protocol: HTTP
+      port: 50051
+    - name: llmmll-runner
+      protocol: HTTP
+      port: 50052
 ---
 apiVersion: gateway.nginx.org/v1alpha1
 kind: ClientSettingsPolicy
@@ -584,3 +593,5 @@ spec:
         - name: selkies-desktop-official
           namespace: steam
           port: 58080
+# llmmll HTTPRoutes have been moved to server/k8s/gateway.yaml
+# to be in the nginx-gateway namespace as required by Gateway API

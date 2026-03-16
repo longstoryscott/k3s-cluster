@@ -11,7 +11,10 @@ IP=$($(dirname $0)/set-static-ip.sh "${DEV_NAME}")
 
 mkdir -p ~/.kube
 touch ~/.kube/config
-curl -sfL https://get.k3s.io | K3S_URL=https://${MASTER_IP}:6443 K3S_NODE_NAME=\"${NODE_NAME}\" K3S_TOKEN=${TOKEN} K3S_KUBECONFIG_MODE='600' sh -s -
+
+echo "Running curl -sfL https://get.k3s.io | K3S_URL=https://${MASTER_IP}:6443 K3S_NODE_NAME=\"${NODE_NAME}\" K3S_TOKEN=${TOKEN} K3S_KUBECONFIG_MODE='600' INSTALL_K3S_VERSION='v1.33.6+k3s1' sh -s -"
+
+curl -sfL https://get.k3s.io | K3S_URL=https://${MASTER_IP}:6443 K3S_NODE_NAME=\"${NODE_NAME}\" K3S_TOKEN=${TOKEN} K3S_KUBECONFIG_MODE='600' INSTALL_K3S_VERSION='v1.33.6+k3s1' sh -s -
 
 CONF=$(sudo cat /etc/rancher/k3s/k3s.yaml | sed "s|127.0.0.1|${MASTER_IP}|g")
 
@@ -24,26 +27,26 @@ sudo hostnamectl set-hostname "${NODE_NAME}" --static
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
-  echo "Please run this script with sudo."
-  exit 1
+    echo "Please run this script with sudo."
+    exit 1
 fi
 
 # Check if the hosts file exists
 if [ ! -f "$HOSTS_FILE" ]; then
-  echo "Error: $HOSTS_FILE not found!"
-  exit 1
+    echo "Error: $HOSTS_FILE not found!"
+    exit 1
 fi
 
 # Create a backup of the original file
 if [ -f "${HOSTS_FILE}${BACKUP_EXT}" ]; then
-  echo "Backup file ${HOSTS_FILE}${BACKUP_EXT} already exists. Overwriting."
+    echo "Backup file ${HOSTS_FILE}${BACKUP_EXT} already exists. Overwriting."
 fi
 sudo cp "$HOSTS_FILE" "${HOSTS_FILE}${BACKUP_EXT}"
 if [ $? -eq 0 ]; then
-  echo "Backup created at ${HOSTS_FILE}${BACKUP_EXT}"
+    echo "Backup created at ${HOSTS_FILE}${BACKUP_EXT}"
 else
-  echo "Error: Failed to create backup. Exiting."
-  exit 1
+    echo "Error: Failed to create backup. Exiting."
+    exit 1
 fi
 
 echo "Updating hostname in $HOSTS_FILE..."
@@ -65,27 +68,27 @@ sudo sed -i "$BACKUP_EXT" "/^127\.0\.1\.1/ s/(\s+)\S+/\1${NODE_NAME}/" "$HOSTS_F
 
 # Check if sed command was successful (basic check)
 if [ $? -eq 0 ]; then
-  echo "Successfully updated $HOSTS_FILE. The old line (likely starting with 127.0.1.1) should now use '$NODE_NAME'."
-  echo "Displaying the updated line(s) for 127.0.1.1:"
-  grep "^127\.0\.1\.1" "$HOSTS_FILE"
+    echo "Successfully updated $HOSTS_FILE. The old line (likely starting with 127.0.1.1) should now use '$NODE_NAME'."
+    echo "Displaying the updated line(s) for 127.0.1.1:"
+    grep "^127\.0\.1\.1" "$HOSTS_FILE"
 else
-  echo "Error: An error occurred during sed execution."
-  echo "The original file has been preserved in ${HOSTS_FILE}${BACKUP_EXT}"
-  exit 1
+    echo "Error: An error occurred during sed execution."
+    echo "The original file has been preserved in ${HOSTS_FILE}${BACKUP_EXT}"
+    exit 1
 fi
 
 echo "Generating SSH key..."
 ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N "" -C "${NODE_NAME}" >/dev/null 2>&1
 if [ $? -ne 0 ]; then
-  echo "Error: Failed to generate SSH key."
-  exit 1
+    echo "Error: Failed to generate SSH key."
+    exit 1
 fi
 echo "SSH key generated at ~/.ssh/id_rsa"
 echo "Copying SSH key to master node..."
 ssh-copy-id -i ~/.ssh/id_rsa.pub lsm@${MASTER_IP} >/dev/null 2>&1
 if [ $? -ne 0 ]; then
-  echo "Error: Failed to copy SSH key to master node."
-  exit 1
+    echo "Error: Failed to copy SSH key to master node."
+    exit 1
 fi
 echo "SSH key copied to master node ${MASTER_IP}."
 

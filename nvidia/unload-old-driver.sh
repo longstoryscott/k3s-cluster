@@ -23,15 +23,15 @@ echo ""
 echo "Step 1: Checking for GPU workloads on lsnode-3..."
 
 # Check for pods with nvidia runtime or GPU resources or NVIDIA_VISIBLE_DEVICES
-GPU_PODS=$(kubectl get pods --all-namespaces -o json | jq -r '.items[] | 
-  select(.spec.nodeName == "lsnode-3") | 
+GPU_PODS=$(kubectl get pods --all-namespaces -o json | jq -r '.items[] |
+  select(.spec.nodeName == "lsnode-3") |
   select(
     (.spec.runtimeClassName == "nvidia") or
     (.spec.containers[]?.resources.limits."nvidia.com/gpu" != null) or
     (.spec.containers[]?.env[]? | select(.name == "NVIDIA_VISIBLE_DEVICES" and .value != "void"))
-  ) | 
+  ) |
   select(.metadata.namespace != "gpu-operator") |
-  "\(.metadata.namespace)/\(.metadata.name)"')
+"\(.metadata.namespace)/\(.metadata.name)"')
 
 if [ -n "$GPU_PODS" ]; then
     echo "Found pods with GPU access on lsnode-3:"
@@ -57,14 +57,14 @@ fi
 
 echo ""
 echo "Step 2: Unloading NVIDIA kernel modules on lsnode-3..."
-ssh lsm@lsnode-3 'sudo rmmod nvidia_uvm nvidia_drm nvidia_modeset nvidia 2>/dev/null || sudo modprobe -r nvidia_uvm nvidia_drm nvidia_modeset nvidia' || {
+ssh lsm@lsnode-3.local 'sudo rmmod nvidia_uvm nvidia_drm nvidia_modeset nvidia 2>/dev/null || sudo modprobe -r nvidia_uvm nvidia_drm nvidia_modeset nvidia' || {
     echo ""
     echo "Failed to unload modules. The modules might be in use."
     echo "Checking what's holding them..."
-    ssh lsm@lsnode-3 'lsmod | grep nvidia'
+    ssh lsm@lsnode-3.local 'lsmod | grep nvidia'
     echo ""
     echo "You may need to:"
-    echo "  1. Reboot lsnode-3: ssh lsm@lsnode-3 'sudo reboot'"
+    echo "  1. Reboot lsnode-3: ssh lsm@lsnode-3.local 'sudo reboot'"
     echo "  2. Or investigate what's using the modules"
     exit 1
 }
@@ -73,7 +73,7 @@ echo "  Modules unloaded successfully"
 
 echo ""
 echo "Step 3: Verifying modules are unloaded..."
-if ssh lsm@lsnode-3 'lsmod | grep -q nvidia'; then
+if ssh lsm@lsnode-3.local 'lsmod | grep -q nvidia'; then
     echo "ERROR: NVIDIA modules still loaded!"
     ssh lsm@lsnode-3 'lsmod | grep nvidia'
     exit 1
@@ -85,7 +85,7 @@ echo "Step 4: Restarting GPU Operator driver pod..."
 kubectl delete pod -n gpu-operator -l app=nvidia-driver-daemonset --force --grace-period=0
 
 echo ""
-echo "=== Success ===" 
+echo "=== Success ==="
 echo ""
 echo "The old driver modules have been unloaded."
 echo "The GPU Operator should now be able to install its driver."
