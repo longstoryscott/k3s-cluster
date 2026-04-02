@@ -19,8 +19,7 @@ staticClients:
       - "https://ai.longstorymedia.com/callback"
       - "http://localhost:5173/callback"
   - id: lsm-client
-    public: false
-    secret: ${DEX_CLIENT_SECRET}
+    public: true
     name: "Long Story Media"
     redirectURIs:
       - "https://ai.longstorymedia.com/callback"

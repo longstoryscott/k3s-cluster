@@ -10,11 +10,11 @@ USER_SECRET_FILE="${REGISTRY_HOME}/.secrets/registryuser"
 PW_SECRET_FILE="${REGISTRY_HOME}/.secrets/registrypw"
 
 if [[ -f "$USER_SECRET_FILE" && -f "$PW_SECRET_FILE" ]]; then
-  REGISTRY_USER=$(cat "$USER_SECRET_FILE")
-  REGISTRY_PW=$(cat "$PW_SECRET_FILE")
+    REGISTRY_USER=$(cat "$USER_SECRET_FILE")
+    REGISTRY_PW=$(cat "$PW_SECRET_FILE")
 else
-  echo "Registry credentials not found. Please run registry-mgmt.sh install first."
-  exit 1
+    echo "Registry credentials not found. Please run registry-mgmt.sh install first."
+    exit 1
 fi
 
 # Login to registry
@@ -23,10 +23,10 @@ echo "${REGISTRY_PW}" | docker login --username "${REGISTRY_USER}" --password-st
 
 # Build the image
 echo "Building usrmgr image..."
-docker build -t "${REGISTRY_URL}/usrmgr:latest" "$(dirname "$0")"
+docker buildx build --platform linux/arm64 -t "${REGISTRY_URL}/usrmgr:latest" --push -f "$(dirname "$0")/Dockerfile" "$(dirname "$0")"
 
 # Push to registry
-echo "Pushing image to registry..."
-docker push "${REGISTRY_URL}/usrmgr:latest"
+# echo "Pushing image to registry..."
+# docker push "${REGISTRY_URL}/usrmgr:latest"
 
 echo "✅ Image built and pushed to ${REGISTRY_URL}/usrmgr:latest"

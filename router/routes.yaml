@@ -14,7 +14,7 @@ spec:
     # - name: ollama
     #   port: 11434
     #   protocol: HTTP
-    # - name: llmmllab  # Removed - conflicts with ollama LoadBalancer port 8000
+    # - name: llmmllab
     #   port: 8000
     #   protocol: HTTP
     - name: dex

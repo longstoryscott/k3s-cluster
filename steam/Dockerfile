@@ -59,6 +59,10 @@ USER ubuntu
 # Reset to default frontend
 ENV DEBIAN_FRONTEND=dialog
 
+# Custom entrypoint that disables the joystick interposer
+# This allows Steam games to detect controllers natively
+COPY entrypoint-no-interposer.sh /usr/local/bin/entrypoint-no-interposer.sh
+
 # Metadata
 LABEL maintainer="k3s-cluster"
 LABEL description="Selkies GLX Desktop with Steam pre-installed - Software encoding"
