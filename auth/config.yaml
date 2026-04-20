@@ -25,6 +25,14 @@ staticClients:
       - "https://ai.longstorymedia.com/callback"
       - "https://auth.longstorymedia.com/callback"
       - "http://localhost:5173/callback"
+  - id: gmail-mcp-client
+    public: true
+    name: "Gmail MCP Server Client"
+    redirectURIs:
+      - "http://localhost:8000/auth/callback"
+      - "http://127.0.0.1:8000/auth/callback"
+      - "http://192.168.0.71:50000/mcp/auth/callback"
+      - "https://mcp.longstorymedia.com/mcp/auth/callback"
 
 connectors:
   - type: ldap
