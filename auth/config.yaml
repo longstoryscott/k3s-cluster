@@ -31,8 +31,8 @@ staticClients:
     redirectURIs:
       - "http://localhost:8000/auth/callback"
       - "http://127.0.0.1:8000/auth/callback"
-      - "http://192.168.0.71:50000/mcp/auth/callback"
-      - "https://mcp.longstorymedia.com/mcp/auth/callback"
+      - "http://mcp-server-gmail.llmmllab-mcp.svc.cluster.local:8000/auth/callb\
+        ack"
 
 connectors:
   - type: ldap
@@ -52,7 +52,7 @@ connectors:
         emailAttr: "mail"
         nameAttr: "cn"
         preferredUsernameAttr: uid
-        attributes: ["uid", "cn"]
+        attributes: [ "uid", "cn" ]
       groupSearch:
         baseDN: "dc=longstorymedia,dc=com"
         filter: "(objectClass=groupOfNames)"
@@ -62,8 +62,8 @@ connectors:
         nameAttr: "cn"
       # Updated claims mapping to include both uid and groups
       claims:
-        uid: ["uid"]
-        groups: ["cn"]
+        uid: [ "uid" ]
+        groups: [ "cn" ]
 
 # Enable local users
 # enablePasswordDB: true
